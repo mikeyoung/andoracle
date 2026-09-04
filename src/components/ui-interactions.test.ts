@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   clearKeyboardOwnership,
   createKeyboardRowGeometry,
+  focusKeyboardNote,
   isSyntheticActivationClick,
   isVisualActivationKey,
   Keyboard,
@@ -73,6 +74,24 @@ describe("on-screen keyboard interaction contracts", () => {
     expect(markup).toContain('role="group" aria-label="On-screen keyboard"');
     expect(markup.match(/data-keyboard-row="true"/g)).toHaveLength(3);
     expect(markup).not.toContain("Scrollable on-screen keyboard");
+  });
+
+  it("focuses a pointer-struck piano key without scrolling the page", () => {
+    const lowFocus = vi.fn();
+    const middleFocus = vi.fn();
+    const highFocus = vi.fn();
+    const keys = new Map([
+      [36, { focus: lowFocus }],
+      [60, { focus: middleFocus }],
+      [72, { focus: highFocus }],
+    ]);
+
+    expect(focusKeyboardNote(60, keys)).toBe(60);
+    expect(middleFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+    expect(focusKeyboardNote(12, keys)).toBe(36);
+    expect(focusKeyboardNote(96, keys)).toBe(72);
+    expect(lowFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+    expect(highFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
   });
 
   it("lays out each responsive keyboard bank entirely within its own width", () => {
@@ -397,6 +416,7 @@ describe("help dialog", () => {
     ]) expect(markup).toContain(label);
     expect(markup).toContain("A S D F G H J K L ;");
     expect(markup).toContain("W E T Y U O P");
+    expect(markup).toContain("Click or Tab to a piano key");
     expect(markup).toContain("Close help");
     expect(markup).not.toMatch(/cutoff|resonance|delay time|envelope/i);
   });

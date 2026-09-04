@@ -1194,6 +1194,19 @@ kbd {
   user-select: none;
 }
 
+.piano-key:focus {
+  outline: 0;
+}
+
+.piano-key:focus::after {
+  position: absolute;
+  inset: 5px;
+  border: 3px solid #f0c95b;
+  box-shadow: 0 0 0 2px #282923;
+  content: "";
+  pointer-events: none;
+}
+
 .piano-key--white {
   z-index: 1;
   height: 218px;
@@ -2050,6 +2063,11 @@ footer span {
   .toggle-switch[aria-checked="true"] {
     outline: 3px solid Highlight;
     outline-offset: -3px;
+  }
+
+  .piano-key:focus::after {
+    border-color: Highlight;
+    box-shadow: none;
   }
 }
 

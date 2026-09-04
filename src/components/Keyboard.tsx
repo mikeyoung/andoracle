@@ -44,6 +44,15 @@ export const shouldToggleAssistiveKey = (detail: number, keyboardClickSuppressed
   isSyntheticActivationClick(detail) && !keyboardClickSuppressed
 );
 
+export const focusKeyboardNote = (
+  note: number,
+  keyElements: ReadonlyMap<number, Pick<HTMLButtonElement, "focus">>,
+): number => {
+  const next = Math.max(START_NOTE, Math.min(END_NOTE, note));
+  keyElements.get(next)?.focus({ preventScroll: true });
+  return next;
+};
+
 export const clearKeyboardOwnership = (
   pointerNotes: Map<number, number>,
   visualKeySources: Map<string, number>,
@@ -143,9 +152,14 @@ export function Keyboard({
     return Number.isFinite(note) ? note : null;
   };
 
+  const moveKeyboardFocus = (note: number): void => {
+    setFocusedNote(focusKeyboardNote(note, keyElements.current));
+  };
+
   const begin = (event: PointerEvent<HTMLDivElement>): void => {
     const note = noteAtPoint(event.clientX, event.clientY);
     if (note === null) return;
+    moveKeyboardFocus(note);
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     pointerNotes.current.set(event.pointerId, note);
@@ -167,12 +181,6 @@ export function Keyboard({
     if (!pointerNotes.current.has(event.pointerId)) return;
     onNoteOff(`pointer:${event.pointerId}`);
     pointerNotes.current.delete(event.pointerId);
-  };
-
-  const moveKeyboardFocus = (note: number): void => {
-    const next = Math.max(START_NOTE, Math.min(END_NOTE, note));
-    setFocusedNote(next);
-    keyElements.current.get(next)?.focus();
   };
 
   const activateVisualKey = (note: number, activation: VisualActivation): void => {
@@ -283,7 +291,7 @@ export function Keyboard({
           <span className="module-eyebrow">C2–C5 · low/high priority</span>
           <h2>37-key duophonic keyboard</h2>
         </div>
-        <p><kbd>A S D F G H J K L ;</kbd> white · <kbd>W E T Y U O P</kbd> black. Drag for glissando.</p>
+        <p><kbd>A S D F G H J K L ;</kbd> white · <kbd>W E T Y U O P</kbd> black. Click or tap a piano key, then Space or Enter plays it · drag for glissando.</p>
       </div>
       <div
         ref={surfaceRef}

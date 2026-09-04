@@ -63,7 +63,7 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
           </li>
           <li>
             <strong>Keyboard focus</strong>
-            <span>Tab to a piano key, move with arrows, and play with Space or Enter.</span>
+            <span>Click or Tab to a piano key, move with arrows, and play with Space or Enter.</span>
           </li>
           <li>
             <strong>MIDI keyboard</strong>
