@@ -246,31 +246,46 @@ export function ChoiceControl({
 }: SharedControlProps) {
   const spec = PARAM_SPECS[param];
   const directHandlers = useDirectEntry(param, onDirectEdit);
-  const selectedLabel = spec.options?.find((option) => option.value === value)?.label ?? String(value);
+  const options = spec.options ?? [];
+  const selectedLabel = options.find((option) => option.value === value)?.label ?? String(value);
   return (
     <div
       className={`parameter parameter--choice${compact ? " parameter--compact" : ""}`}
       data-param={param}
+      data-choice-count={options.length}
       style={accentStyle(accent)}
       {...directHandlers}
     >
-      <label htmlFor={`param-${param}`}>{compact ? "Source" : spec.shortLabel ?? spec.label}</label>
-      <button
-        type="button"
-        className="choice-button"
+      <span className="choice-label" id={`label-${param}`}>
+        {compact ? "Source" : spec.shortLabel ?? spec.label}
+      </span>
+      <div
+        className="choice-switch-bank"
         id={`param-${param}`}
-        aria-label={`${spec.label}: ${selectedLabel}`}
-        onClick={() => {
-          const options = spec.options ?? [];
-          const current = options.findIndex((option) => option.value === value);
-          const next = options[(current + 1) % Math.max(1, options.length)];
-          if (next) onChange(param, next.value);
-        }}
+        role="radiogroup"
+        aria-label={compact ? spec.label : undefined}
+        aria-labelledby={compact ? undefined : `label-${param}`}
       >
-        <span>{selectedLabel}</span>
-        <i aria-hidden="true" />
-      </button>
-      {!compact && <output htmlFor={`param-${param}`}>{formatParamValue(param, value)}</output>}
+        {options.map((option) => (
+          <label className="choice-switch-position" key={option.value}>
+            <input
+              type="radio"
+              name={`param-${param}`}
+              value={option.value}
+              checked={option.value === value}
+              aria-label={`${spec.label}: ${option.label}`}
+              onChange={() => {
+                if (option.value !== value) onChange(param, option.value);
+              }}
+            />
+            <span className="choice-switch-face">
+              <i aria-hidden="true" />
+              <b>{option.label}</b>
+            </span>
+          </label>
+        ))}
+      </div>
+      {!compact && <output aria-live="polite">{selectedLabel}</output>}
     </div>
   );
 }

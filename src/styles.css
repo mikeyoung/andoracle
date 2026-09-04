@@ -542,7 +542,8 @@ main {
   border-right: 0;
 }
 
-.parameter label,
+.parameter > label,
+.choice-label,
 .toggle-label {
   display: grid;
   min-height: 31px;
@@ -663,43 +664,102 @@ main {
 }
 
 .parameter--choice {
-  min-width: 118px;
-  flex-basis: 118px;
+  min-width: 168px;
+  flex-basis: 168px;
   justify-content: flex-start;
 }
 
-.parameter--choice select,
-.choice-button {
-  width: 100%;
-  min-height: 46px;
-  margin-top: 20px;
-  padding: 5px 24px 5px 7px;
-  border: 1px solid #645e4f;
-  border-radius: 1px;
-  color: var(--cream);
-  background: linear-gradient(180deg, #36332a, #1e1d18);
-  font-size: 9px;
-  font-weight: 700;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.09), 0 3px 0 #070706;
+.parameter--choice[data-choice-count="3"] {
+  min-width: 246px;
+  flex-basis: 246px;
 }
 
-.choice-button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+.choice-switch-bank {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 14px;
+}
+
+.parameter--choice[data-choice-count="3"] .choice-switch-bank {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.choice-switch-position {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.choice-switch-position input {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
   cursor: pointer;
-  text-align: left;
   touch-action: manipulation;
 }
 
-.choice-button i {
-  width: 0;
-  height: 0;
+.choice-switch-face {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 5px;
+  border: 1px solid #58493b;
+  border-radius: 2px;
+  color: #d4c3aa;
+  background: linear-gradient(180deg, #29221b, #15110e);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 3px 0 #080706;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.055em;
+  line-height: 1.15;
+  text-align: center;
+  text-transform: uppercase;
+  touch-action: manipulation;
+}
+
+.choice-switch-face i {
+  width: 9px;
+  height: 9px;
   flex: 0 0 auto;
-  border-top: 5px solid var(--accent);
-  border-right: 4px solid transparent;
-  border-left: 4px solid transparent;
+  border: 1px solid #1f130b;
+  border-radius: 50%;
+  background: #75452a;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.22), 0 0 0 3px rgba(106, 70, 53, 0.18);
+}
+
+.choice-switch-face b {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.choice-switch-position input:checked + .choice-switch-face {
+  border-color: color-mix(in srgb, var(--accent), #b96a37 22%);
+  color: #ffe3b8;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent), #4b2a19 72%), #2c190f);
+}
+
+.choice-switch-position input:checked + .choice-switch-face i {
+  background: var(--accent);
+  box-shadow: 0 0 13px var(--accent), 0 0 0 3px color-mix(in srgb, var(--accent), transparent 81%);
+}
+
+.choice-switch-position input:focus-visible + .choice-switch-face {
+  outline: 3px solid var(--yellow);
+  outline-offset: 3px;
+}
+
+.choice-switch-position input:active + .choice-switch-face {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.72);
+  transform: translateY(2px);
 }
 
 .parameter--toggle {
@@ -767,8 +827,8 @@ main {
 
 .route-control {
   display: flex;
-  min-width: 116px;
-  flex: 1 0 116px;
+  min-width: 168px;
+  flex: 1 0 168px;
   flex-direction: column;
   border-right: 1px solid rgba(239, 222, 178, 0.09);
   scroll-snap-align: start;
@@ -785,16 +845,18 @@ main {
   padding-bottom: 2px;
 }
 
-.route-control .parameter--choice label {
+.route-control .choice-label {
   min-height: 11px;
   color: color-mix(in srgb, var(--accent), var(--cream) 13%);
   font-size: 9px;
 }
 
-.route-control .parameter--choice select,
-.route-control .choice-button {
-  min-height: 44px;
+.route-control .choice-switch-bank {
   margin-top: 0;
+}
+
+.route-control .choice-switch-face {
+  min-height: 44px;
   font-size: 8px;
 }
 
@@ -1797,9 +1859,8 @@ footer {
     padding-left: 6px;
   }
 
-  .route-control .parameter--choice label,
-  .route-control .parameter--choice select,
-  .route-control .choice-button {
+  .route-control .choice-label,
+  .route-control .choice-switch-face {
     font-size: 9px;
   }
 
@@ -1870,7 +1931,7 @@ footer {
 }
 
 @media (hover: hover) {
-  .choice-button:hover,
+  .choice-switch-position input:hover + .choice-switch-face,
   .toggle-switch:hover,
   .external-input-button:hover,
   .keyboard-pan-controls button:hover {
