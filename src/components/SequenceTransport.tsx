@@ -1,14 +1,18 @@
-import type { Ref } from "react";
+import { useRef, type Ref } from "react";
+
+export type SequencePlaybackState = "stopped" | "playing" | "paused";
 
 interface SequenceTransportProps {
   sequenceNames: readonly string[];
   activeName: string | null;
   recording: boolean;
-  playing: boolean;
+  playbackState: SequencePlaybackState;
   recordButtonRef: Ref<HTMLButtonElement>;
   onSelect: (name: string) => void;
   onRecord: () => void;
   onPlay: () => void;
+  onPause: () => void;
+  onStop: () => void;
 }
 
 /** Persistent, touch-sized access to the local note-sequence transport. */
@@ -16,12 +20,22 @@ export function SequenceTransport({
   sequenceNames,
   activeName,
   recording,
-  playing,
+  playbackState,
   recordButtonRef,
   onSelect,
   onRecord,
   onPlay,
+  onPause,
+  onStop,
 }: SequenceTransportProps) {
+  const playing = playbackState === "playing";
+  const paused = playbackState === "paused";
+  const playbackActive = playing || paused;
+  const playButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusToPlay = (): void => {
+    queueMicrotask(() => playButtonRef.current?.focus({ preventScroll: true }));
+  };
+
   return (
     <div className="sequence-strip" role="group" aria-label="Sequence transport">
       <label htmlFor="sequence-select">Sequence</label>
@@ -52,15 +66,43 @@ export function SequenceTransport({
         {recording ? "Stop record" : "Record"}
       </button>
       <button
+        ref={playButtonRef}
         type="button"
         className={`button sequence-play-button${playing ? " is-active" : ""}`}
-        aria-label={playing ? "Stop sequence" : "Play loaded sequence"}
+        aria-label={paused ? "Resume sequence" : "Play loaded sequence"}
         aria-pressed={playing}
-        disabled={!activeName || recording}
+        disabled={!activeName || recording || playing}
         onClick={onPlay}
       >
         <i aria-hidden="true" />
-        {playing ? "Stop" : "Play"}
+        {paused ? "Resume" : "Play"}
+      </button>
+      <button
+        type="button"
+        className={`button sequence-pause-button${paused ? " is-active" : ""}`}
+        aria-label="Pause sequence"
+        aria-pressed={paused}
+        disabled={!activeName || recording || !playing}
+        onClick={() => {
+          onPause();
+          returnFocusToPlay();
+        }}
+      >
+        <i aria-hidden="true" />
+        Pause
+      </button>
+      <button
+        type="button"
+        className="button sequence-stop-button"
+        aria-label="Stop sequence and return to beginning"
+        disabled={!activeName || recording || !playbackActive}
+        onClick={() => {
+          onStop();
+          returnFocusToPlay();
+        }}
+      >
+        <i aria-hidden="true" />
+        Stop
       </button>
     </div>
   );

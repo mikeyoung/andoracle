@@ -79,7 +79,7 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
           </li>
           <li>
             <strong>Note sequencer</strong>
-            <span>Record keyboard notes, stop to save or discard, then load a name and choose Play.</span>
+            <span>Record keyboard notes, save or discard, then Play, Pause/resume, or Stop to rewind. Synth controls stay live.</span>
           </li>
         </ul>
 

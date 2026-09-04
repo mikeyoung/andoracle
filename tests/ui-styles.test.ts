@@ -47,6 +47,12 @@ describe("synth control styling", () => {
       /\.patch-strip,\s*\.sequence-strip,\s*\.power-strip\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
+      /\.sequence-record-button,\s*\.sequence-play-button,\s*\.sequence-pause-button,\s*\.sequence-stop-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(/\.sequence-pause-button i\s*\{[\s\S]*?linear-gradient/);
+    expect(styles).toMatch(/\.sequence-pause-button\.is-active:disabled\s*\{[\s\S]*?opacity:\s*1;[\s\S]*?filter:\s*none;/);
+    expect(styles).toMatch(/\.sequence-stop-button i\s*\{[\s\S]*?border-radius/);
+    expect(styles).toMatch(
       /@media \(max-width:\s*700px\)[\s\S]*?\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\}/,
     );
     expect(styles).toMatch(

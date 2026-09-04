@@ -195,6 +195,9 @@ export class NoteSequencePlayer {
   private nextDueMs = 0;
   private generation = 0;
   private playing = false;
+  private paused = false;
+  private pausedElapsedMs = 0;
+  private sourcesAudible = false;
   private sourceSerial = 0;
 
   constructor(
@@ -207,6 +210,14 @@ export class NoteSequencePlayer {
     return this.playing;
   }
 
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  get isActive(): boolean {
+    return this.playing || this.paused;
+  }
+
   play(sequence: Pick<CapturedNoteSequence, "events">): boolean {
     this.stop(false);
     if (sequence.events.length === 0) return false;
@@ -214,25 +225,54 @@ export class NoteSequencePlayer {
     this.cursor = 0;
     this.nextDueMs = sequence.events[0]?.deltaMs ?? 0;
     this.startedAt = this.clock.now();
+    this.pausedElapsedMs = 0;
+    this.paused = false;
     this.playing = true;
+    this.sourcesAudible = true;
     const generation = ++this.generation;
     this.tick(generation);
     return true;
   }
 
-  stop(notify = true): void {
-    const wasPlaying = this.playing;
+  /** Freezes the sequence clock and silences sequence-owned notes. */
+  pause(): boolean {
+    if (!this.playing) return false;
+    this.pausedElapsedMs = Math.max(0, this.clock.now() - this.startedAt);
     this.playing = false;
+    this.paused = true;
     this.generation += 1;
-    if (this.timer !== null) {
-      this.timers.clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.clearTimer();
+    // Keep logical FIFO ownership so held notes can be chased on resume and
+    // their eventual recorded note-offs still release the correct source.
+    this.silenceSources();
+    return true;
+  }
+
+  /** Continues from the frozen playhead and retriggers notes held at pause. */
+  resume(): boolean {
+    if (!this.paused || this.events.length === 0) return false;
+    this.startedAt = this.clock.now() - this.pausedElapsedMs;
+    this.paused = false;
+    this.playing = true;
+    const generation = ++this.generation;
+    this.restoreSources();
+    if (!this.playing || generation !== this.generation) return false;
+    this.tick(generation);
+    return true;
+  }
+
+  stop(notify = true): void {
+    const wasActive = this.isActive;
+    this.playing = false;
+    this.paused = false;
+    this.generation += 1;
+    this.clearTimer();
     this.releaseAllSources();
     this.events = [];
     this.cursor = 0;
     this.nextDueMs = 0;
-    if (notify && wasPlaying) this.handlers.finished("stopped");
+    this.pausedElapsedMs = 0;
+    if (notify && wasActive) this.handlers.finished("stopped");
   }
 
   dispose(): void {
@@ -252,18 +292,24 @@ export class NoteSequencePlayer {
     ) {
       const event = this.events[this.cursor];
       if (!event) break;
-      this.dispatch(event);
-      if (!this.playing || generation !== this.generation) return;
       this.cursor += 1;
       processed += 1;
       const next = this.events[this.cursor];
       if (next) this.nextDueMs += next.deltaMs;
+      // Advance the cursor before invoking application callbacks so a
+      // re-entrant Pause cannot replay the same event after resume.
+      this.dispatch(event);
+      if (!this.playing || generation !== this.generation) return;
     }
 
     if (this.cursor >= this.events.length) {
       this.playing = false;
+      this.paused = false;
       this.releaseAllSources();
       this.events = [];
+      this.cursor = 0;
+      this.nextDueMs = 0;
+      this.pausedElapsedMs = 0;
       this.handlers.finished("ended");
       return;
     }
@@ -293,13 +339,38 @@ export class NoteSequencePlayer {
     const source = sources?.shift();
     if (!sources || !source) return;
     if (sources.length === 0) this.sourcesByNote.delete(event.note);
-    this.handlers.noteOff(source);
+    if (this.sourcesAudible) this.handlers.noteOff(source);
   }
 
-  private releaseAllSources(): void {
+  private clearTimer(): void {
+    if (this.timer === null) return;
+    this.timers.clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  private silenceSources(): void {
+    if (!this.sourcesAudible) return;
     for (const sources of this.sourcesByNote.values()) {
       for (const source of sources) this.handlers.noteOff(source);
     }
+    this.sourcesAudible = false;
+  }
+
+  private restoreSources(): void {
+    if (this.sourcesAudible) return;
+    // Mark restoration audible before callbacks so even a deliberately
+    // re-entrant Pause can release the first restored note safely.
+    this.sourcesAudible = true;
+    for (const [note, sources] of this.sourcesByNote) {
+      for (const source of sources) {
+        this.handlers.noteOn(source, note);
+        if (!this.playing || this.paused || !this.sourcesAudible) return;
+      }
+    }
+  }
+
+  private releaseAllSources(): void {
+    this.silenceSources();
     this.sourcesByNote.clear();
   }
 }

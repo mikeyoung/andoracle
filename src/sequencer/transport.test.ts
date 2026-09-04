@@ -297,6 +297,222 @@ describe("NoteSequencePlayer", () => {
     expect(time.nextDelay()).toBe(25);
   });
 
+  it("pauses the clock, silences held notes, and resumes with the exact remaining delay", () => {
+    const { time, calls, player } = setup();
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+      { deltaMs: 50, note: 64, on: true },
+      { deltaMs: 50, note: 64, on: false },
+    ]));
+    time.advance(40);
+
+    expect(player.pause()).toBe(true);
+    expect(player.isPlaying).toBe(false);
+    expect(player.isPaused).toBe(true);
+    expect(player.isActive).toBe(true);
+    expect(time.tasks.size).toBe(0);
+    expect(calls.filter((call) => call.startsWith("off:"))).toHaveLength(1);
+    expect(calls.some((call) => call.startsWith("finished:"))).toBe(false);
+
+    time.advance(10_000);
+    expect(calls).toHaveLength(2);
+    expect(player.resume()).toBe(true);
+    expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(2);
+    expect(time.nextDelay()).toBe(60);
+
+    time.advance(59);
+    expect(calls.filter((call) => call.startsWith("off:"))).toHaveLength(1);
+    time.advance(1);
+    expect(calls.filter((call) => call.startsWith("off:"))).toHaveLength(2);
+    time.advance(50);
+    expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(3);
+    time.advance(50);
+    expect(calls.at(-1)).toBe("finished:ended");
+    expect(player.isActive).toBe(false);
+    expect(time.tasks.size).toBe(0);
+  });
+
+  it("excludes every paused interval from the monotonic playback clock", () => {
+    const { time, calls, player } = setup();
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 1_000, note: 60, on: false },
+    ]));
+    time.advance(100);
+    player.pause();
+    time.advance(5_000);
+    player.resume();
+    time.advance(200);
+    player.pause();
+    time.advance(8_000);
+    player.resume();
+
+    expect(time.nextDelay()).toBe(700);
+    time.advance(699);
+    expect(calls.at(-1)).toMatch(/^on:/);
+    time.advance(1);
+    expect(calls.at(-1)).toBe("finished:ended");
+  });
+
+  it("preserves duplicate-pitch FIFO ownership across pause and resume", () => {
+    const time = new FakeTime();
+    const activeSources = new Set<string>();
+    const attacks: string[] = [];
+    const player = new NoteSequencePlayer({
+      noteOn: (source) => {
+        attacks.push(source);
+        activeSources.add(source);
+      },
+      noteOff: (source) => activeSources.delete(source),
+      finished: () => undefined,
+    }, time, time);
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+      { deltaMs: 0, note: 60, on: false },
+    ]));
+    expect(activeSources.size).toBe(2);
+    const originalSources = new Set(activeSources);
+
+    player.pause();
+    expect(activeSources.size).toBe(0);
+    player.resume();
+    expect(activeSources).toEqual(originalSources);
+    expect(attacks).toHaveLength(4);
+    time.advance(100);
+    expect(activeSources.size).toBe(0);
+    expect(time.tasks.size).toBe(0);
+  });
+
+  it("invalidates a timer callback captured before pause", () => {
+    const { time, calls, player } = setup();
+    player.play(take([
+      { deltaMs: 100, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]));
+    const pending = [...time.tasks.entries()][0];
+    expect(pending).toBeDefined();
+    if (!pending) throw new Error("Expected a playback timer.");
+    time.tasks.delete(pending[0]);
+    time.time = 25;
+    player.pause();
+    player.resume();
+    expect(time.tasks.size).toBe(1);
+
+    pending[1].callback();
+    expect(calls).toEqual([]);
+    expect(time.tasks.size).toBe(1);
+    time.advance(75);
+    expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(1);
+  });
+
+  it("does not replay an event when a note callback pauses re-entrantly", () => {
+    const time = new FakeTime();
+    const calls: string[] = [];
+    let pauseOnFirstAttack = true;
+    let player: NoteSequencePlayer;
+    player = new NoteSequencePlayer({
+      noteOn: (source, note) => {
+        calls.push(`on:${source}:${note}`);
+        if (pauseOnFirstAttack) {
+          pauseOnFirstAttack = false;
+          player.pause();
+        }
+      },
+      noteOff: (source) => calls.push(`off:${source}`),
+      finished: (reason) => calls.push(`finished:${reason}`),
+    }, time, time);
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]));
+    expect(player.isPaused).toBe(true);
+    expect(player.resume()).toBe(true);
+    time.advance(100);
+
+    expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(2);
+    expect(calls.filter((call) => call.startsWith("off:"))).toHaveLength(2);
+    expect(calls.at(-1)).toBe("finished:ended");
+  });
+
+  it("cleans up safely if a restored-note callback pauses re-entrantly", () => {
+    const time = new FakeTime();
+    const activeSources = new Set<string>();
+    let pauseDuringRestore = false;
+    let player: NoteSequencePlayer;
+    player = new NoteSequencePlayer({
+      noteOn: (source) => {
+        activeSources.add(source);
+        if (pauseDuringRestore) {
+          pauseDuringRestore = false;
+          player.pause();
+        }
+      },
+      noteOff: (source) => activeSources.delete(source),
+      finished: () => undefined,
+    }, time, time);
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 0, note: 64, on: true },
+      { deltaMs: 100, note: 60, on: false },
+      { deltaMs: 0, note: 64, on: false },
+    ]));
+    player.pause();
+    pauseDuringRestore = true;
+
+    expect(player.resume()).toBe(false);
+    expect(player.isPaused).toBe(true);
+    expect(activeSources.size).toBe(0);
+    expect(player.resume()).toBe(true);
+    expect(activeSources.size).toBe(2);
+    time.advance(100);
+    expect(activeSources.size).toBe(0);
+  });
+
+  it("stops from paused state, rewinds, and does not duplicate lifecycle work", () => {
+    const { time, calls, player } = setup();
+    const sequence = take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]);
+    player.play(sequence);
+    time.advance(40);
+    expect(player.pause()).toBe(true);
+    expect(player.pause()).toBe(false);
+    player.stop();
+    player.stop();
+
+    expect(player.isActive).toBe(false);
+    expect(player.resume()).toBe(false);
+    expect(calls.filter((call) => call === "finished:stopped")).toHaveLength(1);
+    expect(time.tasks.size).toBe(0);
+
+    const callCount = calls.length;
+    player.play(sequence);
+    expect(calls.slice(callCount).filter((call) => call.startsWith("on:"))).toHaveLength(1);
+    expect(time.nextDelay()).toBe(100);
+  });
+
+  it("pauses only sequence-owned sources and leaves an external keyboard owner intact", () => {
+    const time = new FakeTime();
+    const activeSources = new Set(["computer:KeyA"]);
+    const player = new NoteSequencePlayer({
+      noteOn: (source) => activeSources.add(source),
+      noteOff: (source) => activeSources.delete(source),
+      finished: () => undefined,
+    }, time, time);
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]));
+    player.pause();
+    expect(activeSources).toEqual(new Set(["computer:KeyA"]));
+    player.stop(false);
+    expect(activeSources).toEqual(new Set(["computer:KeyA"]));
+  });
+
   it("uses distinct FIFO ownership for repeated notes", () => {
     const { calls, player } = setup();
     player.play(take([
@@ -406,6 +622,8 @@ describe("NoteSequencePlayer", () => {
       recorder.noteOff(`key:${cycle}`);
       const recording = recorder.finish();
       player.play(recording);
+      player.pause();
+      player.resume();
       player.stop(false);
       expect(time.tasks.size).toBe(0);
       expect(activeSources.size).toBe(0);

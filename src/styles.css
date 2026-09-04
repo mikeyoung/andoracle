@@ -234,7 +234,9 @@ input:focus-visible,
 }
 
 .sequence-record-button,
-.sequence-play-button {
+.sequence-play-button,
+.sequence-pause-button,
+.sequence-stop-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -242,7 +244,9 @@ input:focus-visible,
 }
 
 .sequence-record-button i,
-.sequence-play-button i {
+.sequence-play-button i,
+.sequence-pause-button i,
+.sequence-stop-button i {
   width: 9px;
   height: 9px;
   flex: 0 0 auto;
@@ -257,6 +261,15 @@ input:focus-visible,
 
 .sequence-play-button i {
   clip-path: polygon(12% 0, 100% 50%, 12% 100%);
+}
+
+.sequence-pause-button i {
+  border: 0;
+  background: linear-gradient(90deg, #5b5043 0 35%, transparent 35% 65%, #5b5043 65% 100%);
+}
+
+.sequence-stop-button i {
+  border-radius: 1px;
 }
 
 .sequence-record-button.is-active {
@@ -279,6 +292,22 @@ input:focus-visible,
 .sequence-play-button.is-active i {
   background: #dfb84f;
   box-shadow: 0 0 8px rgba(223, 184, 79, 0.72);
+}
+
+.sequence-pause-button.is-active {
+  border-color: #c1a14f;
+  color: #fff0bd;
+  background: linear-gradient(180deg, #5c5030, #302b20);
+}
+
+.sequence-pause-button.is-active i {
+  background: linear-gradient(90deg, #dfb84f 0 35%, transparent 35% 65%, #dfb84f 65% 100%);
+  box-shadow: 0 0 8px rgba(223, 184, 79, 0.72);
+}
+
+.sequence-pause-button.is-active:disabled {
+  opacity: 1;
+  filter: none;
 }
 
 .power-strip {

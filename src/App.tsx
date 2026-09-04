@@ -9,7 +9,7 @@ import { MidiInputControl } from "./components/MidiInputControl";
 import { OutputMeter } from "./components/OutputMeter";
 import { PatchLibraryDialog, type PatchLibraryMode } from "./components/PatchLibraryDialog";
 import { SequenceCommitDialog } from "./components/SequenceCommitDialog";
-import { SequenceTransport } from "./components/SequenceTransport";
+import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
 import {
   ChoiceControl,
   RangeControl,
@@ -250,7 +250,7 @@ function App() {
   const [userSequences, setUserSequences] = useState<readonly UserNoteSequence[]>(() => readUserSequences().sequences);
   const [activeSequenceName, setActiveSequenceName] = useState<string | null>(null);
   const [sequenceRecording, setSequenceRecording] = useState(false);
-  const [sequencePlaying, setSequencePlaying] = useState(false);
+  const [sequencePlaybackState, setSequencePlaybackState] = useState<SequencePlaybackState>("stopped");
   const [sequenceTake, setSequenceTake] = useState<{
     take: CapturedNoteSequence;
     origin: HTMLElement | null;
@@ -392,8 +392,11 @@ function App() {
       if (activeSequenceDataRef.current !== matchingSequence.data) {
         const decoded = decodeUserSequence(matchingSequence);
         if (!decoded) {
+          sequenceOperationRef.current += 1;
+          sequencePlayerRef.current?.stop(false);
           activeSequenceTakeRef.current = null;
           activeSequenceDataRef.current = null;
+          setSequencePlaybackState("stopped");
           setActiveSequenceName(null);
           setNotice("The loaded sequence is damaged and was unloaded.");
           return;
@@ -408,7 +411,7 @@ function App() {
     sequencePlayerRef.current?.stop(false);
     activeSequenceTakeRef.current = null;
     activeSequenceDataRef.current = null;
-    setSequencePlaying(false);
+    setSequencePlaybackState("stopped");
     setActiveSequenceName(null);
     setNotice("The loaded sequence was removed in another tab.");
   }, [activeSequenceName, userSequences]);
@@ -421,10 +424,10 @@ function App() {
       setAudioStatus(status);
       if (status.state !== "running") {
         setMeter(EMPTY_METER);
-        if (sequencePlayerRef.current?.isPlaying) {
+        if (sequencePlayerRef.current?.isActive) {
           sequenceOperationRef.current += 1;
           sequencePlayerRef.current.stop(false);
-          setSequencePlaying(false);
+          setSequencePlaybackState("stopped");
         }
       }
       setPowered(status.state === "running");
@@ -669,7 +672,7 @@ function App() {
       noteOff,
       finished: (reason) => {
         if (!mountedRef.current) return;
-        setSequencePlaying(false);
+        setSequencePlaybackState("stopped");
         setNotice(reason === "ended" ? "Sequence playback finished." : "Sequence playback stopped.");
       },
     });
@@ -685,12 +688,12 @@ function App() {
 
   useEffect(() => {
     const stopPlayback = (): void => {
-      const wasPlaying = sequencePlayerRef.current?.isPlaying ?? false;
+      const wasActive = sequencePlayerRef.current?.isActive ?? false;
       sequenceOperationRef.current += 1;
       sequencePlayerRef.current?.stop(false);
       if (mountedRef.current) {
-        setSequencePlaying(false);
-        if (wasPlaying) setNotice("Sequence playback stopped because the page became inactive.");
+        setSequencePlaybackState("stopped");
+        if (wasActive) setNotice("Sequence playback stopped because the page became inactive.");
       }
     };
     const stopPlaybackWhenHidden = (): void => {
@@ -714,7 +717,7 @@ function App() {
 
     sequenceOperationRef.current += 1;
     sequencePlayerRef.current?.stop(false);
-    setSequencePlaying(false);
+    setSequencePlaybackState("stopped");
     setSequenceTake(null);
     setDirectEditor(null);
     setPatchLibraryDialog(null);
@@ -729,7 +732,7 @@ function App() {
   const selectSequence = (name: string): void => {
     sequenceOperationRef.current += 1;
     sequencePlayerRef.current?.stop(false);
-    setSequencePlaying(false);
+    setSequencePlaybackState("stopped");
     if (!name) {
       activeSequenceTakeRef.current = null;
       activeSequenceDataRef.current = null;
@@ -927,7 +930,7 @@ function App() {
       if (powered) {
         sequenceOperationRef.current += 1;
         sequencePlayerRef.current?.stop(false);
-        setSequencePlaying(false);
+        setSequencePlaybackState("stopped");
         if (sequenceRecorderRef.current?.isRecording) finishSequenceRecording("manual");
         engine.disableExternalInput();
         externalInputEnabledRef.current = false;
@@ -955,19 +958,19 @@ function App() {
     }
   };
 
-  const toggleSequencePlayback = async (): Promise<void> => {
+  const playSequence = async (): Promise<void> => {
     const player = sequencePlayerRef.current;
     if (!player || sequenceRecording) return;
-    if (player.isPlaying) {
-      sequenceOperationRef.current += 1;
-      player.stop();
-      return;
-    }
+    if (player.isPlaying) return;
+    const resuming = player.isPaused;
 
     const sequence = activeSequenceName
       ? userSequences.find((candidate) => candidate.name === activeSequenceName)
       : null;
     if (!sequence) {
+      sequenceOperationRef.current += 1;
+      player.stop(false);
+      setSequencePlaybackState("stopped");
       setActiveSequenceName(null);
       setNotice("Load or save a sequence before pressing Play.");
       return;
@@ -976,8 +979,11 @@ function App() {
       ? activeSequenceTakeRef.current
       : decodeUserSequence(sequence);
     if (!playbackTake) {
+      sequenceOperationRef.current += 1;
+      player.stop(false);
       activeSequenceTakeRef.current = null;
       activeSequenceDataRef.current = null;
+      setSequencePlaybackState("stopped");
       setActiveSequenceName(null);
       setNotice("That saved sequence is damaged and could not be played.");
       return;
@@ -1016,13 +1022,29 @@ function App() {
     }
 
     if (!mountedRef.current || sequenceOperation !== sequenceOperationRef.current) return;
-    const started = player.play(playbackTake);
+    const started = resuming ? player.resume() : player.play(playbackTake);
     if (started && player.isPlaying) {
-      setSequencePlaying(true);
-      setNotice(`Playing sequence “${sequence.name}”.`);
+      setSequencePlaybackState("playing");
+      setNotice(`${resuming ? "Resumed" : "Playing"} sequence “${sequence.name}”. Controls remain live.`);
     } else {
-      setSequencePlaying(false);
+      setSequencePlaybackState("stopped");
     }
+  };
+
+  const pauseSequencePlayback = (): void => {
+    const player = sequencePlayerRef.current;
+    if (!player?.pause()) return;
+    sequenceOperationRef.current += 1;
+    setSequencePlaybackState("paused");
+    setNotice("Sequence paused. Play resumes from this position; Stop returns to the beginning.");
+  };
+
+  const stopSequencePlayback = (): void => {
+    const player = sequencePlayerRef.current;
+    if (!player?.isActive) return;
+    sequenceOperationRef.current += 1;
+    player.stop();
+    setSequencePlaybackState("stopped");
   };
 
   const toggleExternalInput = async (): Promise<void> => {
@@ -1117,7 +1139,7 @@ function App() {
   const panic = (): void => {
     sequenceOperationRef.current += 1;
     sequencePlayerRef.current?.stop(false);
-    setSequencePlaying(false);
+    setSequencePlaybackState("stopped");
     if (sequenceRecorderRef.current?.isRecording) finishSequenceRecording("manual");
     setInputResetEpoch((epoch) => epoch + 1);
     releasePhysicalNotes();
@@ -1484,11 +1506,13 @@ function App() {
             sequenceNames={userSequences.map((sequence) => sequence.name)}
             activeName={activeSequenceName}
             recording={sequenceRecording}
-            playing={sequencePlaying}
+            playbackState={sequencePlaybackState}
             recordButtonRef={recordButtonRef}
             onSelect={selectSequence}
             onRecord={toggleSequenceRecording}
-            onPlay={() => void toggleSequencePlayback()}
+            onPlay={() => void playSequence()}
+            onPause={pauseSequencePlayback}
+            onStop={stopSequencePlayback}
           />
         </div>
         <div className="power-strip">
