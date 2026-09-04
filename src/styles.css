@@ -641,6 +641,9 @@ main {
     repeating-linear-gradient(90deg, transparent 0 5px, rgba(21, 14, 7, 0.28) 5px 6px),
     var(--accent);
   box-shadow: 0 3px 5px rgba(0, 0, 0, 0.72), inset 0 0 0 2px rgba(0, 0, 0, 0.14);
+  /* Blink/WebKit places a custom vertical thumb's left edge on the track.
+     Offset half the 34px thumb minus the 6px track to share one centerline. */
+  transform: translateX(-14px);
 }
 
 .fader-shell input[type="range"]::-moz-range-track {
