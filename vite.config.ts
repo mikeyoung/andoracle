@@ -14,7 +14,7 @@ export default defineConfig({
       manifest: {
         name: "Andoracle",
         short_name: "Andoracle",
-        description: "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with modern MIDI, delay, and patch sharing.",
+        description: "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.",
         id: "./",
         lang: "en",
         dir: "ltr",

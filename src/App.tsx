@@ -8,6 +8,8 @@ import { Keyboard } from "./components/Keyboard";
 import { MidiInputControl } from "./components/MidiInputControl";
 import { OutputMeter } from "./components/OutputMeter";
 import { PatchLibraryDialog, type PatchLibraryMode } from "./components/PatchLibraryDialog";
+import { SequenceCommitDialog } from "./components/SequenceCommitDialog";
+import { SequenceTransport } from "./components/SequenceTransport";
 import {
   ChoiceControl,
   RangeControl,
@@ -45,6 +47,20 @@ import {
   userPatchNameKey,
   type UserPatch,
 } from "./synth/user-patches";
+import {
+  USER_SEQUENCES_STORAGE_KEY,
+  decodeUserSequence,
+  readUserSequences,
+  saveUserSequenceSafely,
+  userSequenceNameKey,
+  type CapturedNoteSequence,
+  type UserNoteSequence,
+} from "./sequencer/user-sequences";
+import {
+  NoteSequencePlayer,
+  NoteSequenceRecorder,
+  SEQUENCE_SOURCE_PREFIX,
+} from "./sequencer/transport";
 import { PANEL_SECTIONS, type LayoutItem } from "./ui/layout";
 
 // Keep the pre-Andoracle key so existing users retain their last patch after the rename.
@@ -196,6 +212,13 @@ function App() {
   const [activeNotes, setActiveNotes] = useState<ReadonlySet<number>>(new Set());
   const [inputResetEpoch, setInputResetEpoch] = useState(0);
   const noteSources = useRef(new Map<string, number>());
+  const sequenceRecorderRef = useRef<NoteSequenceRecorder | null>(null);
+  const sequencePlayerRef = useRef<NoteSequencePlayer | null>(null);
+  const finishRecordingRef = useRef<(reason: "manual" | "idle") => void>(() => undefined);
+  const sequenceOperationRef = useRef(0);
+  const activeSequenceTakeRef = useRef<CapturedNoteSequence | null>(null);
+  const activeSequenceDataRef = useRef<string | null>(null);
+  const recordButtonRef = useRef<HTMLButtonElement | null>(null);
   const midiSessionRef = useRef<WebMidiSession | null>(null);
   const mountedRef = useRef(true);
   const powerOperationRef = useRef(0);
@@ -224,6 +247,14 @@ function App() {
     displayScale: number;
   } | null>(null);
   const [userPatches, setUserPatches] = useState<readonly UserPatch[]>(() => readUserPatches().patches);
+  const [userSequences, setUserSequences] = useState<readonly UserNoteSequence[]>(() => readUserSequences().sequences);
+  const [activeSequenceName, setActiveSequenceName] = useState<string | null>(null);
+  const [sequenceRecording, setSequenceRecording] = useState(false);
+  const [sequencePlaying, setSequencePlaying] = useState(false);
+  const [sequenceTake, setSequenceTake] = useState<{
+    take: CapturedNoteSequence;
+    origin: HTMLElement | null;
+  } | null>(null);
   const [patchLibraryDialog, setPatchLibraryDialog] = useState<{
     mode: PatchLibraryMode;
     origin: HTMLElement | null;
@@ -337,10 +368,50 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const storageChanged = (event: StorageEvent): void => {
+      if (event.key !== null && event.key !== USER_SEQUENCES_STORAGE_KEY) return;
+      const result = readUserSequences();
+      if (result.status !== "storage-error") setUserSequences(result.sequences);
+    };
+    window.addEventListener("storage", storageChanged);
+    return () => window.removeEventListener("storage", storageChanged);
+  }, []);
+
+  useEffect(() => {
     if (!activeUserPatchName || hasUserPatchNamed(userPatches, activeUserPatchName)) return;
     setActiveUserPatchName(null);
     setPresetName(matchingPresetName(paramsRef.current));
   }, [activeUserPatchName, userPatches]);
+
+  useEffect(() => {
+    if (!activeSequenceName) return;
+    const matchingSequence = userSequences.find(
+      (sequence) => userSequenceNameKey(sequence.name) === userSequenceNameKey(activeSequenceName),
+    );
+    if (matchingSequence) {
+      if (activeSequenceDataRef.current !== matchingSequence.data) {
+        const decoded = decodeUserSequence(matchingSequence);
+        if (!decoded) {
+          activeSequenceTakeRef.current = null;
+          activeSequenceDataRef.current = null;
+          setActiveSequenceName(null);
+          setNotice("The loaded sequence is damaged and was unloaded.");
+          return;
+        }
+        activeSequenceTakeRef.current = decoded;
+        activeSequenceDataRef.current = matchingSequence.data;
+      }
+      if (matchingSequence.name !== activeSequenceName) setActiveSequenceName(matchingSequence.name);
+      return;
+    }
+    sequenceOperationRef.current += 1;
+    sequencePlayerRef.current?.stop(false);
+    activeSequenceTakeRef.current = null;
+    activeSequenceDataRef.current = null;
+    setSequencePlaying(false);
+    setActiveSequenceName(null);
+    setNotice("The loaded sequence was removed in another tab.");
+  }, [activeSequenceName, userSequences]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -348,7 +419,14 @@ function App() {
     const unsubscribeStatus = engine.onStatus((status) => {
       if (!mountedRef.current) return;
       setAudioStatus(status);
-      if (status.state !== "running") setMeter(EMPTY_METER);
+      if (status.state !== "running") {
+        setMeter(EMPTY_METER);
+        if (sequencePlayerRef.current?.isPlaying) {
+          sequenceOperationRef.current += 1;
+          sequencePlayerRef.current.stop(false);
+          setSequencePlaying(false);
+        }
+      }
       setPowered(status.state === "running");
     });
     const unsubscribeExternalInput = engine.onExternalInputState((connected) => {
@@ -357,6 +435,11 @@ function App() {
     });
     return () => {
       mountedRef.current = false;
+      sequenceOperationRef.current += 1;
+      sequenceRecorderRef.current?.dispose();
+      sequencePlayerRef.current?.dispose();
+      activeSequenceTakeRef.current = null;
+      activeSequenceDataRef.current = null;
       powerOperationRef.current += 1;
       externalInputOperationRef.current += 1;
       externalInputStartedPowerRef.current = false;
@@ -470,6 +553,9 @@ function App() {
     if (!Number.isFinite(note)) return;
     const previous = noteSources.current.get(source);
     if (previous === note) return;
+    if (!source.startsWith(SEQUENCE_SOURCE_PREFIX)) {
+      sequenceRecorderRef.current?.noteOn(source, note);
+    }
     if (previous !== undefined) {
       noteSources.current.delete(source);
       if (![...noteSources.current.values()].includes(previous)) engine.noteOff(previous);
@@ -484,12 +570,16 @@ function App() {
   const noteOff = useCallback((source: string): void => {
     const note = noteSources.current.get(source);
     if (note === undefined) return;
+    if (!source.startsWith(SEQUENCE_SOURCE_PREFIX)) {
+      sequenceRecorderRef.current?.noteOff(source);
+    }
     noteSources.current.delete(source);
     if (![...noteSources.current.values()].includes(note)) engine.noteOff(note);
     syncActiveNotes();
   }, [engine, syncActiveNotes]);
 
   const releasePhysicalNotes = useCallback((): void => {
+    sequenceRecorderRef.current?.releaseMatching((source) => !source.startsWith(SEQUENCE_SOURCE_PREFIX));
     noteSources.current.clear();
     midiSessionRef.current?.forgetHeldNotes();
     performanceSources.current = {
@@ -504,13 +594,15 @@ function App() {
   }, [engine]);
 
   const releaseUiNotes = useCallback((): void => {
+    const isUiSource = (source: string): boolean => (
+      source.startsWith("computer:")
+      || source.startsWith("pointer:")
+      || source.startsWith("visual-key:")
+    );
+    sequenceRecorderRef.current?.releaseMatching((source) => isUiSource(source));
     const releasedNotes = new Set<number>();
     for (const [source, note] of noteSources.current) {
-      if (
-        !source.startsWith("computer:")
-        && !source.startsWith("pointer:")
-        && !source.startsWith("visual-key:")
-      ) continue;
+      if (!isUiSource(source)) continue;
       noteSources.current.delete(source);
       releasedNotes.add(note);
     }
@@ -554,6 +646,157 @@ function App() {
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [noteOff, noteOn, releaseUiNotes]);
+
+  const finishSequenceRecording = useCallback((reason: "manual" | "idle"): void => {
+    const recorder = sequenceRecorderRef.current;
+    if (!mountedRef.current || !recorder?.isRecording) return;
+    const take = recorder.finish();
+    setSequenceRecording(false);
+    setDirectEditor(null);
+    setPatchLibraryDialog(null);
+    setHelpDialogOrigin(null);
+    setSequenceTake({ take, origin: recordButtonRef.current });
+    setNotice(reason === "idle"
+      ? "Recording stopped after one minute without a played note. Save or discard the take."
+      : "Recording stopped. Save or discard the take.");
+  }, []);
+  finishRecordingRef.current = finishSequenceRecording;
+
+  useEffect(() => {
+    const recorder = new NoteSequenceRecorder(() => finishRecordingRef.current("idle"));
+    const player = new NoteSequencePlayer({
+      noteOn,
+      noteOff,
+      finished: (reason) => {
+        if (!mountedRef.current) return;
+        setSequencePlaying(false);
+        setNotice(reason === "ended" ? "Sequence playback finished." : "Sequence playback stopped.");
+      },
+    });
+    sequenceRecorderRef.current = recorder;
+    sequencePlayerRef.current = player;
+    return () => {
+      recorder.dispose();
+      player.dispose();
+      if (sequenceRecorderRef.current === recorder) sequenceRecorderRef.current = null;
+      if (sequencePlayerRef.current === player) sequencePlayerRef.current = null;
+    };
+  }, [noteOff, noteOn]);
+
+  useEffect(() => {
+    const stopPlayback = (): void => {
+      const wasPlaying = sequencePlayerRef.current?.isPlaying ?? false;
+      sequenceOperationRef.current += 1;
+      sequencePlayerRef.current?.stop(false);
+      if (mountedRef.current) {
+        setSequencePlaying(false);
+        if (wasPlaying) setNotice("Sequence playback stopped because the page became inactive.");
+      }
+    };
+    const stopPlaybackWhenHidden = (): void => {
+      if (document.hidden) stopPlayback();
+    };
+    window.addEventListener("pagehide", stopPlayback);
+    document.addEventListener("visibilitychange", stopPlaybackWhenHidden);
+    return () => {
+      window.removeEventListener("pagehide", stopPlayback);
+      document.removeEventListener("visibilitychange", stopPlaybackWhenHidden);
+    };
+  }, []);
+
+  const toggleSequenceRecording = (): void => {
+    const recorder = sequenceRecorderRef.current;
+    if (!recorder) return;
+    if (recorder.isRecording) {
+      finishSequenceRecording("manual");
+      return;
+    }
+
+    sequenceOperationRef.current += 1;
+    sequencePlayerRef.current?.stop(false);
+    setSequencePlaying(false);
+    setSequenceTake(null);
+    setDirectEditor(null);
+    setPatchLibraryDialog(null);
+    setHelpDialogOrigin(null);
+    recorder.start(
+      [...noteSources.current].filter(([source]) => !source.startsWith(SEQUENCE_SOURCE_PREFIX)),
+    );
+    setSequenceRecording(true);
+    setNotice("Recording keyboard notes. Press Record again to stop; one minute of silence stops automatically.");
+  };
+
+  const selectSequence = (name: string): void => {
+    sequenceOperationRef.current += 1;
+    sequencePlayerRef.current?.stop(false);
+    setSequencePlaying(false);
+    if (!name) {
+      activeSequenceTakeRef.current = null;
+      activeSequenceDataRef.current = null;
+      setActiveSequenceName(null);
+      setNotice("No sequence is loaded.");
+      return;
+    }
+    const sequence = userSequences.find((candidate) => candidate.name === name);
+    if (!sequence) {
+      activeSequenceTakeRef.current = null;
+      activeSequenceDataRef.current = null;
+      setActiveSequenceName(null);
+      setNotice("That saved sequence is no longer available.");
+      return;
+    }
+    const decoded = decodeUserSequence(sequence);
+    if (!decoded) {
+      activeSequenceTakeRef.current = null;
+      activeSequenceDataRef.current = null;
+      setActiveSequenceName(null);
+      setNotice("That saved sequence is damaged and could not be loaded.");
+      return;
+    }
+    activeSequenceTakeRef.current = decoded;
+    activeSequenceDataRef.current = sequence.data;
+    setActiveSequenceName(sequence.name);
+    setNotice(`Loaded sequence “${sequence.name}”.`);
+  };
+
+  const saveSequenceTake = async (name: string): Promise<string | null> => {
+    const take = sequenceTake?.take;
+    if (!take) return "That recording is no longer available.";
+    const cancellation = browserOperations.begin(
+      "sequence-save",
+      "Sequence save was cancelled because Andoracle closed.",
+    );
+    try {
+      const result = await cancellation.race(saveUserSequenceSafely(name, take));
+      switch (result.status) {
+        case "saved":
+          setUserSequences(result.sequences);
+          activeSequenceTakeRef.current = take;
+          activeSequenceDataRef.current = result.sequence.data;
+          setActiveSequenceName(result.sequence.name);
+          setSequenceTake(null);
+          setNotice(`Saved and loaded sequence “${result.sequence.name}” on this device.`);
+          return null;
+        case "empty-name":
+          setUserSequences(result.sequences);
+          return "Enter a sequence name. A name cannot contain only whitespace.";
+        case "duplicate-name":
+          setUserSequences(result.sequences);
+          return `A saved sequence named “${result.existingName}” already exists. Choose a different name.`;
+        case "invalid-sequence":
+          return "This recording is incomplete and cannot be saved. Discard it and record again.";
+        case "storage-error":
+          return "This sequence could not be saved. Local storage may be blocked or full.";
+        case "unsupported-version":
+          return "This sequence library was created by a newer Andoracle version and cannot be changed safely.";
+        case "busy":
+          setUserSequences(result.sequences);
+          return "Another Andoracle tab is saving a sequence right now. Try again.";
+      }
+    } finally {
+      browserOperations.finish("sequence-save", cancellation);
+    }
+  };
 
   const changeParam = useCallback((key: ParamKey, value: number): void => {
     const normalizedValue = normalizeParamValue(key, value);
@@ -682,6 +925,10 @@ function App() {
     setPowerBusy(true);
     try {
       if (powered) {
+        sequenceOperationRef.current += 1;
+        sequencePlayerRef.current?.stop(false);
+        setSequencePlaying(false);
+        if (sequenceRecorderRef.current?.isRecording) finishSequenceRecording("manual");
         engine.disableExternalInput();
         externalInputEnabledRef.current = false;
         if (mountedRef.current) setExternalInputEnabled(false);
@@ -705,6 +952,76 @@ function App() {
         : error instanceof Error ? error.message : "Audio could not start.");
     } finally {
       if (mountedRef.current && operation === powerOperationRef.current) setPowerBusy(false);
+    }
+  };
+
+  const toggleSequencePlayback = async (): Promise<void> => {
+    const player = sequencePlayerRef.current;
+    if (!player || sequenceRecording) return;
+    if (player.isPlaying) {
+      sequenceOperationRef.current += 1;
+      player.stop();
+      return;
+    }
+
+    const sequence = activeSequenceName
+      ? userSequences.find((candidate) => candidate.name === activeSequenceName)
+      : null;
+    if (!sequence) {
+      setActiveSequenceName(null);
+      setNotice("Load or save a sequence before pressing Play.");
+      return;
+    }
+    const playbackTake = activeSequenceDataRef.current === sequence.data
+      ? activeSequenceTakeRef.current
+      : decodeUserSequence(sequence);
+    if (!playbackTake) {
+      activeSequenceTakeRef.current = null;
+      activeSequenceDataRef.current = null;
+      setActiveSequenceName(null);
+      setNotice("That saved sequence is damaged and could not be played.");
+      return;
+    }
+    activeSequenceTakeRef.current = playbackTake;
+    activeSequenceDataRef.current = sequence.data;
+    if (powerBusy || externalInputBusy) {
+      setNotice("Wait for the current audio operation, then press Play again.");
+      return;
+    }
+
+    const sequenceOperation = ++sequenceOperationRef.current;
+    if (!powered) {
+      const powerOperation = ++powerOperationRef.current;
+      setPowerBusy(true);
+      try {
+        await engine.powerOn(paramsRef.current);
+        if (
+          !mountedRef.current
+          || powerOperation !== powerOperationRef.current
+          || sequenceOperation !== sequenceOperationRef.current
+        ) return;
+        for (const note of new Set(noteSources.current.values())) engine.noteOn(note);
+        syncPerformance();
+        setPowered(true);
+      } catch (error) {
+        if (!mountedRef.current || powerOperation !== powerOperationRef.current) return;
+        setPowered(false);
+        setNotice(error instanceof Error && error.name === "AbortError"
+          ? "Sequence playback was cancelled."
+          : error instanceof Error ? error.message : "Audio could not start for sequence playback.");
+        return;
+      } finally {
+        if (mountedRef.current && powerOperation === powerOperationRef.current) setPowerBusy(false);
+      }
+    }
+
+    if (!mountedRef.current || sequenceOperation !== sequenceOperationRef.current) return;
+    const started = player.play(playbackTake);
+    if (started && player.isPlaying) {
+      setSequencePlaying(true);
+      setNotice(`Playing sequence “${sequence.name}”.`);
+    } else {
+      setSequencePlaying(false);
     }
   };
 
@@ -798,6 +1115,10 @@ function App() {
   };
 
   const panic = (): void => {
+    sequenceOperationRef.current += 1;
+    sequencePlayerRef.current?.stop(false);
+    setSequencePlaying(false);
+    if (sequenceRecorderRef.current?.isRecording) finishSequenceRecording("manual");
     setInputResetEpoch((epoch) => epoch + 1);
     releasePhysicalNotes();
     if (paramsRef.current.autoRun > 0.5) changeParam("autoRun", 0);
@@ -1102,53 +1423,73 @@ function App() {
             <div className="brand-model">Duophonic · Model 2800</div>
           </div>
         </div>
-        <div className="patch-strip">
-          <label htmlFor="preset">Patch</label>
-          <select id="preset" value={presetName} onChange={(event) => applyPatch(event.target.value)}>
-            {activeUserPatchName && (
-              <option value={USER_PATCH_PRESET_VALUE}>Saved · {activeUserPatchName}</option>
-            )}
-            <option value="Custom patch">Custom patch</option>
-            {FACTORY_PRESETS.map((preset) => <option key={preset.name}>{preset.name}</option>)}
-          </select>
-          <button
-            type="button"
-            className="button button--quiet"
-            aria-haspopup="dialog"
-            onClick={(event) => openPatchLibrary("save", event.currentTarget)}
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            className="button button--quiet"
-            aria-haspopup="dialog"
-            onClick={(event) => openPatchLibrary("load", event.currentTarget)}
-          >
-            Load
-          </button>
-          <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
-          <button type="button" className="button button--danger" onClick={panic}>All notes off</button>
-          <button
-            type="button"
-            className="button button--quiet help-button"
-            aria-haspopup="dialog"
-            onClick={(event) => {
-              setDirectEditor(null);
-              setPatchLibraryDialog(null);
-              setHelpDialogOrigin(event.currentTarget);
-            }}
-          >
-            Help
-          </button>
-          <button
-            type="button"
-            className="button button--quiet share-button"
-            disabled={shareBusy}
-            onClick={() => void sharePatch()}
-          >
-            {shareBusy ? "Sharing…" : "Share patch"}
-          </button>
+        <div className="library-deck">
+          <div className="patch-strip">
+            <label htmlFor="preset">Patch</label>
+            <select
+              id="preset"
+              aria-label="Patch"
+              value={presetName}
+              onChange={(event) => {
+                applyPatch(event.target.value);
+                event.currentTarget.blur();
+              }}
+            >
+              {activeUserPatchName && (
+                <option value={USER_PATCH_PRESET_VALUE}>Saved · {activeUserPatchName}</option>
+              )}
+              <option value="Custom patch">Custom patch</option>
+              {FACTORY_PRESETS.map((preset) => <option key={preset.name}>{preset.name}</option>)}
+            </select>
+            <button
+              type="button"
+              className="button button--quiet"
+              aria-haspopup="dialog"
+              onClick={(event) => openPatchLibrary("save", event.currentTarget)}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              className="button button--quiet"
+              aria-haspopup="dialog"
+              onClick={(event) => openPatchLibrary("load", event.currentTarget)}
+            >
+              Load
+            </button>
+            <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
+            <button type="button" className="button button--danger" onClick={panic}>All notes off</button>
+            <button
+              type="button"
+              className="button button--quiet help-button"
+              aria-haspopup="dialog"
+              onClick={(event) => {
+                setDirectEditor(null);
+                setPatchLibraryDialog(null);
+                setHelpDialogOrigin(event.currentTarget);
+              }}
+            >
+              Help
+            </button>
+            <button
+              type="button"
+              className="button button--quiet share-button"
+              disabled={shareBusy}
+              onClick={() => void sharePatch()}
+            >
+              {shareBusy ? "Sharing…" : "Share patch"}
+            </button>
+          </div>
+          <SequenceTransport
+            sequenceNames={userSequences.map((sequence) => sequence.name)}
+            activeName={activeSequenceName}
+            recording={sequenceRecording}
+            playing={sequencePlaying}
+            recordButtonRef={recordButtonRef}
+            onSelect={selectSequence}
+            onRecord={toggleSequenceRecording}
+            onPlay={() => void toggleSequencePlayback()}
+          />
         </div>
         <div className="power-strip">
           {installPrompt && <button type="button" className="button button--quiet install-button" onClick={install}>Install app</button>}
@@ -1256,7 +1597,7 @@ function App() {
       <footer>
         <span>Shared VCF / VCA duophony · pulse-XOR ring modulation · three filter characters</span>
         {showSafariInstallHint && <span>Install on Safari: Share → Add to Home Screen.</span>}
-        <span>The current patch auto-restores · Save and Load manage named local snapshots · the URL is shareable.</span>
+        <span>The current patch auto-restores · named patches and note sequences stay on this device · patch URLs are shareable.</span>
       </footer>
 
       {directEditor && (
@@ -1277,6 +1618,17 @@ function App() {
           onSave={saveNamedPatch}
           onLoad={loadNamedPatch}
           onClose={() => setPatchLibraryDialog(null)}
+        />
+      )}
+      {sequenceTake && (
+        <SequenceCommitDialog
+          take={sequenceTake.take}
+          origin={sequenceTake.origin}
+          onSave={saveSequenceTake}
+          onDiscard={() => {
+            setSequenceTake(null);
+            setNotice("Recording discarded. The previously loaded sequence was kept.");
+          }}
         />
       )}
       {helpDialogOrigin && (

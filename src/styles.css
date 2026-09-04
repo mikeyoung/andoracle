@@ -175,7 +175,14 @@ input:focus-visible,
   white-space: nowrap;
 }
 
+.library-deck {
+  display: grid;
+  min-width: 0;
+  gap: 7px;
+}
+
 .patch-strip,
+.sequence-strip,
 .power-strip {
   display: flex;
   min-width: 0;
@@ -184,17 +191,20 @@ input:focus-visible,
   gap: 8px;
 }
 
-.patch-strip {
+.patch-strip,
+.sequence-strip {
   min-width: 0;
 }
 
-.patch-strip .button {
+.patch-strip .button,
+.sequence-strip .button {
   min-width: 0;
   overflow-wrap: anywhere;
   touch-action: manipulation;
 }
 
-.patch-strip label {
+.patch-strip label,
+.sequence-strip label {
   color: #f1ead6;
   font-size: 10px;
   font-weight: 800;
@@ -202,8 +212,10 @@ input:focus-visible,
   text-transform: uppercase;
 }
 
-.patch-strip select {
+.patch-strip select,
+.sequence-strip select {
   width: min(220px, 34vw);
+  max-width: 100%;
   min-height: 44px;
   padding: 0 34px 0 12px;
   border: 2px solid #30322d;
@@ -212,6 +224,61 @@ input:focus-visible,
   color-scheme: light;
   background: linear-gradient(180deg, #f1ead5, #c6c0ac);
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.68), 0 2px 0 #272923;
+}
+
+.sequence-strip select {
+  min-width: 0;
+  flex: 1 1 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sequence-record-button,
+.sequence-play-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.sequence-record-button i,
+.sequence-play-button i {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border: 1px solid #171814;
+  background: #5b5043;
+  box-shadow: inset 1px 1px rgba(255, 255, 255, 0.13);
+}
+
+.sequence-record-button i {
+  border-radius: 50%;
+}
+
+.sequence-play-button i {
+  clip-path: polygon(12% 0, 100% 50%, 12% 100%);
+}
+
+.sequence-record-button.is-active {
+  border-color: #c35a48;
+  color: #ffe3d4;
+  background: linear-gradient(180deg, #63332d, #36201d);
+}
+
+.sequence-record-button.is-active i {
+  background: #e0674f;
+  box-shadow: inset 1px 1px #ffc0a3, 0 0 8px rgba(224, 103, 79, 0.8);
+}
+
+.sequence-play-button.is-active {
+  border-color: #c1a14f;
+  color: #fff0bd;
+  background: linear-gradient(180deg, #5c5030, #302b20);
+}
+
+.sequence-play-button.is-active i {
+  background: #dfb84f;
+  box-shadow: 0 0 8px rgba(223, 184, 79, 0.72);
 }
 
 .power-strip {
@@ -1465,6 +1532,19 @@ footer span {
   filter: saturate(0.35);
 }
 
+.sequence-strip .button:disabled,
+.sequence-commit-dialog .button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: saturate(0.35);
+}
+
+.sequence-take-summary {
+  overflow-wrap: anywhere;
+  font-family: "Courier New", Courier, monospace;
+  font-weight: 700;
+}
+
 .help-dialog {
   width: min(620px, calc(100vw - 28px));
   border-top-color: #aa8436;
@@ -2028,6 +2108,71 @@ footer span {
 
   .modal-actions .button {
     width: 100%;
+  }
+}
+
+/* Keep both local-library rows in patch-then-sequence order after the older
+   responsive panel rules above have resolved. */
+@media (max-width: 1180px) {
+  .library-deck {
+    order: 3;
+    width: 100%;
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .patch-strip,
+  .sequence-strip {
+    order: initial;
+    width: 100%;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .patch-strip select,
+  .sequence-strip select {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 170px;
+  }
+}
+
+@media (max-width: 700px) {
+  .patch-strip,
+  .sequence-strip {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .patch-strip select,
+  .sequence-strip select {
+    width: 100%;
+    min-width: 0;
+    grid-column: 1 / -1;
+  }
+
+  .patch-strip .button,
+  .sequence-strip .button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .sequence-review-actions {
+    flex-direction: column;
+  }
+
+  .sequence-review-actions .button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 260px) {
+  .patch-strip,
+  .sequence-strip {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

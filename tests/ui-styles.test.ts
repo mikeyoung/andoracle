@@ -38,4 +38,22 @@ describe("synth control styling", () => {
     expect(styles).toMatch(/\.keyboard-banks\s*\{[\s\S]*?grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);[\s\S]*?overflow:\s*hidden;[\s\S]*?\}/);
     expect(styles).toMatch(/\.status-deck\s*\{[\s\S]*?repeat\(auto-fit, minmax\(min\(112px, 100%\), 1fr\)\);[\s\S]*?\}/);
   });
+
+  it("keeps the persistent sequence transport touch-sized and reflowable", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+
+    expect(styles).toMatch(/\.library-deck\s*\{[\s\S]*?display:\s*grid;[\s\S]*?min-width:\s*0;[\s\S]*?\}/);
+    expect(styles).toMatch(
+      /\.patch-strip,\s*\.sequence-strip,\s*\.power-strip\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*700px\)[\s\S]*?\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /\.patch-strip select,\s*\.sequence-strip select\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*260px\)[\s\S]*?\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*?\}/,
+    );
+  });
 });

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const DESCRIPTION = "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with modern MIDI, delay, and patch sharing.";
+const DESCRIPTION = "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.";
 const SITE_URL = "https://mikeyoung.org/andoracle/";
 const SOCIAL_IMAGE_URL = `${SITE_URL}icon-512.png`;
 
@@ -23,6 +23,7 @@ describe("Andoracle project metadata", () => {
       "duophonic",
       "web-audio",
       "web-midi",
+      "music-sequencer",
       "pwa",
       "arp-odyssey",
     ]));
@@ -61,6 +62,7 @@ describe("Andoracle project metadata", () => {
     expect(structured.featureList).toEqual(expect.arrayContaining([
       expect.stringContaining("signal flow"),
       expect.stringContaining("URL patch sharing"),
+      expect.stringContaining("note sequences"),
     ]));
   });
 

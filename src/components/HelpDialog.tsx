@@ -77,6 +77,10 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
             <strong>Hands-free</strong>
             <span>Turn on Auto gate to play without holding a key.</span>
           </li>
+          <li>
+            <strong>Note sequencer</strong>
+            <span>Record keyboard notes, stop to save or discard, then load a name and choose Play.</span>
+          </li>
         </ul>
 
         <div className="modal-actions">

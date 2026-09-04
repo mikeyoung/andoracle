@@ -1,6 +1,6 @@
 # Andoracle
 
-Andoracle is an installable, offline-capable, touch-first duophonic browser synthesizer whose goal is a faithful functional recreation of the ARP Odyssey's normalized signal flow, playing behavior, and three filter characters—not component-for-component circuit simulation—with clearly separated modern additions including stereo delay, optional MIDI and live input, local named patches, and URL sharing. Its audio engine is intentionally fixed at 44.1 kHz.
+Andoracle is an installable, offline-capable, touch-first duophonic browser synthesizer whose goal is a faithful functional recreation of the ARP Odyssey's normalized signal flow, playing behavior, and three filter characters—not component-for-component circuit simulation—with clearly separated modern additions including stereo delay, optional MIDI and live input, local named patches and note sequences, and URL sharing. Its audio engine is intentionally fixed at 44.1 kHz.
 
 Play the production version at [mikeyoung.org/andoracle](https://mikeyoung.org/andoracle/).
 
@@ -27,6 +27,7 @@ Open the printed local URL, press **Power on** to enable audio, then play the on
 - Use **External audio** to route an audio-interface or microphone input through the mixer, stereo delay, VCF, HPF, and VCA. The browser asks for input permission only when you press it.
 - Patch edits save automatically in local storage and are encoded in the URL fragment. Use **Share patch** (or copy the current browser URL) to share all 80 patch controls; opening it restores the patch without restoring audio power, held notes, or hardware permissions. Factory patches remain available from the header.
 - **Save** creates a trimmed, user-named snapshot in this device's local storage, and **Load** restores one from the user patch library. Saved names are unique regardless of capitalization and are never overwritten implicitly.
+- The persistent **Record** transport captures keyboard note attacks, releases, and timing only; synth controls, wheels, pedals, and patch changes are excluded. Stop manually or leave all notes released for one minute, then explicitly save/name or discard the take. Saved sequences use compact versioned local storage, reject trimmed/case-equivalent duplicate names, and the **Play** button runs the currently loaded sequence through the live patch.
 
 ## Audio architecture
 
