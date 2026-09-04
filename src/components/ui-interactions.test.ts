@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
   clearKeyboardOwnership,
+  createKeyboardRowGeometry,
   isSyntheticActivationClick,
   isVisualActivationKey,
   Keyboard,
@@ -69,8 +70,27 @@ describe("on-screen keyboard interaction contracts", () => {
     expect(markup.match(/class="piano-key /g)).toHaveLength(37);
     expect(markup.match(/aria-keyshortcuts="Enter Space"/g)).toHaveLength(37);
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(37);
-    expect(markup).toContain('role="group" aria-label="Keyboard viewport controls"');
-    expect(markup).toContain('role="group" aria-label="Scrollable on-screen keyboard"');
+    expect(markup).toContain('role="group" aria-label="On-screen keyboard"');
+    expect(markup.match(/data-keyboard-row="true"/g)).toHaveLength(3);
+    expect(markup).not.toContain("Scrollable on-screen keyboard");
+  });
+
+  it("lays out each responsive keyboard bank entirely within its own width", () => {
+    const rows = [
+      createKeyboardRowGeometry(36, 47),
+      createKeyboardRowGeometry(48, 59),
+      createKeyboardRowGeometry(60, 72),
+    ];
+
+    expect(rows.map((row) => row.keys.length)).toEqual([12, 12, 13]);
+    expect(rows.map((row) => row.whiteCount)).toEqual([7, 7, 8]);
+    for (const row of rows) {
+      for (const key of row.keys) {
+        const width = key.white ? 1 : 0.625;
+        expect(key.left).toBeGreaterThanOrEqual(0);
+        expect(key.left + width).toBeLessThanOrEqual(row.whiteCount);
+      }
+    }
   });
 
   it("clears every pointer, assistive, and pending-click owner on a reset", () => {

@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
@@ -20,9 +19,13 @@ interface KeyboardProps {
 
 const START_NOTE = 36;
 const END_NOTE = 72;
-const WHITE_WIDTH = 48;
-const BLACK_WIDTH = 30;
+const BLACK_KEY_WIDTH = 0.625;
 const WHITE_PITCHES = new Set([0, 2, 4, 5, 7, 9, 11]);
+const KEYBOARD_ROW_RANGES = [
+  [36, 47],
+  [48, 59],
+  [60, 72],
+] as const;
 
 type VisualActivation = " " | "Enter" | "assistive";
 
@@ -64,7 +67,32 @@ interface KeyGeometry {
   left: number;
 }
 
+interface KeyboardRowGeometry {
+  startNote: number;
+  endNote: number;
+  whiteCount: number;
+  keys: KeyGeometry[];
+}
+
 const isWhite = (note: number): boolean => WHITE_PITCHES.has(((note % 12) + 12) % 12);
+
+export const createKeyboardRowGeometry = (startNote: number, endNote: number): KeyboardRowGeometry => {
+  const keys: KeyGeometry[] = [];
+  let whiteCount = 0;
+  for (let note = startNote; note <= endNote; note += 1) {
+    if (isWhite(note)) {
+      keys.push({ note, white: true, left: whiteCount });
+      whiteCount += 1;
+    } else {
+      keys.push({ note, white: false, left: whiteCount - BLACK_KEY_WIDTH / 2 });
+    }
+  }
+  return { startNote, endNote, whiteCount, keys };
+};
+
+const KEYBOARD_ROWS = KEYBOARD_ROW_RANGES.map(([startNote, endNote]) => (
+  createKeyboardRowGeometry(startNote, endNote)
+));
 
 export function Keyboard({
   activeNotes,
@@ -75,7 +103,6 @@ export function Keyboard({
   onNoteOff,
 }: KeyboardProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const pointerNotes = useRef(new Map<number, number>());
   const visualKeySources = useRef(new Map<string, number>());
   const clickSuppressions = useRef(new Set<string>());
@@ -91,20 +118,6 @@ export function Keyboard({
     onNoteOff,
     (timer) => window.clearTimeout(timer),
   );
-
-  const geometry = useMemo<KeyGeometry[]>(() => {
-    const result: KeyGeometry[] = [];
-    let whiteCount = 0;
-    for (let note = START_NOTE; note <= END_NOTE; note += 1) {
-      if (isWhite(note)) {
-        result.push({ note, white: true, left: whiteCount * WHITE_WIDTH });
-        whiteCount += 1;
-      } else {
-        result.push({ note, white: false, left: whiteCount * WHITE_WIDTH - BLACK_WIDTH / 2 });
-      }
-    }
-    return result;
-  }, []);
 
   useEffect(() => {
     const releaseWhenHidden = (): void => {
@@ -263,14 +276,6 @@ export function Keyboard({
     deferKeyboardClickRelease(note, event.key);
   };
 
-  const whiteKeyCount = geometry.filter((key) => key.white).length;
-  const panKeyboard = (direction: -1 | 1): void => {
-    scrollRef.current?.scrollBy({
-      left: direction * WHITE_WIDTH * 7,
-      behavior: "auto",
-    });
-  };
-
   return (
     <section className="keyboard-module" aria-label="37-key keyboard">
       <div className="keyboard-header">
@@ -280,79 +285,61 @@ export function Keyboard({
         </div>
         <p><kbd>A S D F G H J K L ;</kbd> white · <kbd>W E T Y U O P</kbd> black. Drag for glissando.</p>
       </div>
-      <div className="keyboard-pan-controls" role="group" aria-label="Keyboard viewport controls">
-        <button type="button" onClick={() => panKeyboard(-1)} aria-label="Show lower keyboard octave">← Lower keys</button>
-        <button type="button" onClick={() => panKeyboard(1)} aria-label="Show higher keyboard octave">Higher keys →</button>
-      </div>
-      <div ref={scrollRef} className="keyboard-scroll" role="group" aria-label="Scrollable on-screen keyboard">
-        <div
-          ref={surfaceRef}
-          className="keyboard-surface"
-          style={{ width: whiteKeyCount * WHITE_WIDTH }}
-          onPointerDown={begin}
-          onPointerMove={move}
-          onPointerUp={end}
-          onPointerCancel={end}
-          onLostPointerCapture={end}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          {geometry.filter((key) => key.white).map((key) => {
-            const active = activeNotes.has(key.note);
-            const low = allocatedLow === key.note;
-            const high = allocatedHigh === key.note;
-            return (
-              <button
-                key={key.note}
-                type="button"
-                className={`piano-key piano-key--white${active ? " is-active" : ""}${low ? " is-low" : ""}${high ? " is-high" : ""}`}
-                style={{ left: key.left, width: WHITE_WIDTH }}
-                data-note={key.note}
-                aria-label={midiNoteName(key.note)}
-                aria-pressed={active}
-                aria-keyshortcuts="Enter Space"
-                tabIndex={focusedNote === key.note ? 0 : -1}
-                ref={(element) => {
-                  if (element) keyElements.current.set(key.note, element);
-                  else keyElements.current.delete(key.note);
-                }}
-                onFocus={() => setFocusedNote(key.note)}
-                onKeyDown={(event) => keyboardDown(key.note, event)}
-                onKeyUp={(event) => keyboardUp(key.note, event)}
-                onClick={(event) => syntheticClick(key.note, event)}
-                onBlur={() => releaseVisualNote(key.note)}
-              >
-                {key.note % 12 === 0 && <span>{midiNoteName(key.note)}</span>}
-              </button>
-            );
-          })}
-          {geometry.filter((key) => !key.white).map((key) => {
-            const active = activeNotes.has(key.note);
-            const low = allocatedLow === key.note;
-            const high = allocatedHigh === key.note;
-            return (
-              <button
-                key={key.note}
-                type="button"
-                className={`piano-key piano-key--black${active ? " is-active" : ""}${low ? " is-low" : ""}${high ? " is-high" : ""}`}
-                style={{ left: key.left, width: BLACK_WIDTH }}
-                data-note={key.note}
-                aria-label={midiNoteName(key.note)}
-                aria-pressed={active}
-                aria-keyshortcuts="Enter Space"
-                tabIndex={focusedNote === key.note ? 0 : -1}
-                ref={(element) => {
-                  if (element) keyElements.current.set(key.note, element);
-                  else keyElements.current.delete(key.note);
-                }}
-                onFocus={() => setFocusedNote(key.note)}
-                onKeyDown={(event) => keyboardDown(key.note, event)}
-                onKeyUp={(event) => keyboardUp(key.note, event)}
-                onClick={(event) => syntheticClick(key.note, event)}
-                onBlur={() => releaseVisualNote(key.note)}
-              />
-            );
-          })}
-        </div>
+      <div
+        ref={surfaceRef}
+        className="keyboard-banks"
+        role="group"
+        aria-label="On-screen keyboard"
+        onPointerDown={begin}
+        onPointerMove={move}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onLostPointerCapture={end}
+        onContextMenu={(event) => event.preventDefault()}
+      >
+        {KEYBOARD_ROWS.map((row) => (
+          <div
+            key={row.startNote}
+            className="keyboard-surface"
+            role="group"
+            aria-label={`${midiNoteName(row.startNote)} through ${midiNoteName(row.endNote)}`}
+            data-keyboard-row
+          >
+            {[true, false].flatMap((white) => row.keys.filter((key) => key.white === white)).map((key) => {
+              const active = activeNotes.has(key.note);
+              const low = allocatedLow === key.note;
+              const high = allocatedHigh === key.note;
+              const width = key.white ? 1 : BLACK_KEY_WIDTH;
+              return (
+                <button
+                  key={key.note}
+                  type="button"
+                  className={`piano-key piano-key--${key.white ? "white" : "black"}${active ? " is-active" : ""}${low ? " is-low" : ""}${high ? " is-high" : ""}`}
+                  style={{
+                    left: `${(key.left / row.whiteCount) * 100}%`,
+                    width: `${(width / row.whiteCount) * 100}%`,
+                  }}
+                  data-note={key.note}
+                  aria-label={midiNoteName(key.note)}
+                  aria-pressed={active}
+                  aria-keyshortcuts="Enter Space"
+                  tabIndex={focusedNote === key.note ? 0 : -1}
+                  ref={(element) => {
+                    if (element) keyElements.current.set(key.note, element);
+                    else keyElements.current.delete(key.note);
+                  }}
+                  onFocus={() => setFocusedNote(key.note)}
+                  onKeyDown={(event) => keyboardDown(key.note, event)}
+                  onKeyUp={(event) => keyboardUp(key.note, event)}
+                  onClick={(event) => syntheticClick(key.note, event)}
+                  onBlur={() => releaseVisualNote(key.note)}
+                >
+                  {key.white && key.note % 12 === 0 && <span>{midiNoteName(key.note)}</span>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
       <div className="allocation-legend" aria-hidden="true">
         <span><i className="dot dot--low" /> VCO 1 / lowest</span>

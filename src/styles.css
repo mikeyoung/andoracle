@@ -59,6 +59,7 @@ body {
 button,
 input,
 select {
+  max-width: 100%;
   font: inherit;
 }
 
@@ -71,7 +72,7 @@ input[type="range"] {
 button:focus-visible,
 select:focus-visible,
 input:focus-visible,
-.keyboard-scroll:focus-visible {
+.keyboard-banks:focus-visible {
   outline: 3px solid var(--yellow);
   outline-offset: 3px;
 }
@@ -111,6 +112,10 @@ input:focus-visible,
   min-width: 0;
 }
 
+.brand > div {
+  min-width: 0;
+}
+
 .brand-mark {
   display: grid;
   width: 48px;
@@ -136,6 +141,7 @@ input:focus-visible,
   letter-spacing: 0.1em;
   line-height: 0.95;
   text-shadow: 1px 1px #000;
+  overflow-wrap: anywhere;
 }
 
 .brand-model {
@@ -152,7 +158,9 @@ input:focus-visible,
 .patch-strip,
 .power-strip {
   display: flex;
+  min-width: 0;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -161,6 +169,8 @@ input:focus-visible,
 }
 
 .patch-strip .button {
+  min-width: 0;
+  overflow-wrap: anywhere;
   touch-action: manipulation;
 }
 
@@ -234,7 +244,7 @@ input:focus-visible,
 
 .power-button {
   display: inline-flex;
-  min-width: 130px;
+  min-width: min(130px, 100%);
   align-items: center;
   justify-content: center;
   gap: 9px;
@@ -243,6 +253,7 @@ input:focus-visible,
   color: #d4c3aa;
   background: linear-gradient(180deg, #29221b, #15110e);
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 3px 0 #080706;
+  overflow-wrap: anywhere;
 }
 
 .power-button i {
@@ -358,6 +369,7 @@ input:focus-visible,
 .system-banner {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 12px;
   min-height: 40px;
@@ -365,6 +377,11 @@ input:focus-visible,
   color: #caebe5;
   background: #183a34;
   font-size: 12px;
+}
+
+.system-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .system-banner--warning {
@@ -403,19 +420,22 @@ main {
   color: #efb06f;
 }
 
+.usage-note span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .signal-flow {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin: 0 0 10px;
-  overflow-x: auto;
   color: #aaa087;
   font-size: 9px;
   font-weight: 850;
   letter-spacing: 0.1em;
-  scrollbar-width: thin;
   text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .signal-flow i {
@@ -486,6 +506,11 @@ main {
     rgba(0, 0, 0, 0.28);
 }
 
+.module-header > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .module-header h2,
 .keyboard-header h2 {
   margin: 0;
@@ -511,22 +536,17 @@ main {
   display: flex;
   min-height: 282px;
   align-items: stretch;
+  align-content: stretch;
+  flex-wrap: wrap;
   gap: 2px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
   padding: 13px 9px 11px;
-  scroll-snap-type: x proximity;
-  scrollbar-color: #504d44 #171715;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  -webkit-overflow-scrolling: touch;
 }
 
 .parameter {
   position: relative;
   display: flex;
-  min-width: 72px;
-  flex: 1 0 72px;
+  min-width: min(72px, 100%);
+  flex: 1 1 72px;
   flex-direction: column;
   align-items: center;
   padding: 3px 4px;
@@ -535,7 +555,6 @@ main {
   touch-action: manipulation;
   -webkit-touch-callout: none;
   user-select: none;
-  scroll-snap-align: start;
 }
 
 .parameter:last-child {
@@ -553,6 +572,7 @@ main {
   letter-spacing: 0.09em;
   line-height: 1.2;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .parameter output {
@@ -663,8 +683,8 @@ main {
 }
 
 .parameter--choice {
-  min-width: 118px;
-  flex-basis: 118px;
+  min-width: min(118px, 100%);
+  flex: 1 1 118px;
   justify-content: flex-start;
 }
 
@@ -693,6 +713,13 @@ main {
   touch-action: manipulation;
 }
 
+.choice-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .choice-button i {
   width: 0;
   height: 0;
@@ -703,8 +730,8 @@ main {
 }
 
 .parameter--toggle {
-  min-width: 82px;
-  flex-basis: 82px;
+  min-width: min(82px, 100%);
+  flex: 1 1 82px;
 }
 
 .toggle-switch {
@@ -767,11 +794,10 @@ main {
 
 .route-control {
   display: flex;
-  min-width: 116px;
-  flex: 1 0 116px;
+  min-width: min(116px, 100%);
+  flex: 1 1 116px;
   flex-direction: column;
   border-right: 1px solid rgba(239, 222, 178, 0.09);
-  scroll-snap-align: start;
 }
 
 .route-control .parameter {
@@ -819,9 +845,9 @@ main {
 
 .ppc {
   display: grid;
-  min-width: 202px;
-  flex: 1 0 202px;
-  grid-template-columns: repeat(3, 1fr);
+  min-width: min(202px, 100%);
+  flex: 1 1 202px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-template-rows: 23px 1fr;
   gap: 5px;
   align-items: stretch;
@@ -830,8 +856,8 @@ main {
 
 .external-input-control {
   display: flex;
-  min-width: 132px;
-  flex: 1 0 132px;
+  min-width: min(132px, 100%);
+  flex: 1 1 132px;
   flex-direction: column;
   align-items: center;
   padding: 3px 7px 9px;
@@ -847,11 +873,12 @@ main {
   letter-spacing: 0.07em;
   line-height: 1.2;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .external-input-button {
   display: flex;
-  width: 92px;
+  width: min(92px, 100%);
   min-height: 108px;
   flex-direction: column;
   align-items: center;
@@ -906,6 +933,7 @@ main {
   color: #aaa79e;
   font-size: 9px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .external-input-control .control-error,
@@ -920,11 +948,12 @@ main {
   font-weight: 850;
   letter-spacing: 0.1em;
   text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .ppc-pad {
   display: flex;
-  min-width: 58px;
+  min-width: 0;
   min-height: 168px;
   flex-direction: column;
   align-items: center;
@@ -1001,16 +1030,21 @@ main {
   font-size: 12px;
   line-height: 1.35;
   text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .midi-strip-actions {
   display: flex;
+  min-width: 0;
   flex: 0 0 auto;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .midi-strip-actions .button {
   min-height: 44px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .button--midi-on {
@@ -1056,6 +1090,7 @@ main {
   color: #b5aa91;
   font-size: 10px;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 kbd {
@@ -1072,42 +1107,23 @@ kbd {
   text-align: center;
 }
 
-.keyboard-scroll {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+.keyboard-banks {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  overflow: hidden;
   border-top: 4px solid #77756d;
   background: #070706;
-  scrollbar-color: #6b4b39 #171715;
-  scrollbar-width: thin;
-}
-
-.keyboard-pan-controls {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
-  border-bottom: 2px solid #28251e;
-  background: linear-gradient(180deg, #161510, #0c0c0a);
-}
-
-.keyboard-pan-controls button {
-  min-width: 116px;
-  min-height: 44px;
-  padding: 6px 12px;
-  border: 1px solid #5c574a;
-  border-radius: 1px;
-  color: #e5d9b9;
-  background: linear-gradient(180deg, #343128, #201e19);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 2px 0 #050504;
-  font-size: 10px;
-  font-weight: 800;
-  cursor: pointer;
 }
 
 .keyboard-surface {
   position: relative;
+  width: 100%;
+  min-width: 0;
   height: 224px;
-  margin: 0 auto;
+  overflow: hidden;
   touch-action: none;
   user-select: none;
 }
@@ -1172,6 +1188,7 @@ kbd {
 
 .allocation-legend {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 17px;
   min-height: 31px;
@@ -1200,6 +1217,7 @@ kbd {
 
 footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 20px;
   padding: 15px calc(clamp(14px, 2vw, 34px) + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(clamp(14px, 2vw, 34px) + env(safe-area-inset-left));
@@ -1211,11 +1229,18 @@ footer {
   text-transform: uppercase;
 }
 
+footer span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .direct-entry {
   width: min(450px, calc(100vw - 28px));
+  max-width: calc(100vw - 28px);
   max-height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
   max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0;
   border: 2px solid #777369;
@@ -1234,6 +1259,7 @@ footer {
 }
 
 .direct-entry form {
+  min-width: 0;
   padding: 24px;
 }
 
@@ -1252,6 +1278,7 @@ footer {
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
 .modal-current,
@@ -1403,10 +1430,13 @@ footer {
 }
 
 .help-interface-list kbd {
+  max-width: 100%;
   color: var(--cream);
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
   font-weight: 800;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .help-dialog .modal-actions {
@@ -1431,6 +1461,7 @@ footer {
 
 .number-field input {
   width: 100%;
+  min-width: 0;
   min-height: 52px;
   padding: 0 13px;
   border: 0;
@@ -1472,15 +1503,21 @@ footer {
 
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
 }
 
+.modal-actions .button {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1180px) {
   .topbar {
     grid-template-columns: 200px minmax(420px, 1fr) auto;
-    overflow-x: auto;
+    overflow: visible;
   }
 
   .brand {
@@ -1499,8 +1536,7 @@ footer {
   }
 
   .status-deck {
-    grid-template-columns: repeat(4, minmax(110px, 1fr)) minmax(160px, 1.5fr);
-    overflow-x: auto;
+    grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
   }
 
   .network-status {
@@ -1532,13 +1568,13 @@ footer {
   }
 
   .brand {
-    flex: 1 0 180px;
+    flex: 1 1 180px;
   }
 
   .patch-strip {
     order: 3;
     width: 100%;
-    overflow-x: auto;
+    overflow: visible;
   }
 
   .patch-strip select {
@@ -1552,7 +1588,7 @@ footer {
   }
 
   .power-strip {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
   }
 }
 
@@ -1597,7 +1633,7 @@ footer {
   }
 
   .brand {
-    flex: 1 0 180px;
+    flex: 1 1 180px;
   }
 
   .brand-mark {
@@ -1609,7 +1645,7 @@ footer {
   .patch-strip {
     order: 3;
     width: 100%;
-    overflow-x: auto;
+    overflow: visible;
   }
 
   .patch-strip select {
@@ -1623,7 +1659,7 @@ footer {
   }
 
   .power-strip {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
   }
 
   .power-strip .button:not(.install-button) {
@@ -1637,11 +1673,11 @@ footer {
   }
 
   .power-button {
-    min-width: 112px;
+    min-width: min(112px, 100%);
   }
 
   .status-deck {
-    grid-template-columns: repeat(5, minmax(112px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(112px, 100%), 1fr));
     padding: 1px env(safe-area-inset-right) 1px env(safe-area-inset-left);
   }
 
@@ -1704,8 +1740,8 @@ footer {
     text-align: left;
   }
 
-  .keyboard-surface {
-    margin: 0;
+  .keyboard-banks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .allocation-legend {
@@ -1719,6 +1755,12 @@ footer {
   footer span {
     display: block;
     margin-bottom: 6px;
+  }
+}
+
+@media (max-width: 700px) {
+  .keyboard-banks {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1748,7 +1790,7 @@ footer {
   }
 
   .power-button {
-    min-width: 108px;
+    min-width: min(108px, 100%);
     padding-right: 10px;
     padding-left: 10px;
     font-size: 10px;
@@ -1808,11 +1850,6 @@ footer {
     padding-left: 10px;
   }
 
-  .keyboard-pan-controls button {
-    min-width: 0;
-    flex: 1;
-  }
-
   .direct-entry form {
     padding: 20px 18px;
   }
@@ -1869,11 +1906,34 @@ footer {
   }
 }
 
+@media (max-width: 260px) {
+  .topbar .brand,
+  .power-strip {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .power-strip > * {
+    flex: 1 1 100%;
+  }
+
+  .patch-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+
+  .modal-actions .button {
+    width: 100%;
+  }
+}
+
 @media (hover: hover) {
   .choice-button:hover,
   .toggle-switch:hover,
-  .external-input-button:hover,
-  .keyboard-pan-controls button:hover {
+  .external-input-button:hover {
     border-color: color-mix(in srgb, var(--accent, var(--orange)), var(--cream) 30%);
     filter: brightness(1.08);
   }
