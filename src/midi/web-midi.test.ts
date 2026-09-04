@@ -401,6 +401,34 @@ describe("Web MIDI decoding", () => {
     await liveSession.disconnect();
   });
 
+  it("does not let a concurrent session steal or close another session's live port", async () => {
+    const input = new FakeMidiInput("shared-port", "Shared Port");
+    const access = new FakeMidiAccess();
+    access.inputs.set(input.id, input as unknown as MIDIInput);
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", {
+      requestMIDIAccess: vi.fn(async () => access as unknown as MIDIAccess),
+    });
+    const liveHandlers = makeHandlers();
+    const contenderHandlers = makeHandlers();
+    const liveSession = new WebMidiSession(liveHandlers);
+    const contenderSession = new WebMidiSession(contenderHandlers);
+
+    await expect(liveSession.connect()).resolves.toHaveLength(1);
+    const liveMessageHandler = input.onmidimessage;
+    await expect(contenderSession.connect()).resolves.toEqual([]);
+    expect(input.open).toHaveBeenCalledTimes(1);
+    expect(input.onmidimessage).toBe(liveMessageHandler);
+
+    await contenderSession.disconnect(true);
+    expect(input.close).not.toHaveBeenCalled();
+    expect(input.onmidimessage).toBe(liveMessageHandler);
+    input.emit([0x90, 60, 100]);
+    expect(liveHandlers.noteOn).toHaveBeenCalledTimes(1);
+    expect(contenderHandlers.noteOn).not.toHaveBeenCalled();
+    await liveSession.disconnect();
+  });
+
   it("retries a port whose pending open crossed a disconnect/reconnect", async () => {
     const input = new FakeMidiInput("replug-keys", "Replug Keys");
     let resolveFirstOpen: ((input: MIDIInput) => void) | undefined;
@@ -636,6 +664,36 @@ describe("Web MIDI decoding", () => {
     input.emit([0x90, 64, 100]);
     expect(handlers.noteOn).toHaveBeenCalledTimes(1);
     await session.disconnect();
+  });
+
+  it("pairs port, message, and topology ownership across ten full device cycles", async () => {
+    const input = new FakeMidiInput("cycled-keys", "Cycled Keys");
+    const access = new FakeMidiAccess();
+    access.inputs.set(input.id, input as unknown as MIDIInput);
+    const addListener = vi.spyOn(access, "addEventListener");
+    const removeListener = vi.spyOn(access, "removeEventListener");
+    const requestMIDIAccess = vi.fn(async () => access as unknown as MIDIAccess);
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", { requestMIDIAccess });
+    const handlers = makeHandlers();
+    const session = new WebMidiSession(handlers);
+
+    for (let cycle = 0; cycle < 10; cycle += 1) {
+      await expect(session.connect()).resolves.toHaveLength(1);
+      expect(input.onmidimessage).not.toBeNull();
+      input.emit([0x90, 60, 100]);
+      await session.disconnect();
+      expect(input.onmidimessage).toBeNull();
+      input.emit([0x90, 60, 100]);
+    }
+
+    expect(requestMIDIAccess).toHaveBeenCalledTimes(10);
+    expect(input.open).toHaveBeenCalledTimes(10);
+    expect(input.close).toHaveBeenCalledTimes(10);
+    expect(addListener.mock.calls.filter(([type]) => type === "statechange")).toHaveLength(10);
+    expect(removeListener.mock.calls.filter(([type]) => type === "statechange")).toHaveLength(10);
+    expect(handlers.noteOn).toHaveBeenCalledTimes(10);
+    await session.dispose();
   });
 
   it("does not advertise a port that fails to open and can retry it", async () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_PARAMS, PARAM_KEYS } from "./params";
 import {
   USER_PATCHES_STORAGE_KEY,
@@ -8,6 +8,7 @@ import {
   readUserPatches,
   saveUserPatch,
   saveUserPatchSafely,
+  type SafeSaveUserPatchResult,
   type UserPatchLockManager,
   type UserPatchStorage,
 } from "./user-patches";
@@ -301,5 +302,43 @@ describe("user patch storage", () => {
 
     expect(result).toEqual({ status: "busy", patches: [] });
     expect(storage.writes).toBe(0);
+  });
+
+  it("bounds repeated saves behind one never-settling host lock request", async () => {
+    const storage = new MemoryStorage();
+    const neverSettles = new Promise<SafeSaveUserPatchResult>(() => undefined);
+    const request = vi.fn(() => neverSettles);
+    const locks: UserPatchLockManager = { request } as UserPatchLockManager;
+
+    void saveUserPatchSafely("First", DEFAULT_PARAMS, storage, locks);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await expect(saveUserPatchSafely(`Retry ${attempt}`, DEFAULT_PARAMS, storage, locks))
+        .resolves.toEqual({ status: "busy", patches: [] });
+    }
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(storage.writes).toBe(0);
+  });
+
+  it("allows a fresh lock request after the raw request actually settles", async () => {
+    const storage = new MemoryStorage();
+    let resolveFirst!: (result: SafeSaveUserPatchResult) => void;
+    const first = new Promise<SafeSaveUserPatchResult>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const request = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockImplementationOnce((_name, _options, callback) => Promise.resolve(callback({})));
+    const locks: UserPatchLockManager = { request } as UserPatchLockManager;
+
+    const pending = saveUserPatchSafely("First", DEFAULT_PARAMS, storage, locks);
+    await expect(saveUserPatchSafely("Blocked", DEFAULT_PARAMS, storage, locks))
+      .resolves.toMatchObject({ status: "busy" });
+    resolveFirst({ status: "busy", patches: [] });
+    await expect(pending).resolves.toMatchObject({ status: "busy" });
+
+    await expect(saveUserPatchSafely("Retry", DEFAULT_PARAMS, storage, locks))
+      .resolves.toMatchObject({ status: "saved", patch: { name: "Retry" } });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 });

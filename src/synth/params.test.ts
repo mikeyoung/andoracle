@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PARAMS,
   PARAM_KEYS,
+  PARAM_SPECS,
   isValidParamValue,
   normalizedToParam,
   paramToNormalized,
@@ -13,6 +14,27 @@ describe("parameter schema", () => {
   it("renders every persistent parameter exactly once", () => {
     expect(new Set(LAYOUT_PARAM_KEYS).size).toBe(LAYOUT_PARAM_KEYS.length);
     expect([...LAYOUT_PARAM_KEYS].sort()).toEqual([...PARAM_KEYS].sort());
+  });
+
+  it("renders every parameter with a control compatible with its schema", () => {
+    for (const section of PANEL_SECTIONS) {
+      for (const item of section.items) {
+        switch (item.kind) {
+          case "range":
+          case "choice":
+          case "toggle":
+            expect(PARAM_SPECS[item.param].control, `${section.id}.${item.param}`).toBe(item.kind);
+            break;
+          case "route":
+            expect(PARAM_SPECS[item.source].control, `${section.id}.${item.source}`).toBe("choice");
+            expect(PARAM_SPECS[item.amount].control, `${section.id}.${item.amount}`).toBe("range");
+            break;
+          case "external":
+          case "ppc":
+            break;
+        }
+      }
+    }
   });
 
   it("places the complete delay panel between the mixer and final filters", () => {

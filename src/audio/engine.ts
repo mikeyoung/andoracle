@@ -599,10 +599,15 @@ export class OdysseyAudioEngine {
       output.gain.cancelScheduledValues(now);
       output.gain.setValueAtTime(output.gain.value, now);
       output.gain.linearRampToValueAtTime(0, now + 0.025);
-      await Promise.race([
-        new Promise<void>((resolve) => setTimeout(resolve, 40)),
-        cancelled,
-      ]);
+      let rampTimer: ReturnType<typeof setTimeout> | null = null;
+      const rampDelay = new Promise<void>((resolve) => {
+        rampTimer = setTimeout(resolve, 40);
+      });
+      try {
+        await Promise.race([rampDelay, cancelled]);
+      } finally {
+        if (rampTimer !== null) clearTimeout(rampTimer);
+      }
       if (this.disposed || sequence !== this.powerSequence || this.context !== context) {
         throw cancellationError("Audio engine shutdown was superseded.");
       }
@@ -656,12 +661,32 @@ export class OdysseyAudioEngine {
         cancel?.();
         this.clearExternalInput(stream);
       };
-      stream.addEventListener("inactive", ended);
-      for (const track of stream.getTracks()) track.addEventListener("ended", ended);
+      const tracks = stream.getTracks();
+      let listeningToStream = false;
+      const listeningTracks: MediaStreamTrack[] = [];
       removeListeners = () => {
-        stream.removeEventListener("inactive", ended);
-        for (const track of stream.getTracks()) track.removeEventListener("ended", ended);
+        if (listeningToStream) {
+          try {
+            stream.removeEventListener("inactive", ended);
+          } catch {
+            // A host object that became invalid cannot deliver another event.
+          }
+          listeningToStream = false;
+        }
+        for (const track of listeningTracks.splice(0)) {
+          try {
+            track.removeEventListener("ended", ended);
+          } catch {
+            // Track teardown continues even if one host listener rejects removal.
+          }
+        }
       };
+      stream.addEventListener("inactive", ended);
+      listeningToStream = true;
+      for (const track of tracks) {
+        track.addEventListener("ended", ended);
+        listeningTracks.push(track);
+      }
       source.connect(node, 0, 0);
 
       if (

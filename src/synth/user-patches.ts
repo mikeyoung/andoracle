@@ -82,6 +82,11 @@ export type SafeSaveUserPatchResult = SaveUserPatchResult | {
   readonly patches: readonly UserPatch[];
 };
 
+// A host-owned Web Locks request cannot be force-settled by the page. Gate it
+// by lock-manager identity so broken implementations cannot accumulate one
+// retained request (and patch snapshot) per component remount.
+const pendingLockSaves = new WeakMap<UserPatchLockManager, Promise<SafeSaveUserPatchResult>>();
+
 interface StoredUserPatchCollection {
   readonly version: typeof USER_PATCHES_STORAGE_VERSION;
   readonly patches: readonly UserPatch[];
@@ -298,25 +303,38 @@ export const saveUserPatch = (
  * Web Locks is available. A simultaneous save is asked to retry rather than
  * risking a lost patch or an implicit same-name overwrite.
  */
-export const saveUserPatchSafely = async (
+export const saveUserPatchSafely = (
   name: string,
   params: SynthParams,
   storage: UserPatchStorage | null = defaultStorage(),
   lockManager: UserPatchLockManager | null = defaultLockManager(),
 ): Promise<SafeSaveUserPatchResult> => {
-  if (!lockManager) return saveUserPatch(name, params, storage);
+  if (!lockManager) return Promise.resolve(saveUserPatch(name, params, storage));
+  if (pendingLockSaves.has(lockManager)) {
+    return Promise.resolve({ status: "busy", patches: readUserPatches(storage).patches });
+  }
 
+  let request: Promise<SafeSaveUserPatchResult>;
   try {
-    return await lockManager.request(
+    request = Promise.resolve(lockManager.request(
       `${USER_PATCHES_STORAGE_KEY}:write`,
       { mode: "exclusive", ifAvailable: true },
-      (lock) => lock
+      (lock): SafeSaveUserPatchResult => lock
         ? saveUserPatch(name, params, storage)
         : { status: "busy", patches: readUserPatches(storage).patches },
-    );
+    ));
   } catch {
     // Some privacy modes expose navigator.locks but reject requests. Retain
     // normal single-tab storage behavior in that environment.
-    return saveUserPatch(name, params, storage);
+    return Promise.resolve(saveUserPatch(name, params, storage));
   }
+
+  let tracked: Promise<SafeSaveUserPatchResult>;
+  tracked = request
+    .catch(() => saveUserPatch(name, params, storage))
+    .finally(() => {
+      if (pendingLockSaves.get(lockManager) === tracked) pendingLockSaves.delete(lockManager);
+    });
+  pendingLockSaves.set(lockManager, tracked);
+  return tracked;
 };

@@ -118,10 +118,13 @@ describe("PWA icon assets", () => {
 
   it("provides a favicon container with 16px, 32px, and 48px frames", () => {
     const ico = readFileSync(publicPath("favicon.ico"));
+    const html = readFileSync(resolve("index.html"), "utf8");
     expect(ico.readUInt16LE(0)).toBe(0);
     expect(ico.readUInt16LE(2)).toBe(1);
     expect(ico.readUInt16LE(4)).toBe(3);
     expect([ico[6], ico[22], ico[38]]).toEqual([16, 32, 48]);
+    expect(html).toContain('rel="icon" href="%BASE_URL%favicon.ico" sizes="16x16 32x32 48x48"');
+    expect(html).not.toContain('href="%BASE_URL%favicon.ico" sizes="any"');
   });
 
   it("keeps contiguous retro sawtooth bands without dark gutters or spectral flag order", () => {

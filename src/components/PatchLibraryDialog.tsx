@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
+import { createOperationCancellation } from "../cancellable-operation";
 
 export type PatchLibraryMode = "save" | "load";
 
@@ -27,6 +28,7 @@ export function PatchLibraryDialog({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const submissionRef = useRef(0);
+  const cancelSubmissionRef = useRef<(() => void) | null>(null);
   const isSave = mode === "save";
 
   useEffect(() => {
@@ -38,6 +40,9 @@ export function PatchLibraryDialog({
     }, 0);
     return () => {
       submissionRef.current += 1;
+      const cancelSubmission = cancelSubmissionRef.current;
+      cancelSubmissionRef.current = null;
+      cancelSubmission?.();
       window.clearTimeout(focusTimer);
       origin?.focus({ preventScroll: true });
     };
@@ -53,10 +58,12 @@ export function PatchLibraryDialog({
     event.preventDefault();
     if (busy) return;
     const submission = ++submissionRef.current;
+    const cancellation = createOperationCancellation("Patch dialog closed during submission.");
+    cancelSubmissionRef.current = cancellation.cancel;
     setBusy(true);
     setError("");
     try {
-      const result = await (isSave ? onSave(draftName) : onLoad(selectedName));
+      const result = await cancellation.race(isSave ? onSave(draftName) : onLoad(selectedName));
       if (submission !== submissionRef.current) return;
       if (result) {
         setError(result);
@@ -69,6 +76,7 @@ export function PatchLibraryDialog({
       if (submission !== submissionRef.current) return;
       setError(`This patch could not be ${isSave ? "saved" : "loaded"}. Try again.`);
     } finally {
+      if (cancelSubmissionRef.current === cancellation.cancel) cancelSubmissionRef.current = null;
       if (submission === submissionRef.current) setBusy(false);
     }
   };

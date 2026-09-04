@@ -641,6 +641,25 @@ describe("OdysseyAudioEngine lifecycle", () => {
     },
   );
 
+  it("rolls back partially installed live-input listeners when a track rejects setup", async () => {
+    const stream = new FakeStream();
+    const removeStreamListener = vi.spyOn(stream, "removeEventListener");
+    vi.spyOn(stream.track, "addEventListener").mockImplementationOnce(() => {
+      throw new Error("track listener failed");
+    });
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+    });
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+
+    await expect(engine.enableExternalInput()).rejects.toThrow("track listener failed");
+    expect(removeStreamListener).toHaveBeenCalledWith("inactive", expect.any(Function));
+    expect(contexts[0].mediaSources[0].disconnect).toHaveBeenCalledTimes(1);
+    expect(stream.track.stop).toHaveBeenCalledTimes(1);
+    await engine.dispose();
+  });
+
   it.each(["ended", "inactive"] as const)(
     "clears a %s live-input stream and permits reacquisition",
     async (eventType) => {
@@ -768,6 +787,61 @@ describe("OdysseyAudioEngine lifecycle", () => {
       performance: { bendSemitones: 3, vibratoSemitones: 0 },
     });
     await engine.dispose();
+  });
+
+  it("clears superseded power-down ramp timers across repeated power cycles", async () => {
+    vi.useFakeTimers();
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+
+    for (let cycle = 0; cycle < 10; cycle += 1) {
+      const stopping = engine.powerOff();
+      const stopped = stopping.catch((error: unknown) => error);
+      const starting = engine.powerOn(DEFAULT_PARAMS);
+      await expect(stopped).resolves.toMatchObject({ name: "AbortError" });
+      await expect(starting).resolves.toBeUndefined();
+      expect(vi.getTimerCount()).toBe(0);
+    }
+
+    await engine.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("releases every live-input graph across ten complete power and device cycles", async () => {
+    vi.useFakeTimers();
+    const streams: FakeStream[] = [];
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => {
+          const stream = new FakeStream();
+          streams.push(stream);
+          return stream as unknown as MediaStream;
+        }),
+      },
+    });
+    const engine = new OdysseyAudioEngine();
+
+    for (let cycle = 0; cycle < 10; cycle += 1) {
+      await engine.powerOn(DEFAULT_PARAMS);
+      await engine.enableExternalInput();
+      engine.disableExternalInput();
+      const stopping = engine.powerOff();
+      await vi.advanceTimersByTimeAsync(40);
+      await stopping;
+      expect(vi.getTimerCount()).toBe(0);
+    }
+
+    expect(contexts).toHaveLength(1);
+    expect(workletNodes).toHaveLength(1);
+    expect(streams).toHaveLength(10);
+    for (const [index, stream] of streams.entries()) {
+      expect(stream.track.stop, `stream ${index} track`).toHaveBeenCalledTimes(1);
+      expect(contexts[0].mediaSources[index].disconnect, `stream ${index} source`)
+        .toHaveBeenCalledTimes(1);
+    }
+    await engine.dispose();
+    expect(contexts[0].close).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("fully disposes the graph, external stream, port, and AudioContext", async () => {

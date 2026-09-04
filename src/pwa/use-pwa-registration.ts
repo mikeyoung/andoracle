@@ -1,11 +1,17 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { registerSW } from "virtual:pwa-register";
-import { PwaRegistrationStore } from "./registration-store";
+import {
+  PwaRegistrationStore,
+  ServiceWorkerCapabilityStore,
+  bindPwaRegistrationRetries,
+  type ServiceWorkerCapabilityTarget,
+} from "./registration-store";
 
 const registrationStore = new PwaRegistrationStore((callbacks) => registerSW({
   immediate: true,
   ...callbacks,
 }));
+const serviceWorkerCapabilityStore = new ServiceWorkerCapabilityStore();
 
 export const usePwaRegistration = () => {
   const snapshot = useSyncExternalStore(
@@ -14,9 +20,7 @@ export const usePwaRegistration = () => {
     registrationStore.getSnapshot,
   );
 
-  useEffect(() => {
-    registrationStore.start();
-  }, []);
+  useEffect(() => bindPwaRegistrationRetries(registrationStore, window), []);
 
   return {
     ...snapshot,
@@ -25,4 +29,21 @@ export const usePwaRegistration = () => {
     clearError: registrationStore.clearError,
     updateServiceWorker: registrationStore.updateServiceWorker,
   };
+};
+
+export const useServiceWorkerCapability = (): boolean => {
+  const capable = useSyncExternalStore(
+    serviceWorkerCapabilityStore.subscribe,
+    serviceWorkerCapabilityStore.getSnapshot,
+    serviceWorkerCapabilityStore.getSnapshot,
+  );
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    serviceWorkerCapabilityStore.start(
+      navigator.serviceWorker as unknown as ServiceWorkerCapabilityTarget,
+    );
+  }, []);
+
+  return capable;
 };

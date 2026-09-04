@@ -10,7 +10,11 @@ import {
   visualKeySource,
 } from "./Keyboard";
 import { OutputMeter, outputPeakPercent } from "./OutputMeter";
-import { DirectEntryInterruptionRegistry, shouldEmitRangeChange } from "./ParameterControls";
+import {
+  DirectEntryInterruptionRegistry,
+  shouldConsumeLongPressClick,
+  shouldEmitRangeChange,
+} from "./ParameterControls";
 import { ExternalInputControl } from "./ExternalInputControl";
 import { HelpDialog } from "./HelpDialog";
 import { MidiInputControl } from "./MidiInputControl";
@@ -263,6 +267,15 @@ describe("direct-entry interruption listener registry", () => {
     expect(registry.subscriberCount).toBe(0);
     expect(windowTarget.removed.get("blur")).toBe(1);
     expect(documentTarget.removed.get("visibilitychange")).toBe(1);
+  });
+});
+
+describe("direct-entry long-press click suppression", () => {
+  it("consumes only the pointer click belonging to the gesture", () => {
+    expect(shouldConsumeLongPressClick(true, 1)).toBe(true);
+    expect(shouldConsumeLongPressClick(true, 2)).toBe(true);
+    expect(shouldConsumeLongPressClick(true, 0)).toBe(false);
+    expect(shouldConsumeLongPressClick(false, 1)).toBe(false);
   });
 });
 

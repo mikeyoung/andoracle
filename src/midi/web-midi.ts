@@ -85,6 +85,7 @@ export const MIDI_INPUT_CLOSE_TIMEOUT_MS = 2_000;
 // stacking more native promises onto the same port while one is unresolved.
 const rawOpeningInputs = new WeakMap<MIDIInput, RawMidiInputOperation>();
 const rawClosingInputs = new WeakMap<MIDIInput, RawMidiInputOperation>();
+const liveInputOwners = new WeakMap<MIDIInput, WeakRef<WebMidiSession>>();
 let rawInputOperationSequence = 0;
 let rawMidiAccessRequestSequence = 0;
 let pendingRawMidiAccessRequestId: number | null = null;
@@ -387,6 +388,7 @@ export class WebMidiSession {
     if (!input) return;
     input.onmidimessage = null;
     this.inputs.delete(inputId);
+    if (liveInputOwners.get(input)?.deref() === this) liveInputOwners.delete(input);
     this.releaseMatching((held) => held.inputId === inputId);
     this.removeInputControllers(inputId);
     await closeMidiInput(input);
@@ -418,6 +420,9 @@ export class WebMidiSession {
 
   private async closeIfUnowned(input: MIDIInput, rawOperation: RawMidiInputOperation): Promise<void> {
     if (this.inputs.get(input.id) === input) return;
+    const liveOwner = liveInputOwners.get(input)?.deref();
+    if (liveOwner && liveOwner !== this) return;
+    if (!liveOwner) liveInputOwners.delete(input);
     const currentOpening = this.openingInputs.get(input.id);
     if (
       currentOpening
@@ -446,9 +451,12 @@ export class WebMidiSession {
 
     const opening: Promise<void>[] = [];
     for (const input of available) {
+      const liveOwner = liveInputOwners.get(input)?.deref();
+      if (!liveOwner) liveInputOwners.delete(input);
       if (
         this.inputs.has(input.id)
         || this.openingInputs.has(input.id)
+        || (liveOwner !== undefined && liveOwner !== this)
         || rawOpeningInputs.has(input)
         || rawClosingInputs.has(input)
       ) continue;
@@ -538,8 +546,11 @@ export class WebMidiSession {
           if (input.connection !== "open") {
             throw new Error(`${input.name?.trim() || "MIDI input"} did not enter the open state.`);
           }
+          const owner = liveInputOwners.get(input)?.deref();
+          if (owner && owner !== this) return;
           input.onmidimessage = (event) => this.handleMessage(input, event);
           this.inputs.set(input.id, input);
+          liveInputOwners.set(input, new WeakRef(this));
         })
         .catch((error: unknown) => {
           if (
@@ -729,7 +740,13 @@ export class WebMidiSession {
       opening.invalidated = true;
       opening.cancel?.();
     }
-    for (const input of inputs) {
+    const ownedInputs = inputs.filter((input) => {
+      const owner = liveInputOwners.get(input)?.deref();
+      if (owner && owner !== this) return false;
+      if (owner === this) liveInputOwners.delete(input);
+      return true;
+    });
+    for (const input of ownedInputs) {
       input.onmidimessage = null;
       if (!silent) this.releaseMatching((held) => held.inputId === input.id);
     }
@@ -744,7 +761,7 @@ export class WebMidiSession {
       this.handlers.modulation(0);
       this.handlers.inputsChanged([]);
     }
-    await Promise.allSettled(inputs.map(closeMidiInput));
+    await Promise.allSettled(ownedInputs.map(closeMidiInput));
   }
 
   async dispose(): Promise<void> {
@@ -779,13 +796,19 @@ export class WebMidiSession {
       inputsChanged: () => undefined,
       error: () => undefined,
     };
-    for (const input of inputs) input.onmidimessage = null;
+    const ownedInputs = inputs.filter((input) => {
+      const owner = liveInputOwners.get(input)?.deref();
+      if (owner && owner !== this) return false;
+      if (owner === this) liveInputOwners.delete(input);
+      return true;
+    });
+    for (const input of ownedInputs) input.onmidimessage = null;
     this.inputs.clear();
     this.openingInputs.clear();
     this.noteStacks.clear();
     this.heldNotes.clear();
     this.bends.clear();
     this.modulations.clear();
-    await Promise.allSettled(inputs.map(closeMidiInput));
+    await Promise.allSettled(ownedInputs.map(closeMidiInput));
   }
 }

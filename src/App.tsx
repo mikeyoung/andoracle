@@ -15,6 +15,7 @@ import {
   ToggleControl,
 } from "./components/ParameterControls";
 import { PpcPads } from "./components/PpcPads";
+import { OperationCancellationRegistry } from "./cancellable-operation";
 import {
   WebMidiSession,
   combinePerformanceSources,
@@ -23,11 +24,10 @@ import {
   type MidiInputSummary,
   type MidiPerformanceSources,
 } from "./midi/web-midi";
-import { usePwaRegistration } from "./pwa/use-pwa-registration";
+import { usePwaRegistration, useServiceWorkerCapability } from "./pwa/use-pwa-registration";
 import {
   DEFAULT_PARAMS,
   PARAM_KEYS,
-  PARAM_SPECS,
   formatParamValue,
   normalizeParamValue,
   normalizePatch,
@@ -203,6 +203,10 @@ function App() {
   const externalInputStartedPowerRef = useRef(false);
   const midiOperationRef = useRef(0);
   const shareBusyRef = useRef(false);
+  const updateBusyRef = useRef(false);
+  const browserOperationsRef = useRef<OperationCancellationRegistry | null>(null);
+  if (!browserOperationsRef.current) browserOperationsRef.current = new OperationCancellationRegistry();
+  const browserOperations = browserOperationsRef.current;
   const urlSyncTimerRef = useRef<number | null>(null);
   const urlSyncStartedRef = useRef(false);
   const urlSyncBlockedRef = useRef(initialPatch.preserveUnsupportedUrl);
@@ -226,9 +230,10 @@ function App() {
   } | null>(null);
   const [helpDialogOrigin, setHelpDialogOrigin] = useState<HTMLElement | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
-  const [offlineCapable, setOfflineCapable] = useState(Boolean(navigator.serviceWorker?.controller));
+  const offlineCapable = useServiceWorkerCapability();
   const [notice, setNotice] = useState(initialPatch.notice);
   const showSafariInstallHint = useMemo(() => {
     const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
@@ -338,22 +343,6 @@ function App() {
   }, [activeUserPatchName, userPatches]);
 
   useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-    let cancelled = false;
-    void navigator.serviceWorker.getRegistration().then((registration) => {
-      if (!cancelled && Boolean(registration?.active || navigator.serviceWorker.controller)) {
-        setOfflineCapable(true);
-      }
-    }).catch(() => undefined);
-    const controlled = (): void => setOfflineCapable(true);
-    navigator.serviceWorker.addEventListener("controllerchange", controlled);
-    return () => {
-      cancelled = true;
-      navigator.serviceWorker.removeEventListener("controllerchange", controlled);
-    };
-  }, []);
-
-  useEffect(() => {
     mountedRef.current = true;
     const unsubscribeMeter = engine.onMeter(setMeter);
     const unsubscribeStatus = engine.onStatus((status) => {
@@ -373,10 +362,13 @@ function App() {
       externalInputStartedPowerRef.current = false;
       midiOperationRef.current += 1;
       externalInputEnabledRef.current = false;
+      shareBusyRef.current = false;
+      updateBusyRef.current = false;
+      browserOperations.cancelAll();
       engine.disableExternalInput();
       engine.allNotesOff();
       engine.setPerformance({ bendSemitones: 0, vibratoSemitones: 0 });
-      void midiSessionRef.current?.disconnect(true);
+      void midiSessionRef.current?.disconnect(true).catch(() => undefined);
       unsubscribeMeter();
       unsubscribeStatus();
       unsubscribeExternalInput();
@@ -614,27 +606,35 @@ function App() {
       return `“${normalizedName}” is already used by the factory patch selector. Choose a different name.`;
     }
 
-    const result = await saveUserPatchSafely(name, paramsRef.current);
-    switch (result.status) {
-      case "saved":
-        setUserPatches(result.patches);
-        setActiveUserPatchName(result.patch.name);
-        setPresetName(USER_PATCH_PRESET_VALUE);
-        setNotice(`Saved user patch “${result.patch.name}” on this device.`);
-        return null;
-      case "empty-name":
-        setUserPatches(result.patches);
-        return "Enter a patch name. A name cannot contain only whitespace.";
-      case "duplicate-name":
-        setUserPatches(result.patches);
-        return `A saved patch named “${result.existingName}” already exists. Choose a different name.`;
-      case "storage-error":
-        return "This patch could not be saved. Local storage may be blocked or full.";
-      case "unsupported-version":
-        return "This patch library was created by a newer Andoracle version and cannot be changed safely.";
-      case "busy":
-        setUserPatches(result.patches);
-        return "Another Andoracle tab is saving a patch right now. Try again.";
+    const cancellation = browserOperations.begin(
+      "patch-save",
+      "Patch save was cancelled because Andoracle closed.",
+    );
+    try {
+      const result = await cancellation.race(saveUserPatchSafely(name, paramsRef.current));
+      switch (result.status) {
+        case "saved":
+          setUserPatches(result.patches);
+          setActiveUserPatchName(result.patch.name);
+          setPresetName(USER_PATCH_PRESET_VALUE);
+          setNotice(`Saved user patch “${result.patch.name}” on this device.`);
+          return null;
+        case "empty-name":
+          setUserPatches(result.patches);
+          return "Enter a patch name. A name cannot contain only whitespace.";
+        case "duplicate-name":
+          setUserPatches(result.patches);
+          return `A saved patch named “${result.existingName}” already exists. Choose a different name.`;
+        case "storage-error":
+          return "This patch could not be saved. Local storage may be blocked or full.";
+        case "unsupported-version":
+          return "This patch library was created by a newer Andoracle version and cannot be changed safely.";
+        case "busy":
+          setUserPatches(result.patches);
+          return "Another Andoracle tab is saving a patch right now. Try again.";
+      }
+    } finally {
+      browserOperations.finish("patch-save", cancellation);
     }
   };
 
@@ -821,18 +821,22 @@ function App() {
     shareBusyRef.current = true;
     setShareBusy(true);
     const shareUrl = window.location.href;
+    const cancellation = browserOperations.begin(
+      "share",
+      "Patch sharing was cancelled because Andoracle closed.",
+    );
     try {
       if (typeof navigator.share === "function") {
         try {
-          await navigator.share({
+          await cancellation.race(navigator.share({
             title: "Andoracle synthesizer patch",
             text: "Playable patch for the Andoracle ARP Odyssey-inspired duophonic browser synthesizer.",
             url: shareUrl,
-          });
+          }));
           if (mountedRef.current) setNotice("Patch shared.");
           return;
         } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") {
+          if (error instanceof Error && error.name === "AbortError") {
             if (mountedRef.current) setNotice("Patch sharing cancelled.");
             return;
           }
@@ -840,13 +844,14 @@ function App() {
       }
 
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
-      await navigator.clipboard.writeText(shareUrl);
+      await cancellation.race(navigator.clipboard.writeText(shareUrl));
       if (mountedRef.current) setNotice("Patch URL copied to the clipboard.");
     } catch {
       if (mountedRef.current) {
         setNotice("The current patch is in the URL. Copy it from your browser's address bar.");
       }
     } finally {
+      browserOperations.finish("share", cancellation);
       shareBusyRef.current = false;
       if (mountedRef.current) setShareBusy(false);
     }
@@ -985,9 +990,13 @@ function App() {
     if (!installPrompt) return;
     const prompt = installPrompt;
     setInstallPrompt(null);
+    const cancellation = browserOperations.begin(
+      "install",
+      "App installation was cancelled because Andoracle closed.",
+    );
     try {
-      await prompt.prompt();
-      const choice = await prompt.userChoice;
+      await cancellation.race(prompt.prompt());
+      const choice = await cancellation.race(prompt.userChoice);
       if (!mountedRef.current) return;
       setNotice(choice.outcome === "accepted"
         ? "Andoracle is being installed."
@@ -995,15 +1004,25 @@ function App() {
     } catch (error) {
       if (!mountedRef.current) return;
       setNotice(error instanceof Error ? `Installation could not start: ${error.message}` : "Installation could not start.");
+    } finally {
+      browserOperations.finish("install", cancellation);
     }
   };
 
   const reloadUpdate = async (): Promise<void> => {
+    if (updateBusyRef.current) return;
+    updateBusyRef.current = true;
+    setUpdateBusy(true);
+    const cancellation = browserOperations.begin("pwa-update", "App update wait was cancelled.");
     try {
-      await updateServiceWorker(true);
+      await cancellation.race(updateServiceWorker(true));
     } catch (error) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || (error instanceof Error && error.name === "AbortError")) return;
       setNotice(error instanceof Error ? `The app update could not reload: ${error.message}` : "The app update could not reload.");
+    } finally {
+      browserOperations.finish("pwa-update", cancellation);
+      updateBusyRef.current = false;
+      if (mountedRef.current) setUpdateBusy(false);
     }
   };
 
@@ -1183,8 +1202,8 @@ function App() {
           <span>{needRefresh ? "A newer app version is ready." : "The complete synth is ready offline."}</span>
           {needRefresh ? (
             <>
-              <button type="button" onClick={() => void reloadUpdate()}>Reload update</button>
-              <button type="button" onClick={() => setNeedRefresh(false)}>Later</button>
+              <button type="button" disabled={updateBusy} onClick={() => void reloadUpdate()}>{updateBusy ? "Reloading…" : "Reload update"}</button>
+              <button type="button" disabled={updateBusy} onClick={() => setNeedRefresh(false)}>Later</button>
             </>
           ) : <button type="button" onClick={() => setOfflineReady(false)}>Dismiss</button>}
         </aside>
