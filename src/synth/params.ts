@@ -31,6 +31,9 @@ export interface ParamSpec {
   readonly options?: readonly ParamOption[];
 }
 
+export const DELAY_TONE_MINIMUM = 500;
+export const DELAY_TONE_MAXIMUM = 18_000;
+
 const choice = (
   label: string,
   group: string,
@@ -478,8 +481,8 @@ const PARAM_SPEC_DEFINITIONS = {
     label: "Delay tone",
     group: "Delay",
     control: "range",
-    min: 500,
-    max: 18000,
+    min: DELAY_TONE_MINIMUM,
+    max: DELAY_TONE_MAXIMUM,
     step: 1,
     default: 6200,
     unit: "Hz",

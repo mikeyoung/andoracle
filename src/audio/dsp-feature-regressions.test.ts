@@ -51,6 +51,29 @@ const windowEnergy = (buffer: Float32Array, start: number, end: number): number 
   return energy;
 };
 
+const windowedSineBurst = (frames: number, burstFrames: number, frequency: number): Float32Array => (
+  Float32Array.from({ length: frames }, (_, index) => {
+    if (index >= burstFrames) return 0;
+    const envelope = Math.sin(Math.PI * index / Math.max(1, burstFrames - 1)) ** 2;
+    return Math.sin(index * Math.PI * 2 * frequency / SAMPLE_RATE) * envelope * 0.1;
+  })
+);
+
+const sineSegment = (startFrame: number, frames: number, frequency: number): Float32Array => (
+  Float32Array.from(
+    { length: frames },
+    (_, index) => Math.sin((startFrame + index) * Math.PI * 2 * frequency / SAMPLE_RATE) * 0.1,
+  )
+);
+
+const maximumAdjacentStep = (buffer: Float32Array, previousSample?: number): number => {
+  let maximum = previousSample === undefined ? 0 : Math.abs(buffer[0] - previousSample);
+  for (let index = 1; index < buffer.length; index += 1) {
+    maximum = Math.max(maximum, Math.abs(buffer[index] - buffer[index - 1]));
+  }
+  return maximum;
+};
+
 const assertFiniteAndBounded = (buffer: Float32Array): void => {
   for (const sample of buffer) {
     expect(Number.isFinite(sample)).toBe(true);
@@ -87,7 +110,104 @@ const transparentExternalPatch = (
   ...overrides,
 });
 
+const wetTransferAt = (frequency: number, delayTone = 6_200): number => {
+  const input = windowedSineBurst(4_000, 512, frequency);
+  const dry = new OdysseyDSP(SAMPLE_RATE);
+  dry.setParams(transparentExternalPatch({ delayEnabled: 0 }));
+  render(dry, 4_096);
+  const [dryLeft] = processExternal(dry, input);
+
+  const wet = new OdysseyDSP(SAMPLE_RATE);
+  wet.setParams(transparentExternalPatch({
+    delayTime: 30,
+    delayFeedback: 0,
+    delayMix: 1,
+    delayTone,
+  }));
+  render(wet, 4_096);
+  const [wetLeft] = processExternal(wet, input);
+  const dryEnergy = windowEnergy(dryLeft, 0, 1_000);
+  const wetEnergy = windowEnergy(wetLeft, 1_250, 2_400);
+  return Math.sqrt(wetEnergy / dryEnergy);
+};
+
 describe("stereo delay feature regressions", () => {
+  it("keeps the first ping-pong repeat prominent at a typical wet mix", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams(transparentExternalPatch({
+      delayTime: 20,
+      delayFeedback: 0,
+      delayMix: 0.2,
+      delayTone: 6_200,
+      delaySpread: 0.35,
+      delayPingPong: 1,
+    }));
+    render(dsp, 4_096);
+
+    const [left] = processExternal(dsp, windowedSineBurst(2_500, 256, 1_000));
+    const dryEnergy = windowEnergy(left, 0, 600);
+    const firstRepeatEnergy = windowEnergy(left, 850, 1_500);
+    const repeatToDryLevel = Math.sqrt(firstRepeatEnergy / dryEnergy);
+
+    expect(repeatToDryLevel).toBeGreaterThan(0.55);
+    expect(repeatToDryLevel).toBeLessThan(0.7);
+  });
+
+  it("applies the calibrated wet makeup at full mix", () => {
+    const transfer = wetTransferAt(1_000);
+    expect(transfer).toBeGreaterThan(1.2);
+    expect(transfer).toBeLessThan(1.4);
+  });
+
+  it("keeps upper harmonics defined at the default repeat tone", () => {
+    const lowTransfer = wetTransferAt(1_000);
+    const upperTransfer = wetTransferAt(8_000);
+    expect(upperTransfer / lowTransfer).toBeGreaterThan(0.68);
+  });
+
+  it("power-matches ping-pong repeats to ordinary two-channel repeats", () => {
+    const firstRepeatEnergy = (delayPingPong: number): number => {
+      const dsp = new OdysseyDSP(SAMPLE_RATE);
+      dsp.setParams(transparentExternalPatch({
+        delayTime: 20,
+        delayFeedback: 0,
+        delayMix: 1,
+        delayTone: 18_000,
+        delaySpread: 0,
+        delayPingPong,
+      }));
+      render(dsp, 4_096);
+      const [left, right] = processExternal(dsp, windowedSineBurst(2_500, 256, 1_000));
+      return windowEnergy(left, 850, 1_500) + windowEnergy(right, 850, 1_500);
+    };
+
+    const ordinaryEnergy = firstRepeatEnergy(0);
+    const pingPongEnergy = firstRepeatEnergy(1);
+    expect(pingPongEnergy / ordinaryEnergy).toBeGreaterThan(0.98);
+    expect(pingPongEnergy / ordinaryEnergy).toBeLessThan(1.02);
+  });
+
+  it("smooths ping-pong power compensation while audio is running", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams(transparentExternalPatch({
+      delayTime: 20,
+      delayFeedback: 0.6,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 0,
+      delayPingPong: 0,
+    }));
+    const [before] = processExternal(dsp, sineSegment(0, 8_192, 1_000));
+    const baselineStep = maximumAdjacentStep(before.slice(-1_024));
+
+    dsp.setParams({ delayPingPong: 1 });
+    const [transition] = processExternal(dsp, sineSegment(8_192, 2_048, 1_000));
+    const transitionStep = maximumAdjacentStep(transition, before.at(-1));
+
+    expect(baselineStep).toBeGreaterThan(0.001);
+    expect(transitionStep).toBeLessThan(baselineStep * 1.4);
+  });
+
   it("keeps both wet channels sample-aligned when stereo spread is zero", () => {
     const dsp = new OdysseyDSP(SAMPLE_RATE);
     dsp.setParams(transparentExternalPatch());
@@ -199,6 +319,34 @@ describe("stereo delay feature regressions", () => {
       assertFiniteAndBounded(left);
       assertFiniteAndBounded(right);
     }
+  });
+
+  it("stays bounded with maximum wet, delay-feedback, output-return, resonance, and drive gain", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams(transparentExternalPatch({
+      outputFeedback: 2,
+      delayFeedback: 0.92,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 1,
+      delayPingPong: 1,
+      filterType: 2,
+      filterResonance: 1,
+      driveEnabled: 1,
+      driveAmount: 10,
+    }));
+    const input = Float32Array.from(
+      { length: SAMPLE_RATE },
+      (_, index) => Math.sin(index * Math.PI * 2 * 997 / SAMPLE_RATE) * 0.7,
+    );
+    const [left, right] = processExternal(dsp, input);
+
+    expect(maximumAbsolute(left)).toBeGreaterThan(0.01);
+    expect(maximumAbsolute(right)).toBeGreaterThan(0.01);
+    assertFiniteAndBounded(left);
+    assertFiniteAndBounded(right);
+    expect(windowEnergy(left, SAMPLE_RATE - 4_096, SAMPLE_RATE)).toBeGreaterThan(0.01);
+    expect(windowEnergy(right, SAMPLE_RATE - 4_096, SAMPLE_RATE)).toBeGreaterThan(0.01);
   });
 });
 

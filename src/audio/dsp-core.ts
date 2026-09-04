@@ -1,4 +1,11 @@
-import { DEFAULT_PARAMS, normalizeParamValue, type ParamKey, type SynthParams } from "../synth/params";
+import {
+  DEFAULT_PARAMS,
+  DELAY_TONE_MAXIMUM,
+  DELAY_TONE_MINIMUM,
+  normalizeParamValue,
+  type ParamKey,
+  type SynthParams,
+} from "../synth/params";
 
 const TAU = Math.PI * 2;
 const EPSILON = 0.001;
@@ -23,6 +30,10 @@ const createWindowedSincCoefficients = (length: number, cutoff: number): Float64
 
 const OUTPUT_DECIMATOR_COEFFICIENTS = createWindowedSincCoefficients(127, 0.23);
 const DRIVE_OVERSAMPLE = 4;
+const DELAY_WET_MAKEUP = 1.3;
+const DELAY_PING_PONG_POWER_MAKEUP = Math.SQRT2;
+const DELAY_MAX_CLEAN_TAP_BLEND = 0.36;
+const DELAY_PRESENTATION_SMOOTHING_SECONDS = 0.02;
 // Web MIDI and pointer events can continue arriving while an AudioContext is
 // suspended. Keep enough chronology for many complete 37-key gestures without
 // allowing an inactive worklet to accumulate an unbounded backlog.
@@ -466,6 +477,13 @@ class StereoDelay {
   private delayRight = 1;
   private toneLeft = 0;
   private toneRight = 0;
+  private toneFrequency = Number.NaN;
+  private toneCoefficient = 0;
+  private targetCleanTapBlend = 0;
+  private audibleCleanTapBlend = 0;
+  private wetMakeup = DELAY_WET_MAKEUP;
+  private presentationInitialized = false;
+  private readonly presentationSmoothing: number;
   private initialized = false;
   outputLeft = 0;
   outputRight = 0;
@@ -474,6 +492,9 @@ class StereoDelay {
     const length = Math.ceil(rate * 1.3) + 4;
     this.left = new Float32Array(length);
     this.right = new Float32Array(length);
+    this.presentationSmoothing = 1 - Math.exp(
+      -1 / (DELAY_PRESENTATION_SMOOTHING_SECONDS * rate),
+    );
   }
 
   reset(): void {
@@ -484,6 +505,12 @@ class StereoDelay {
     this.delayRight = 1;
     this.toneLeft = 0;
     this.toneRight = 0;
+    this.toneFrequency = Number.NaN;
+    this.toneCoefficient = 0;
+    this.targetCleanTapBlend = 0;
+    this.audibleCleanTapBlend = 0;
+    this.wetMakeup = DELAY_WET_MAKEUP;
+    this.presentationInitialized = false;
     this.initialized = false;
     this.outputLeft = 0;
     this.outputRight = 0;
@@ -513,9 +540,16 @@ class StereoDelay {
 
     const wetLeft = this.read(this.left, this.delayLeft);
     const wetRight = this.read(this.right, this.delayRight);
-    const toneCoefficient = 1 - Math.exp(-TAU * clamp(params.delayTone, 20, this.rate * 0.44) / this.rate);
-    this.toneLeft += toneCoefficient * (wetLeft - this.toneLeft);
-    this.toneRight += toneCoefficient * (wetRight - this.toneRight);
+    const delayTone = clamp(params.delayTone, DELAY_TONE_MINIMUM, DELAY_TONE_MAXIMUM);
+    if (delayTone !== this.toneFrequency) {
+      this.toneFrequency = delayTone;
+      this.toneCoefficient = 1 - Math.exp(-TAU * delayTone / this.rate);
+      const normalizedTone = Math.log(delayTone / DELAY_TONE_MINIMUM)
+        / Math.log(DELAY_TONE_MAXIMUM / DELAY_TONE_MINIMUM);
+      this.targetCleanTapBlend = normalizedTone * DELAY_MAX_CLEAN_TAP_BLEND;
+    }
+    this.toneLeft += this.toneCoefficient * (wetLeft - this.toneLeft);
+    this.toneRight += this.toneCoefficient * (wetRight - this.toneRight);
 
     const feedback = params.delayFeedback;
     const injectedInput = params.delayEnabled > 0.5 ? input : 0;
@@ -537,8 +571,32 @@ class StereoDelay {
     const mix = clamp(params.delayMix, 0, 1);
     const dryGain = Math.cos(mix * Math.PI * 0.5);
     const wetGain = Math.sin(mix * Math.PI * 0.5);
-    this.outputLeft = input * dryGain + this.toneLeft * wetGain;
-    this.outputRight = input * dryGain + this.toneRight * wetGain;
+    // Keep the feedback loop fully tone-filtered, while retaining more attack
+    // and upper-harmonic detail in the audible tap as Tone moves upward. At
+    // the darkest setting the tap remains completely filtered.
+    const targetWetMakeup = DELAY_WET_MAKEUP * (
+      params.delayPingPong > 0.5 ? DELAY_PING_PONG_POWER_MAKEUP : 1
+    );
+    if (!this.presentationInitialized) {
+      this.audibleCleanTapBlend = this.targetCleanTapBlend;
+      this.wetMakeup = targetWetMakeup;
+      this.presentationInitialized = true;
+    } else {
+      this.audibleCleanTapBlend += (
+        this.targetCleanTapBlend - this.audibleCleanTapBlend
+      ) * this.presentationSmoothing;
+      this.wetMakeup += (targetWetMakeup - this.wetMakeup) * this.presentationSmoothing;
+    }
+    const audibleWetLeft = this.toneLeft
+      + (wetLeft - this.toneLeft) * this.audibleCleanTapBlend;
+    const audibleWetRight = this.toneRight
+      + (wetRight - this.toneRight) * this.audibleCleanTapBlend;
+    // A ping-pong repeat occupies one channel at a time, so sqrt(2) restores
+    // the same two-channel power as the ordinary stereo delay. Makeup is
+    // outside the delay's 0.92-bounded internal loop; the separate downstream
+    // output-return path remains protected by its nonlinear stages.
+    this.outputLeft = input * dryGain + audibleWetLeft * wetGain * this.wetMakeup;
+    this.outputRight = input * dryGain + audibleWetRight * wetGain * this.wetMakeup;
   }
 }
 
