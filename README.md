@@ -2,6 +2,8 @@
 
 Andoracle is an installable, offline-capable, touch-first duophonic browser synthesizer whose goal is a faithful functional recreation of the ARP Odyssey's normalized signal flow, playing behavior, and three filter characters—not component-for-component circuit simulation—with clearly separated modern additions including stereo delay, optional MIDI and live input, local named patches, and URL sharing. Its audio engine is intentionally fixed at 44.1 kHz.
 
+Play the production version at [mikeyoung.org/andoracle](https://mikeyoung.org/andoracle/).
+
 ## Run locally
 
 ```sh

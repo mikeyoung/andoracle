@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const DESCRIPTION = "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with modern MIDI, delay, and patch sharing.";
+const SITE_URL = "https://mikeyoung.org/andoracle/";
+const SOCIAL_IMAGE_URL = `${SITE_URL}icon-512.png`;
 
 const readProjectFile = (fileName: string): string => readFileSync(resolve(fileName), "utf8");
 
@@ -34,6 +36,10 @@ describe("Andoracle project metadata", () => {
     expect(html).toContain(`<meta name="twitter:description" content="${DESCRIPTION}" />`);
     expect(html).toContain('<meta property="og:type" content="website" />');
     expect(html).toContain('<meta name="twitter:card" content="summary" />');
+    expect(html).toContain(`<link rel="canonical" href="${SITE_URL}" />`);
+    expect(html).toContain(`<meta property="og:url" content="${SITE_URL}" />`);
+    expect(html).toContain(`<meta property="og:image" content="${SOCIAL_IMAGE_URL}" />`);
+    expect(html).toContain(`<meta name="twitter:image" content="${SOCIAL_IMAGE_URL}" />`);
     expect(html).toContain("<title>Andoracle — ARP Odyssey-Inspired Synthesizer</title>");
 
     const structuredMatch = html.match(/<script type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/);
@@ -43,6 +49,8 @@ describe("Andoracle project metadata", () => {
       "@context": "https://schema.org",
       "@type": "WebApplication",
       name: "Andoracle",
+      url: SITE_URL,
+      image: SOCIAL_IMAGE_URL,
       description: DESCRIPTION,
       applicationCategory: "MultimediaApplication",
       operatingSystem: "Any",
@@ -65,6 +73,15 @@ describe("Andoracle project metadata", () => {
     expect(viteConfig).toContain('lang: "en"');
     expect(viteConfig).toContain('dir: "ltr"');
     expect(viteConfig).toContain('categories: ["music", "entertainment"]');
+  });
+
+  it("ships IIS configuration required by the deployed PWA", () => {
+    const webConfig = readProjectFile("public/web.config");
+
+    expect(webConfig).toContain('<add value="index.html" />');
+    expect(webConfig).toContain('<mimeMap fileExtension=".webmanifest" mimeType="application/manifest+json" />');
+    expect(webConfig).toContain('<location path="sw.js">');
+    expect(webConfig).toContain('<clientCache cacheControlMode="DisableCache" />');
   });
 
   it("states the emulation boundary in the durable project documentation", () => {
