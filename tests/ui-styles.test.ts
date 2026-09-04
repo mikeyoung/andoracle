@@ -11,18 +11,21 @@ describe("synth control styling", () => {
     );
   });
 
-  it("styles selector positions as touch-sized illuminated power switches", () => {
+  it("keeps dropdown-style selectors compact while retaining touch targets", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
 
     expect(styles).toMatch(
-      /\.choice-switch-face\s*\{[\s\S]*?min-height:\s*58px;[\s\S]*?background:\s*linear-gradient\(180deg, #29221b, #15110e\);[\s\S]*?\}/,
+      /\.parameter--choice\s*\{[\s\S]*?min-width:\s*118px;[\s\S]*?flex-basis:\s*118px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.choice-switch-position input:checked \+ \.choice-switch-face i\s*\{[\s\S]*?background:\s*var\(--accent\);[\s\S]*?\}/,
+      /\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?min-height:\s*46px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.route-control \.choice-switch-face\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?\}/,
+      /\.route-control\s*\{[\s\S]*?min-width:\s*116px;[\s\S]*?flex:\s*1 0 116px;[\s\S]*?\}/,
     );
-    expect(styles).not.toContain(".choice-button");
+    expect(styles).toMatch(
+      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?\}/,
+    );
+    expect(styles).not.toContain(".choice-switch-bank");
   });
 });

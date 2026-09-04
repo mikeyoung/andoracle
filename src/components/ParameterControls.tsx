@@ -180,6 +180,13 @@ const useDirectEntry = (
 
 export const shouldEmitRangeChange = (current: number, next: number): boolean => !Object.is(current, next);
 
+export const nextChoiceValue = (param: ParamKey, value: number): number | undefined => {
+  const options = PARAM_SPECS[param].options ?? [];
+  if (options.length === 0) return undefined;
+  const current = options.findIndex((option) => option.value === value);
+  return options[(current + 1) % options.length]?.value;
+};
+
 const accentStyle = (accent: string): CSSProperties => ({ "--accent": accent } as CSSProperties);
 
 export function RangeControl({
@@ -246,46 +253,29 @@ export function ChoiceControl({
 }: SharedControlProps) {
   const spec = PARAM_SPECS[param];
   const directHandlers = useDirectEntry(param, onDirectEdit);
-  const options = spec.options ?? [];
-  const selectedLabel = options.find((option) => option.value === value)?.label ?? String(value);
+  const selectedLabel = spec.options?.find((option) => option.value === value)?.label ?? String(value);
   return (
     <div
       className={`parameter parameter--choice${compact ? " parameter--compact" : ""}`}
       data-param={param}
-      data-choice-count={options.length}
       style={accentStyle(accent)}
       {...directHandlers}
     >
-      <span className="choice-label" id={`label-${param}`}>
-        {compact ? "Source" : spec.shortLabel ?? spec.label}
-      </span>
-      <div
-        className="choice-switch-bank"
+      <label htmlFor={`param-${param}`}>{compact ? "Source" : spec.shortLabel ?? spec.label}</label>
+      <button
+        type="button"
+        className="choice-button"
         id={`param-${param}`}
-        role="radiogroup"
-        aria-label={compact ? spec.label : undefined}
-        aria-labelledby={compact ? undefined : `label-${param}`}
+        aria-label={`${spec.label}: ${selectedLabel}`}
+        onClick={() => {
+          const next = nextChoiceValue(param, value);
+          if (next !== undefined) onChange(param, next);
+        }}
       >
-        {options.map((option) => (
-          <label className="choice-switch-position" key={option.value}>
-            <input
-              type="radio"
-              name={`param-${param}`}
-              value={option.value}
-              checked={option.value === value}
-              aria-label={`${spec.label}: ${option.label}`}
-              onChange={() => {
-                if (option.value !== value) onChange(param, option.value);
-              }}
-            />
-            <span className="choice-switch-face">
-              <i aria-hidden="true" />
-              <b>{option.label}</b>
-            </span>
-          </label>
-        ))}
-      </div>
-      {!compact && <output aria-live="polite">{selectedLabel}</output>}
+        <span>{selectedLabel}</span>
+        <i aria-hidden="true" />
+      </button>
+      {!compact && <output htmlFor={`param-${param}`}>{formatParamValue(param, value)}</output>}
     </div>
   );
 }
