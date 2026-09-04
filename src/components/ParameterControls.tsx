@@ -1,0 +1,332 @@
+import {
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import {
+  PARAM_SPECS,
+  describeValidValues,
+  formatParamValue,
+  normalizedToParam,
+  paramToNormalized,
+  type ParamKey,
+  type SynthParams,
+} from "../synth/params";
+
+interface SharedControlProps {
+  param: ParamKey;
+  value: number;
+  accent: string;
+  onChange: (key: ParamKey, value: number) => void;
+  onDirectEdit: (key: ParamKey, origin: HTMLElement) => void;
+  compact?: boolean;
+  displayScale?: number;
+}
+
+type DirectHandlers = {
+  onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
+  onClickCapture: (event: ReactMouseEvent<HTMLElement>) => void;
+  onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
+  onPointerMoveCapture: (event: ReactPointerEvent<HTMLElement>) => void;
+  onPointerUpCapture: () => void;
+  onPointerCancelCapture: () => void;
+  onLostPointerCaptureCapture: () => void;
+};
+
+interface InterruptionEventTarget {
+  addEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+  removeEventListener: (type: string, listener: EventListenerOrEventListenerObject) => void;
+}
+
+interface VisibilityInterruptionTarget extends InterruptionEventTarget {
+  readonly hidden: boolean;
+}
+
+export class DirectEntryInterruptionRegistry {
+  private readonly cancellers = new Set<() => void>();
+  private listening = false;
+
+  private readonly cancelAll = (): void => {
+    for (const cancel of this.cancellers) cancel();
+  };
+
+  private readonly cancelWhenHidden = (): void => {
+    if (this.documentTarget.hidden) this.cancelAll();
+  };
+
+  constructor(
+    private readonly windowTarget: InterruptionEventTarget,
+    private readonly documentTarget: VisibilityInterruptionTarget,
+  ) {}
+
+  subscribe(cancel: () => void): () => void {
+    this.cancellers.add(cancel);
+    if (!this.listening) {
+      this.windowTarget.addEventListener("blur", this.cancelAll);
+      this.documentTarget.addEventListener("visibilitychange", this.cancelWhenHidden);
+      this.listening = true;
+    }
+
+    return () => {
+      this.cancellers.delete(cancel);
+      if (this.cancellers.size > 0 || !this.listening) return;
+      this.windowTarget.removeEventListener("blur", this.cancelAll);
+      this.documentTarget.removeEventListener("visibilitychange", this.cancelWhenHidden);
+      this.listening = false;
+    };
+  }
+
+  get subscriberCount(): number {
+    return this.cancellers.size;
+  }
+}
+
+let directEntryInterruptionRegistry: DirectEntryInterruptionRegistry | null = null;
+
+const getDirectEntryInterruptionRegistry = (): DirectEntryInterruptionRegistry => {
+  directEntryInterruptionRegistry ??= new DirectEntryInterruptionRegistry(window, document);
+  return directEntryInterruptionRegistry;
+};
+
+const useDirectEntry = (
+  param: ParamKey,
+  onDirectEdit: SharedControlProps["onDirectEdit"],
+  restoreValue?: () => void,
+): DirectHandlers => {
+  const timer = useRef<number | null>(null);
+  const startPoint = useRef({ x: 0, y: 0 });
+  const origin = useRef<HTMLElement | null>(null);
+  const initialControlValue = useRef<string | null>(null);
+  const consumed = useRef(false);
+
+  const cancel = (): void => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+  };
+
+  useEffect(() => {
+    const unsubscribe = getDirectEntryInterruptionRegistry().subscribe(cancel);
+    return () => {
+      cancel();
+      unsubscribe();
+    };
+  }, []);
+
+  return {
+    onContextMenu: (event) => {
+      event.preventDefault();
+      cancel();
+      if (consumed.current) return;
+      consumed.current = false;
+      const target = event.target as HTMLElement;
+      onDirectEdit(param, target.closest<HTMLElement>("input, select, button") ?? event.currentTarget);
+    },
+    onClickCapture: (event) => {
+      if (!consumed.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      consumed.current = false;
+    },
+    onPointerDownCapture: (event) => {
+      cancel();
+      if (event.pointerType === "mouse") {
+        consumed.current = false;
+        return;
+      }
+      consumed.current = false;
+      startPoint.current = { x: event.clientX, y: event.clientY };
+      const target = event.target as HTMLElement;
+      origin.current = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
+      initialControlValue.current = origin.current instanceof HTMLInputElement
+        ? origin.current.value
+        : null;
+      timer.current = window.setTimeout(() => {
+        consumed.current = true;
+        if (
+          restoreValue
+          && origin.current instanceof HTMLInputElement
+          && initialControlValue.current !== null
+          && origin.current.value !== initialControlValue.current
+        ) {
+          restoreValue();
+        }
+        if (origin.current) onDirectEdit(param, origin.current);
+        timer.current = null;
+      }, 620);
+    },
+    onPointerMoveCapture: (event) => {
+      const distance = Math.hypot(
+        event.clientX - startPoint.current.x,
+        event.clientY - startPoint.current.y,
+      );
+      if (distance > 10) cancel();
+    },
+    onPointerUpCapture: cancel,
+    onPointerCancelCapture: cancel,
+    onLostPointerCaptureCapture: cancel,
+  };
+};
+
+export const shouldEmitRangeChange = (current: number, next: number): boolean => !Object.is(current, next);
+
+const accentStyle = (accent: string): CSSProperties => ({ "--accent": accent } as CSSProperties);
+
+export function RangeControl({
+  param,
+  value,
+  accent,
+  onChange,
+  onDirectEdit,
+  compact = false,
+  displayScale = 1,
+}: SharedControlProps) {
+  const spec = PARAM_SPECS[param];
+  const directHandlers = useDirectEntry(param, onDirectEdit, () => onChange(param, value));
+  const position = Math.round(paramToNormalized(param, value) * 1000);
+  const displayedValue = value * displayScale;
+  const rangeDescription = displayScale === 1
+    ? describeValidValues(param)
+    : `${spec.min * displayScale} ${spec.unit ?? ""} to ${spec.max * displayScale} ${spec.unit ?? ""}; step ${spec.step * displayScale} ${spec.unit ?? ""}`;
+
+  return (
+    <div
+      className={`parameter parameter--range${compact ? " parameter--compact" : ""}`}
+      data-param={param}
+      style={accentStyle(accent)}
+      {...directHandlers}
+    >
+      <label htmlFor={`param-${param}`}>{spec.shortLabel ?? spec.label}</label>
+      <div className="fader-shell">
+        <span className="fader-scale" aria-hidden="true">
+          <i /><i /><i /><i /><i /><i /><i /><i /><i />
+        </span>
+        <input
+          id={`param-${param}`}
+          type="range"
+          min="0"
+          max="1000"
+          step="1"
+          value={position}
+          aria-label={spec.label}
+          aria-orientation="vertical"
+          aria-valuetext={formatParamValue(param, displayedValue)}
+          aria-describedby={`param-${param}-range`}
+          onChange={(event) => {
+            const next = normalizedToParam(param, Number(event.target.value) / 1000);
+            if (shouldEmitRangeChange(value, next)) onChange(param, next);
+          }}
+        />
+      </div>
+      <output htmlFor={`param-${param}`}>{formatParamValue(param, displayedValue)}</output>
+      <span id={`param-${param}-range`} className="visually-hidden">
+        Valid range: {rangeDescription}.
+      </span>
+    </div>
+  );
+}
+
+export function ChoiceControl({
+  param,
+  value,
+  accent,
+  onChange,
+  onDirectEdit,
+  compact = false,
+}: SharedControlProps) {
+  const spec = PARAM_SPECS[param];
+  const directHandlers = useDirectEntry(param, onDirectEdit);
+  const selectedLabel = spec.options?.find((option) => option.value === value)?.label ?? String(value);
+  return (
+    <div
+      className={`parameter parameter--choice${compact ? " parameter--compact" : ""}`}
+      data-param={param}
+      style={accentStyle(accent)}
+      {...directHandlers}
+    >
+      <label htmlFor={`param-${param}`}>{compact ? "Source" : spec.shortLabel ?? spec.label}</label>
+      <button
+        type="button"
+        className="choice-button"
+        id={`param-${param}`}
+        aria-label={`${spec.label}: ${selectedLabel}`}
+        onClick={() => {
+          const options = spec.options ?? [];
+          const current = options.findIndex((option) => option.value === value);
+          const next = options[(current + 1) % Math.max(1, options.length)];
+          if (next) onChange(param, next.value);
+        }}
+      >
+        <span>{selectedLabel}</span>
+        <i aria-hidden="true" />
+      </button>
+      {!compact && <output htmlFor={`param-${param}`}>{formatParamValue(param, value)}</output>}
+    </div>
+  );
+}
+
+export function ToggleControl({
+  param,
+  value,
+  accent,
+  onChange,
+  onDirectEdit,
+}: SharedControlProps) {
+  const spec = PARAM_SPECS[param];
+  const directHandlers = useDirectEntry(param, onDirectEdit);
+  const enabled = value > 0.5;
+  return (
+    <div
+      className="parameter parameter--toggle"
+      data-param={param}
+      style={accentStyle(accent)}
+      {...directHandlers}
+    >
+      <span className="toggle-label" id={`label-${param}`}>{spec.shortLabel ?? spec.label}</span>
+      <button
+        type="button"
+        className="toggle-switch"
+        role="switch"
+        aria-checked={enabled}
+        aria-labelledby={`label-${param}`}
+        onClick={() => onChange(param, enabled ? 0 : 1)}
+      >
+        <span aria-hidden="true" />
+        <b>{enabled ? "ON" : "OFF"}</b>
+      </button>
+    </div>
+  );
+}
+
+interface RoutedFaderProps {
+  source: ParamKey;
+  amount: ParamKey;
+  values: SynthParams;
+  accent: string;
+  onChange: SharedControlProps["onChange"];
+  onDirectEdit: SharedControlProps["onDirectEdit"];
+}
+
+export function RoutedFader({ source, amount, values, accent, onChange, onDirectEdit }: RoutedFaderProps) {
+  return (
+    <div className="route-control" style={accentStyle(accent)}>
+      <ChoiceControl
+        param={source}
+        value={values[source]}
+        accent={accent}
+        onChange={onChange}
+        onDirectEdit={onDirectEdit}
+        compact
+      />
+      <RangeControl
+        param={amount}
+        value={values[amount]}
+        accent={accent}
+        onChange={onChange}
+        onDirectEdit={onDirectEdit}
+        compact
+      />
+    </div>
+  );
+}
