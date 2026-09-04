@@ -18,8 +18,8 @@ export default defineConfig({
         id: "./",
         lang: "en",
         dir: "ltr",
-        theme_color: "#11100e",
-        background_color: "#090909",
+        theme_color: "#50564f",
+        background_color: "#24150e",
         display: "standalone",
         orientation: "any",
         start_url: "./",
@@ -41,7 +41,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "index.html",
-        globPatterns: ["**/*.{js,css,html,woff2}"],
+        globPatterns: ["**/*.{js,css,html,woff2,jpg,jpeg}"],
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: false

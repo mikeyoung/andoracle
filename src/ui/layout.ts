@@ -21,7 +21,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "controllers",
     eyebrow: "Keyboard voltage control",
     title: "Controllers",
-    accent: "#e86b24",
+    accent: "#a85b36",
     items: [
       { kind: "choice", param: "transpose" },
       { kind: "range", param: "portamento" },
@@ -41,7 +41,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "vco1",
     eyebrow: "Low-note voltage control",
     title: "VCO 1",
-    accent: "#edc547",
+    accent: "#b58a32",
     items: [
       { kind: "choice", param: "vco1Mode" },
       { kind: "range", param: "vco1Coarse" },
@@ -56,7 +56,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "vco2",
     eyebrow: "High-note voltage control",
     title: "VCO 2",
-    accent: "#d9572c",
+    accent: "#91453b",
     items: [
       { kind: "toggle", param: "vco2Sync" },
       { kind: "range", param: "vco2Coarse" },
@@ -71,7 +71,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "modulators",
     eyebrow: "S/H mixer · low frequency oscillator",
     title: "LFO · Noise · S/H",
-    accent: "#d28b29",
+    accent: "#6f7750",
     items: [
       { kind: "range", param: "lfoRate" },
       { kind: "choice", param: "noiseColor" },
@@ -85,7 +85,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "mixer",
     eyebrow: "Three-channel audio bus",
     title: "Audio Mixer",
-    accent: "#c84a32",
+    accent: "#8c4038",
     items: [
       { kind: "route", source: "mixer1Source", amount: "mixer1Level" },
       { kind: "route", source: "mixer2Source", amount: "mixer2Level" },
@@ -99,7 +99,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "delay",
     eyebrow: "Post mixer → pre filter",
     title: "Stereo Delay",
-    accent: "#dc7626",
+    accent: "#47746e",
     items: [
       { kind: "toggle", param: "delayEnabled" },
       { kind: "range", param: "delayTime" },
@@ -114,7 +114,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "filter",
     eyebrow: "Voltage controlled filter",
     title: "VCF · HPF",
-    accent: "#e5a632",
+    accent: "#aa7535",
     items: [
       { kind: "choice", param: "filterType" },
       { kind: "choice", param: "filter4075Mode" },
@@ -130,7 +130,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "envelopes",
     eyebrow: "AR · ADSR contour generators",
     title: "Envelope Generators",
-    accent: "#d85e32",
+    accent: "#9a5538",
     items: [
       { kind: "choice", param: "repeatMode" },
       { kind: "choice", param: "arSource" },
@@ -147,7 +147,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
     id: "amplifier",
     eyebrow: "Voltage controlled amplifier",
     title: "VCA · Output",
-    accent: "#edc547",
+    accent: "#8a805f",
     items: [
       { kind: "toggle", param: "driveEnabled" },
       { kind: "range", param: "driveAmount" },
