@@ -1295,6 +1295,138 @@ describe("user sequence storage", () => {
     expect(storage.writes).toBe(1);
   });
 
+  it("snapshots proposed events before a delayed save lock is acquired", async () => {
+    const storage = new MemoryStorage();
+    const mutableEvents: NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 500, note: 60, on: false },
+    ];
+    let releaseLock!: () => void;
+    const locks: UserSequenceLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+
+    const saving = saveUserSequenceSafely("Snapshot", mutableEvents, storage, locks);
+    mutableEvents[1] = { deltaMs: 900, note: 60, on: false };
+    releaseLock();
+
+    await expect(saving).resolves.toMatchObject({
+      status: "saved",
+      sequence: { name: "Snapshot", durationMs: 500 },
+    });
+    expect(decodeUserSequence(storedSequence(storage, "Snapshot"))?.durationMs).toBe(500);
+  });
+
+  it("releases an aborted delayed save immediately and denies its late callback", async () => {
+    const storage = new MemoryStorage();
+    let releaseLock!: () => void;
+    let hostSettled!: () => void;
+    const hostSettlement = new Promise<void>((resolve) => { hostSettled = resolve; });
+    const locks: UserSequenceLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => {
+            void Promise.resolve(callback({})).then((result) => {
+              resolve(result);
+              hostSettled();
+            });
+          };
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const saving = saveUserSequenceSafely(
+      "Cancelled",
+      SIMPLE_EVENTS,
+      storage,
+      locks,
+      controller.signal,
+    );
+    controller.abort(new DOMException("Dialog closed.", "AbortError"));
+
+    await expect(saving).resolves.toEqual({ status: "busy", sequences: [] });
+    expect(storage.writes).toBe(0);
+    releaseLock();
+    await hostSettlement;
+    expect(storage.writes).toBe(0);
+    expect(findUserSequence("Cancelled", storage)).toBeNull();
+  });
+
+  it("exposes storage truth when a lock host stalls after running the write callback", async () => {
+    const storage = new MemoryStorage();
+    let releaseHost!: () => void;
+    const locks: UserSequenceLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        const callbackResult = callback({});
+        return new Promise<T>((resolve) => {
+          releaseHost = () => resolve(callbackResult);
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const saving = saveUserSequenceSafely(
+      "Uncertain",
+      SIMPLE_EVENTS,
+      storage,
+      locks,
+      controller.signal,
+    );
+    expect(findUserSequence("Uncertain", storage)).not.toBeNull();
+    controller.abort(new DOMException("UI deadline expired.", "AbortError"));
+
+    await expect(saving).resolves.toMatchObject({ status: "busy" });
+    expect(findUserSequence("Uncertain", storage)).not.toBeNull();
+    releaseHost();
+    await Promise.resolve();
+  });
+
+  it("exposes a completed delete when its lock host stalls before settling", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Uncertain delete", SIMPLE_EVENTS, storage);
+    const target = storedSequence(storage, "Uncertain delete");
+    let releaseHost!: () => void;
+    const locks: UserSequenceLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        const callbackResult = callback({});
+        return new Promise<T>((resolve) => {
+          releaseHost = () => resolve(callbackResult);
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const deleting = deleteUserSequenceSafely(target, storage, locks, controller.signal);
+    expect(findUserSequence(target.name, storage)).toBeNull();
+    controller.abort(new DOMException("UI deadline expired.", "AbortError"));
+
+    await expect(deleting).resolves.toEqual({ status: "busy", sequences: [] });
+    expect(findUserSequence(target.name, storage)).toBeNull();
+    releaseHost();
+    await Promise.resolve();
+  });
+
   it("asks a simultaneous distinct-name save to retry instead of losing a take", async () => {
     const storage = new MemoryStorage();
     const locks = new IfAvailableLockManager();
@@ -1450,7 +1582,7 @@ describe("user sequence storage", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to single-tab saving when a lock manager throws or rejects", async () => {
+  it("fails closed without writing when a lock manager throws or rejects", async () => {
     const thrown: UserSequenceLockManager = {
       request: () => { throw new Error("unavailable"); },
     };
@@ -1463,16 +1595,16 @@ describe("user sequence storage", () => {
       SIMPLE_EVENTS,
       new MemoryStorage(),
       thrown,
-    )).resolves.toMatchObject({ status: "saved" });
+    )).resolves.toEqual({ status: "busy", sequences: [] });
     await expect(saveUserSequenceSafely(
       "Rejected",
       SIMPLE_EVENTS,
       new MemoryStorage(),
       rejected,
-    )).resolves.toMatchObject({ status: "saved" });
+    )).resolves.toEqual({ status: "busy", sequences: [] });
   });
 
-  it("falls back to single-tab deletion when a lock manager throws or rejects", async () => {
+  it("fails closed without deleting when a lock manager throws or rejects", async () => {
     const thrown: UserSequenceLockManager = {
       request: () => { throw new Error("unavailable"); },
     };
@@ -1488,11 +1620,13 @@ describe("user sequence storage", () => {
       storedSequence(thrownStorage, "Thrown"),
       thrownStorage,
       thrown,
-    )).resolves.toMatchObject({ status: "deleted", sequences: [] });
+    )).resolves.toMatchObject({ status: "busy", sequences: [{ name: "Thrown" }] });
     await expect(deleteUserSequenceSafely(
       storedSequence(rejectedStorage, "Rejected"),
       rejectedStorage,
       rejected,
-    )).resolves.toMatchObject({ status: "deleted", sequences: [] });
+    )).resolves.toMatchObject({ status: "busy", sequences: [{ name: "Rejected" }] });
+    expect(loadUserSequences(thrownStorage).map((sequence) => sequence.name)).toEqual(["Thrown"]);
+    expect(loadUserSequences(rejectedStorage).map((sequence) => sequence.name)).toEqual(["Rejected"]);
   });
 });

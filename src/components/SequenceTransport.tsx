@@ -1,4 +1,5 @@
 import { useRef, type Ref } from "react";
+import { finishSelectChange, type SelectInteractionModality } from "./select-focus";
 
 export type SequencePlaybackState = "stopped" | "playing" | "paused";
 
@@ -34,6 +35,7 @@ export function SequenceTransport({
   const paused = playbackState === "paused";
   const playbackActive = playing || paused;
   const playButtonRef = useRef<HTMLButtonElement>(null);
+  const selectInteractionModality = useRef<SelectInteractionModality>("keyboard");
   const returnFocusToPlay = (): void => {
     queueMicrotask(() => playButtonRef.current?.focus({ preventScroll: true }));
   };
@@ -46,11 +48,16 @@ export function SequenceTransport({
         aria-label="Sequence"
         value={activeName ?? ""}
         disabled={recording}
+        onPointerDown={() => {
+          selectInteractionModality.current = "pointer";
+        }}
+        onKeyDown={() => {
+          selectInteractionModality.current = "keyboard";
+        }}
         onChange={(event) => {
           onSelect(event.target.value);
-          // Returning focus to the page makes the computer-note keys usable
-          // immediately after a pointer-selected native dropdown option.
-          event.currentTarget.blur();
+          finishSelectChange(event.currentTarget, selectInteractionModality.current);
+          selectInteractionModality.current = "keyboard";
         }}
       >
         <option value="">{sequenceNames.length > 0 ? "No sequence loaded" : "No saved sequences"}</option>

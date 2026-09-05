@@ -15,13 +15,17 @@ import {
   type ParamKey,
   type SynthParams,
 } from "../synth/params";
+import {
+  shouldRestoreDirectEntryOrigin,
+  type DirectEntryInteractionModality,
+} from "./direct-entry-focus";
 
 interface SharedControlProps {
   param: ParamKey;
   value: number;
   accent: string;
   onChange: (key: ParamKey, value: number) => void;
-  onDirectEdit: (key: ParamKey, origin: HTMLElement) => void;
+  onDirectEdit: (key: ParamKey, origin: HTMLElement, restoreOriginFocus: boolean) => void;
   compact?: boolean;
   displayScale?: number;
 }
@@ -29,6 +33,7 @@ interface SharedControlProps {
 type DirectHandlers = {
   onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
   onClickCapture: (event: ReactMouseEvent<HTMLElement>) => void;
+  onKeyDownCapture: () => void;
   onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerMoveCapture: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerUpCapture: () => void;
@@ -88,6 +93,70 @@ export const shouldConsumeLongPressClick = (longPressConsumed: boolean, clickDet
   longPressConsumed && clickDetail > 0
 );
 
+type SetSuppressionTimer = (callback: () => void, delayMs: number) => number;
+type ClearSuppressionTimer = (timerId: number) => void;
+
+/**
+ * Owns the one-shot latch used to swallow the click synthesized by a touch
+ * long press. Pointer cancellation is not guaranteed to produce that click,
+ * so terminal pointer events also schedule a task-boundary expiry. This keeps
+ * the current gesture protected without letting a stale latch survive into a
+ * later activation.
+ */
+export class LongPressClickSuppression {
+  private consumed = false;
+  private expiryTimer: number | null = null;
+
+  constructor(
+    private readonly setTimer: SetSuppressionTimer = (callback, delayMs) => (
+      window.setTimeout(callback, delayMs)
+    ),
+    private readonly clearTimer: ClearSuppressionTimer = (timerId) => window.clearTimeout(timerId),
+  ) {}
+
+  arm(): void {
+    this.clearExpiryTimer();
+    this.consumed = true;
+  }
+
+  reset(): void {
+    this.clearExpiryTimer();
+    this.consumed = false;
+  }
+
+  expireAfterGesture(): void {
+    this.clearExpiryTimer();
+    if (!this.consumed) return;
+    this.expiryTimer = this.setTimer(() => {
+      this.expiryTimer = null;
+      this.consumed = false;
+    }, 0);
+  }
+
+  consumeClick(clickDetail: number): boolean {
+    if (!this.consumed) return false;
+    const shouldConsume = shouldConsumeLongPressClick(true, clickDetail);
+    this.reset();
+    return shouldConsume;
+  }
+
+  consumeContextMenu(): boolean {
+    if (!this.consumed) return false;
+    this.reset();
+    return true;
+  }
+
+  dispose(): void {
+    this.reset();
+  }
+
+  private clearExpiryTimer(): void {
+    if (this.expiryTimer === null) return;
+    this.clearTimer(this.expiryTimer);
+    this.expiryTimer = null;
+  }
+}
+
 let directEntryInterruptionRegistry: DirectEntryInterruptionRegistry | null = null;
 
 const getDirectEntryInterruptionRegistry = (): DirectEntryInterruptionRegistry => {
@@ -104,17 +173,31 @@ const useDirectEntry = (
   const startPoint = useRef({ x: 0, y: 0 });
   const origin = useRef<HTMLElement | null>(null);
   const initialControlValue = useRef<string | null>(null);
-  const consumed = useRef(false);
+  const interactionModality = useRef<DirectEntryInteractionModality>("unknown");
+  const clickSuppression = useRef<LongPressClickSuppression | null>(null);
+  clickSuppression.current ??= new LongPressClickSuppression();
 
   const cancel = (): void => {
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = null;
   };
 
+  const interrupt = (): void => {
+    cancel();
+    clickSuppression.current?.reset();
+    interactionModality.current = "unknown";
+  };
+
+  const endPointerGesture = (): void => {
+    cancel();
+    clickSuppression.current?.expireAfterGesture();
+  };
+
   useEffect(() => {
-    const unsubscribe = getDirectEntryInterruptionRegistry().subscribe(cancel);
+    const unsubscribe = getDirectEntryInterruptionRegistry().subscribe(interrupt);
     return () => {
       cancel();
+      clickSuppression.current?.dispose();
       unsubscribe();
     };
   }, []);
@@ -123,29 +206,30 @@ const useDirectEntry = (
     onContextMenu: (event) => {
       event.preventDefault();
       cancel();
-      if (consumed.current) return;
-      consumed.current = false;
+      if (clickSuppression.current?.consumeContextMenu()) return;
       const target = event.target as HTMLElement;
-      onDirectEdit(param, target.closest<HTMLElement>("input, select, button") ?? event.currentTarget);
+      const editOrigin = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
+      onDirectEdit(
+        param,
+        editOrigin,
+        shouldRestoreDirectEntryOrigin(editOrigin, interactionModality.current),
+      );
     },
     onClickCapture: (event) => {
-      if (!consumed.current) return;
-      const shouldConsume = shouldConsumeLongPressClick(true, event.detail);
-      // Clear the one-shot latch even when an assistive or keyboard click is
-      // the first activation after the modal. Those clicks have detail 0 and
-      // must not be mistaken for the pointer click generated by a long press.
-      consumed.current = false;
-      if (!shouldConsume) return;
+      if (!clickSuppression.current?.consumeClick(event.detail)) return;
       event.preventDefault();
       event.stopPropagation();
     },
+    onKeyDownCapture: () => {
+      interactionModality.current = "keyboard";
+    },
     onPointerDownCapture: (event) => {
       cancel();
+      clickSuppression.current?.reset();
+      interactionModality.current = "pointer";
       if (event.pointerType === "mouse") {
-        consumed.current = false;
         return;
       }
-      consumed.current = false;
       startPoint.current = { x: event.clientX, y: event.clientY };
       const target = event.target as HTMLElement;
       origin.current = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
@@ -153,7 +237,7 @@ const useDirectEntry = (
         ? origin.current.value
         : null;
       timer.current = window.setTimeout(() => {
-        consumed.current = true;
+        clickSuppression.current?.arm();
         if (
           restoreValue
           && origin.current instanceof HTMLInputElement
@@ -162,7 +246,13 @@ const useDirectEntry = (
         ) {
           restoreValue();
         }
-        if (origin.current) onDirectEdit(param, origin.current);
+        if (origin.current) {
+          onDirectEdit(
+            param,
+            origin.current,
+            shouldRestoreDirectEntryOrigin(origin.current, "pointer"),
+          );
+        }
         timer.current = null;
       }, 620);
     },
@@ -173,9 +263,9 @@ const useDirectEntry = (
       );
       if (distance > 10) cancel();
     },
-    onPointerUpCapture: cancel,
-    onPointerCancelCapture: cancel,
-    onLostPointerCaptureCapture: cancel,
+    onPointerUpCapture: endPointerGesture,
+    onPointerCancelCapture: endPointerGesture,
+    onLostPointerCaptureCapture: endPointerGesture,
   };
 };
 
@@ -186,9 +276,30 @@ export const shouldEmitRangeChange = (current: number, next: number): boolean =>
  * as a fader gesture ends. Keyboard users never enter this path, so a fader
  * reached with Tab keeps focus for Arrow, Home, End, and Page key adjustment.
  */
-export const releaseRangePointerFocus = (target: Pick<HTMLInputElement, "blur">): void => {
-  target.blur();
-};
+export class DeferredRangePointerFocusRelease {
+  private timer: number | null = null;
+
+  constructor(
+    private readonly setTimer: SetSuppressionTimer = (callback, delayMs) => (
+      window.setTimeout(callback, delayMs)
+    ),
+    private readonly clearTimer: ClearSuppressionTimer = (timerId) => window.clearTimeout(timerId),
+  ) {}
+
+  schedule(target: Pick<HTMLInputElement, "blur">): void {
+    this.dispose();
+    this.timer = this.setTimer(() => {
+      this.timer = null;
+      target.blur();
+    }, 0);
+  }
+
+  dispose(): void {
+    if (this.timer === null) return;
+    this.clearTimer(this.timer);
+    this.timer = null;
+  }
+}
 
 /**
  * Gives controlled normalized faders predictable keyboard semantics. Native
@@ -240,6 +351,9 @@ export function RangeControl({
   compact = false,
   displayScale = 1,
 }: SharedControlProps) {
+  const pointerFocusRelease = useRef<DeferredRangePointerFocusRelease | null>(null);
+  pointerFocusRelease.current ??= new DeferredRangePointerFocusRelease();
+  useEffect(() => () => pointerFocusRelease.current?.dispose(), []);
   const spec = PARAM_SPECS[param];
   const directHandlers = useDirectEntry(param, onDirectEdit, () => onChange(param, value));
   const position = Math.round(paramToNormalized(param, value) * 1000);
@@ -281,9 +395,9 @@ export function RangeControl({
             const next = normalizedToParam(param, Number(event.target.value) / 1000);
             if (shouldEmitRangeChange(value, next)) onChange(param, next);
           }}
-          onPointerUp={(event) => releaseRangePointerFocus(event.currentTarget)}
-          onPointerCancel={(event) => releaseRangePointerFocus(event.currentTarget)}
-          onLostPointerCapture={(event) => releaseRangePointerFocus(event.currentTarget)}
+          onPointerUp={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
+          onPointerCancel={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
+          onLostPointerCapture={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
         />
       </div>
       <output htmlFor={`param-${param}`}>{formatParamValue(param, displayedValue)}</output>

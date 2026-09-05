@@ -838,6 +838,154 @@ describe("user patch storage", () => {
     expect(findUserPatch("Concurrent", storage)?.params.filterCutoff).toBe(800);
   });
 
+  it("snapshots proposed controls before a delayed save lock is acquired", async () => {
+    const storage = new MemoryStorage();
+    const mutableParams = { ...DEFAULT_PARAMS, filterCutoff: 800 };
+    let releaseLock!: () => void;
+    const locks: UserPatchLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+
+    const saving = saveUserPatchSafely("Snapshot", mutableParams, storage, locks);
+    mutableParams.filterCutoff = 16_000;
+    releaseLock();
+
+    await expect(saving).resolves.toMatchObject({
+      status: "saved",
+      patch: { name: "Snapshot", params: { filterCutoff: 800 } },
+    });
+    expect(findUserPatch("Snapshot", storage)?.params.filterCutoff).toBe(800);
+  });
+
+  it("releases an aborted delayed save immediately and denies its late callback", async () => {
+    const storage = new MemoryStorage();
+    let releaseLock!: () => void;
+    let hostSettled!: () => void;
+    const hostSettlement = new Promise<void>((resolve) => { hostSettled = resolve; });
+    const locks: UserPatchLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => {
+            void Promise.resolve(callback({})).then((result) => {
+              resolve(result);
+              hostSettled();
+            });
+          };
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const saving = saveUserPatchSafely(
+      "Cancelled",
+      DEFAULT_PARAMS,
+      storage,
+      locks,
+      controller.signal,
+    );
+    controller.abort(new DOMException("Dialog closed.", "AbortError"));
+
+    await expect(saving).resolves.toEqual({ status: "busy", patches: [] });
+    expect(storage.writes).toBe(0);
+    releaseLock();
+    await hostSettlement;
+    expect(storage.writes).toBe(0);
+    expect(findUserPatch("Cancelled", storage)).toBeNull();
+  });
+
+  it("exposes storage truth when a lock host stalls after running the write callback", async () => {
+    const storage = new MemoryStorage();
+    let releaseHost!: () => void;
+    const locks: UserPatchLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        const callbackResult = callback({});
+        return new Promise<T>((resolve) => {
+          releaseHost = () => resolve(callbackResult);
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const saving = saveUserPatchSafely(
+      "Uncertain",
+      DEFAULT_PARAMS,
+      storage,
+      locks,
+      controller.signal,
+    );
+    expect(findUserPatch("Uncertain", storage)).not.toBeNull();
+    controller.abort(new DOMException("UI deadline expired.", "AbortError"));
+
+    await expect(saving).resolves.toMatchObject({ status: "busy" });
+    expect(findUserPatch("Uncertain", storage)).not.toBeNull();
+    releaseHost();
+    await Promise.resolve();
+  });
+
+  it("exposes a completed delete when its lock host stalls before settling", async () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Uncertain delete", DEFAULT_PARAMS, storage);
+    const target = findUserPatch("Uncertain delete", storage);
+    if (!target) throw new Error("Expected a deletion target.");
+    let releaseHost!: () => void;
+    const locks: UserPatchLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        const callbackResult = callback({});
+        return new Promise<T>((resolve) => {
+          releaseHost = () => resolve(callbackResult);
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const deleting = deleteUserPatchSafely(target, storage, locks, controller.signal);
+    expect(findUserPatch(target.name, storage)).toBeNull();
+    controller.abort(new DOMException("UI deadline expired.", "AbortError"));
+
+    await expect(deleting).resolves.toEqual({ status: "busy", patches: [] });
+    expect(findUserPatch(target.name, storage)).toBeNull();
+    releaseHost();
+    await Promise.resolve();
+  });
+
+  it("fails closed without writing when a lock manager throws or rejects", async () => {
+    const thrownStorage = new MemoryStorage();
+    const rejectedStorage = new MemoryStorage();
+    const thrown: UserPatchLockManager = {
+      request: () => { throw new Error("unavailable"); },
+    };
+    const rejected: UserPatchLockManager = {
+      request: () => Promise.reject(new Error("unavailable")),
+    };
+
+    await expect(saveUserPatchSafely("Thrown", DEFAULT_PARAMS, thrownStorage, thrown))
+      .resolves.toEqual({ status: "busy", patches: [] });
+    await expect(saveUserPatchSafely("Rejected", DEFAULT_PARAMS, rejectedStorage, rejected))
+      .resolves.toEqual({ status: "busy", patches: [] });
+    expect(thrownStorage.writes).toBe(0);
+    expect(rejectedStorage.writes).toBe(0);
+  });
+
   it("asks a simultaneous distinct-name save to retry instead of losing either patch", async () => {
     const storage = new MemoryStorage();
     const locks = new IfAvailableLockManager();

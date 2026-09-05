@@ -10,14 +10,20 @@ describe("dialog source contracts", () => {
     expect(source).toContain('`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}`');
   });
 
-  it("shows a temporary toast only after a direct clipboard write succeeds", () => {
+  it("shows a temporary toast only after the gated clipboard pipeline succeeds", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const pipelineStart = source.indexOf("const performPatchShare = async");
+    const pipelineEnd = source.indexOf("const EMPTY_METER", pipelineStart);
+    const pipeline = source.slice(pipelineStart, pipelineEnd);
     const shareStart = source.indexOf("const sharePatch = async");
     const shareEnd = source.indexOf("const performance = useCallback", shareStart);
     const share = source.slice(shareStart, shareEnd);
-    const clipboardWrite = share.indexOf("await cancellation.race(navigator.clipboard.writeText(shareUrl));");
-    const toastShown = share.indexOf("showClipboardToast();", clipboardWrite);
-    const nativeShareSuccess = share.indexOf('setNotice("Patch shared.")');
+    const clipboardWrite = pipeline.indexOf("await navigator.clipboard.writeText(shareUrl);");
+    const clipboardSuccess = pipeline.indexOf('return "copied";', clipboardWrite);
+    const nativeShareSuccess = pipeline.indexOf('return "shared";');
+    const gatedResult = share.indexOf("await cancellation.race(hostOperation.promise)");
+    const clipboardBranch = share.indexOf('if (result === "copied")');
+    const toastShown = share.indexOf("showClipboardToast();", clipboardBranch);
 
     expect(source).toContain("const CLIPBOARD_TOAST_DURATION_MS = 2500;");
     expect(source).toContain("const clipboardToastTimerRef = useRef<number | null>(null);");
@@ -25,10 +31,13 @@ describe("dialog source contracts", () => {
     expect(source).toContain("}, CLIPBOARD_TOAST_DURATION_MS);");
     expect(share).toContain("clearClipboardToast();");
     expect(clipboardWrite).toBeGreaterThanOrEqual(0);
-    expect(toastShown).toBeGreaterThan(clipboardWrite);
+    expect(clipboardSuccess).toBeGreaterThan(clipboardWrite);
     expect(nativeShareSuccess).toBeGreaterThanOrEqual(0);
     expect(nativeShareSuccess).toBeLessThan(clipboardWrite);
-    expect(share.slice(nativeShareSuccess, clipboardWrite)).not.toContain("showClipboardToast();");
+    expect(pipeline).not.toContain("showClipboardToast();");
+    expect(gatedResult).toBeGreaterThanOrEqual(0);
+    expect(clipboardBranch).toBeGreaterThan(gatedResult);
+    expect(toastShown).toBeGreaterThan(clipboardBranch);
     expect(source).toContain('<div className="clipboard-toast" role="status" aria-live="polite" aria-atomic="true">');
 
     const unmountStart = source.indexOf("mountedRef.current = false;");
@@ -46,6 +55,29 @@ describe("dialog source contracts", () => {
     expect(source.slice(nameFieldStart, nameFieldEnd)).toContain("readOnly={busy}");
   });
 
+  it("propagates cancellable, timeout-bounded authority through both library saves", () => {
+    const app = readFileSync(resolve("src/App.tsx"), "utf8");
+    const patchDialog = readFileSync(resolve("src/components/PatchLibraryDialog.tsx"), "utf8");
+    const sequenceDialog = readFileSync(resolve("src/components/SequenceCommitDialog.tsx"), "utf8");
+
+    expect(patchDialog).toContain("onSave: (");
+    expect(patchDialog).toContain("onSave(draftName, saveController!.signal)");
+    expect(patchDialog).toContain("LIBRARY_WRITE_TIMEOUT_MS");
+    expect(sequenceDialog).toContain("onSave: (");
+    expect(sequenceDialog).toContain("onSave(draftName, controller.signal)");
+    expect(sequenceDialog).toContain("LIBRARY_WRITE_TIMEOUT_MS");
+    expect(app).toContain(
+      "saveUserPatchSafely(name, paramsRef.current, undefined, undefined, cancellation.signal)",
+    );
+    expect(app).toContain(
+      "saveUserSequenceSafely(name, take, undefined, undefined, cancellation.signal)",
+    );
+    expect(app).toMatch(/signal\.aborted && mountedRef\.current[\s\S]*?readUserSequences\(\)/u);
+    expect(app).toMatch(/signal\.aborted && mountedRef\.current[\s\S]*?readUserPatches\(\)/u);
+    expect(patchDialog).toContain("timed out and may already have completed");
+    expect(sequenceDialog).toContain("timed out and may already have completed");
+  });
+
   it("synchronously gates destructive confirmation and releases its async lifecycle", () => {
     const source = readFileSync(resolve("src/components/DeleteConfirmationDialog.tsx"), "utf8");
 
@@ -54,6 +86,7 @@ describe("dialog source contracts", () => {
     expect(source).toContain("busyRef.current = true;");
     expect(source).toContain("active.controller.abort(");
     expect(source).toContain("DELETE_CONFIRMATION_TIMEOUT_MS");
+    expect(source).toContain("timed out and may already have completed");
     expect(source).toContain("requestClose();");
     expect(source).toContain("window.clearTimeout(focusTimer);");
     expect(source).toContain("if (busy || cancelFocusRequest === 0) return;");
@@ -64,6 +97,20 @@ describe("dialog source contracts", () => {
     const cancelButtonStart = source.indexOf("ref={cancelButtonRef}");
     const cancelButtonEnd = source.indexOf("</button>", cancelButtonStart);
     expect(source.slice(cancelButtonStart, cancelButtonEnd)).not.toContain("disabled={busy}");
+
+    const app = readFileSync(resolve("src/App.tsx"), "utf8");
+    const patchDeleteFinally = app.indexOf("authority.signal.aborted && mountedRef.current", app.indexOf("patch-delete"));
+    const sequenceDeleteFinally = app.indexOf("authority.signal.aborted && mountedRef.current", app.indexOf("sequence-delete"));
+    expect(patchDeleteFinally).toBeGreaterThanOrEqual(0);
+    expect(app.slice(patchDeleteFinally, patchDeleteFinally + 300)).toContain("readUserPatches()");
+    expect(sequenceDeleteFinally).toBeGreaterThanOrEqual(0);
+    const sequenceAbortReconciliation = app.slice(sequenceDeleteFinally, sequenceDeleteFinally + 1_300);
+    expect(sequenceAbortReconciliation).toContain("readUserSequences()");
+    expect(sequenceAbortReconciliation).toContain("sequencePlayerRef.current?.stop(false)");
+    expect(sequenceAbortReconciliation).toContain("setActiveSequenceName(null)");
+    expect(sequenceAbortReconciliation.indexOf("setActiveSequenceName(null)"))
+      .toBeLessThan(sequenceAbortReconciliation.indexOf("setUserSequences(refreshed.sequences)"));
+    expect(sequenceAbortReconciliation).toContain("may already have been deleted");
   });
 
   it("keeps patch sound/URL intact and fully releases a deleted recording", () => {
@@ -168,7 +215,7 @@ describe("dialog source contracts", () => {
 
     expect(replacementStart).toBeGreaterThanOrEqual(0);
     expect(replacement).toContain(
-      "replaceUserSequenceSafely(expected, take, undefined, undefined, signal)",
+      "replaceUserSequenceSafely(expected, take, undefined, undefined, cancellation.signal)",
     );
     expect(invalidated).toBeGreaterThan(replacedCase);
     expect(stopped).toBeGreaterThan(invalidated);

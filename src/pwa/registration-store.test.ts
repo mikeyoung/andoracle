@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import appSource from "../App.tsx?raw";
 import {
   PwaRegistrationStore,
+  PwaUpdatePendingError,
   ServiceWorkerCapabilityStore,
   bindPwaRegistrationRetries,
   type PwaRegistrationCallbacks,
@@ -73,16 +74,20 @@ describe("PwaRegistrationStore", () => {
     unsubscribe();
   });
 
-  it("coalesces repeated update requests while the browser updater never settles", () => {
+  it("refuses new UI waiters while the browser updater never settles", async () => {
     const neverSettles = new Promise<void>(() => undefined);
     const updater = vi.fn(() => neverSettles);
     const store = new PwaRegistrationStore(() => updater);
 
     const first = store.updateServiceWorker(true);
+    const retries: Promise<void>[] = [];
     for (let cycle = 0; cycle < 10; cycle += 1) {
-      expect(store.updateServiceWorker(false)).toBe(first);
+      const retry = store.updateServiceWorker(false);
+      expect(retry).not.toBe(first);
+      retries.push(retry);
     }
 
+    await Promise.all(retries.map((retry) => expect(retry).rejects.toBeInstanceOf(PwaUpdatePendingError)));
     expect(updater).toHaveBeenCalledTimes(1);
     expect(updater).toHaveBeenCalledWith(true);
   });
@@ -97,7 +102,7 @@ describe("PwaRegistrationStore", () => {
     const store = new PwaRegistrationStore(() => updater);
 
     const firstAttempt = store.updateServiceWorker(true);
-    expect(store.updateServiceWorker(false)).toBe(firstAttempt);
+    await expect(store.updateServiceWorker(false)).rejects.toBeInstanceOf(PwaUpdatePendingError);
     first.resolve(undefined);
     await expect(firstAttempt).resolves.toBeUndefined();
 

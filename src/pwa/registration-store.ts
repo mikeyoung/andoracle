@@ -7,6 +7,13 @@ export interface PwaRegistrationCallbacks {
 export type PwaUpdater = (reloadPage?: boolean) => Promise<void>;
 export type PwaRegistrar = (callbacks: PwaRegistrationCallbacks) => PwaUpdater;
 
+export class PwaUpdatePendingError extends Error {
+  constructor() {
+    super("A previous app update is still finishing.");
+    this.name = "PwaUpdatePendingError";
+  }
+}
+
 export interface PwaRegistrationSnapshot {
   offlineReady: boolean;
   needRefresh: boolean;
@@ -100,7 +107,10 @@ export class PwaRegistrationStore {
 
   readonly updateServiceWorker = (reloadPage = true): Promise<void> => {
     this.start();
-    if (this.updatePromise) return this.updatePromise;
+    // Never attach a second UI observer to the pending browser promise. A
+    // timed-out Promise.race cannot remove its reaction, so returning the raw
+    // promise here would leak one abandoned continuation per Retry click.
+    if (this.updatePromise) return Promise.reject(new PwaUpdatePendingError());
 
     let rawUpdate: Promise<void>;
     try {

@@ -11,11 +11,22 @@ interface DirectEntryModalProps {
   value: number;
   displayScale?: number;
   origin: HTMLElement | null;
+  fallbackOrigin?: HTMLElement | null;
+  restoreOriginFocus?: boolean;
   onApply: (key: ParamKey, value: number) => void;
   onClose: () => void;
 }
 
-export function DirectEntryModal({ param, value, displayScale = 1, origin, onApply, onClose }: DirectEntryModalProps) {
+export function DirectEntryModal({
+  param,
+  value,
+  displayScale = 1,
+  origin,
+  fallbackOrigin = null,
+  restoreOriginFocus = true,
+  onApply,
+  onClose,
+}: DirectEntryModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const spec = PARAM_SPECS[param];
@@ -34,9 +45,14 @@ export function DirectEntryModal({ param, value, displayScale = 1, origin, onApp
     const focusTimer = window.setTimeout(() => inputRef.current?.select(), 0);
     return () => {
       window.clearTimeout(focusTimer);
-      origin?.focus({ preventScroll: true });
+      const returnTarget = restoreOriginFocus && origin?.isConnected
+        ? origin
+        : fallbackOrigin?.isConnected
+          ? fallbackOrigin
+          : null;
+      returnTarget?.focus({ preventScroll: true });
     };
-  }, [origin]);
+  }, [fallbackOrigin, origin, restoreOriginFocus]);
 
   const submit = (event: FormEvent): void => {
     event.preventDefault();

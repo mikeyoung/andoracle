@@ -6,6 +6,10 @@ describe("createOperationCancellation", () => {
   it("can be cancelled before any waiter is attached without an unhandled rejection", async () => {
     const cancellation = createOperationCancellation("no waiter");
     expect(() => cancellation.cancel()).not.toThrow();
+    await expect(cancellation.race(Promise.resolve("too late"))).rejects.toMatchObject({
+      name: "AbortError",
+      message: "no waiter",
+    });
     await Promise.resolve();
   });
 
@@ -25,6 +29,11 @@ describe("createOperationCancellation", () => {
         message: "component unmounted",
       });
     }
+    expect(cancellation.signal.aborted).toBe(true);
+    expect(cancellation.signal.reason).toMatchObject({
+      name: "AbortError",
+      message: "component unmounted",
+    });
   });
 
   it("passes through normal settlement and ignores a later cancellation", async () => {
@@ -50,9 +59,20 @@ describe("createOperationCancellation", () => {
     }
   });
 
-  it("wires App's unmount cleanup to its browser-owned share wait", () => {
+  it("bounds and coalesces browser-owned share and update waits", () => {
     expect(appSource).toMatch(/browserOperations\.begin\(\s*"share"/);
-    expect(appSource).toContain("cancellation.race(navigator.share(");
+    expect(appSource).toContain("patchShareOperationGate.run(");
+    expect(appSource).toContain("cancellation.race(hostOperation.promise)");
+    expect(appSource.match(/createHostOperationDeadline\(/g)).toHaveLength(2);
+    expect(appSource).toContain("Patch sharing timed out.");
+    expect(appSource).toContain("App update timed out.");
+    expect(appSource).toContain("cancelUpdateWaitRef.current?.();");
+    const laterAction = appSource.indexOf("cancelUpdateWaitRef.current?.();");
+    const laterButton = appSource.slice(
+      appSource.lastIndexOf("<button", laterAction),
+      appSource.indexOf("</button>", laterAction),
+    );
+    expect(laterButton).not.toContain("disabled=");
     expect(appSource).toContain("browserOperations.cancelAll();");
   });
 });

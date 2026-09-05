@@ -3,6 +3,10 @@ import {
   allocateUserLibraryName,
   isUserLibraryNameWithinLimit,
 } from "../user-library-name";
+import {
+  defaultLibraryWriteLockManager,
+  type LibraryWriteLockManager,
+} from "../library-write-lock";
 
 /** Storage key for the versioned collection of note-only performances. */
 export const USER_SEQUENCES_STORAGE_KEY = "andoracle:user-sequences:v1";
@@ -44,13 +48,7 @@ export interface UserSequenceStorage {
   setItem(key: string, value: string): void;
 }
 
-export interface UserSequenceLockManager {
-  request<T>(
-    name: string,
-    options: { readonly mode: "exclusive"; readonly ifAvailable: true },
-    callback: (lock: unknown | null) => T | PromiseLike<T>,
-  ): Promise<T>;
-}
+export interface UserSequenceLockManager extends LibraryWriteLockManager {}
 
 export type ReadUserSequencesResult =
   | {
@@ -210,12 +208,7 @@ const defaultStorage = (): UserSequenceStorage | null => {
 };
 
 const defaultLockManager = (): UserSequenceLockManager | null => {
-  try {
-    if (typeof navigator === "undefined" || !("locks" in navigator)) return null;
-    return navigator.locks as unknown as UserSequenceLockManager;
-  } catch {
-    return null;
-  }
+  return defaultLibraryWriteLockManager();
 };
 
 const eventsFromInput = (input: SequenceInput): readonly NoteSequenceEvent[] | null => {
@@ -824,12 +817,13 @@ export const deleteUserSequence = (
 };
 
 const runUserSequenceWriteSafely = <Result>(
-  write: () => Result,
+  write: (() => Result) | null,
   busy: () => Result,
   lockManager: UserSequenceLockManager | null,
   signal?: AbortSignal,
 ): Promise<Result> => {
   if (signal?.aborted) return Promise.resolve(busy());
+  if (!write) return Promise.resolve(busy());
   if (!lockManager) return Promise.resolve(write());
   if (retiredLockManagers.has(lockManager)) return Promise.resolve(busy());
   if (pendingLockWrites.has(lockManager)) return Promise.resolve(busy());
@@ -838,6 +832,9 @@ const runUserSequenceWriteSafely = <Result>(
     write: (() => Result) | null;
     signal: AbortSignal | null;
   } = { write, signal: signal ?? null };
+  // Make the revocable holder the sole remaining reference to a potentially
+  // large captured performance before a browser promise can stall forever.
+  write = null;
   let abortSignal: AbortSignal | null = signal ?? null;
   let retireTimer: ReturnType<typeof setTimeout> | null = null;
   let tracked: Promise<Result>;
@@ -877,13 +874,17 @@ const runUserSequenceWriteSafely = <Result>(
   } catch {
     authority.write = null;
     authority.signal = null;
-    // Some privacy modes expose navigator.locks but reject requests. Preserve
-    // normal single-tab storage behavior there.
-    return Promise.resolve(signal?.aborted ? busy() : write());
+    // An unavailable lock cannot prove that another tab is absent. Reporting
+    // contention is safer than silently overwriting a concurrent library.
+    return Promise.resolve(busy());
   }
 
   tracked = request
-    .catch(() => guardedWrite())
+    .catch(() => {
+      authority.write = null;
+      authority.signal = null;
+      return busy();
+    })
     .finally(() => {
       authority.write = null;
       authority.signal = null;
@@ -897,24 +898,49 @@ const runUserSequenceWriteSafely = <Result>(
   pendingLockWrites.set(lockManager, tracked);
   if (abortSignal?.aborted) revokeAuthority();
   else abortSignal?.addEventListener("abort", revokeAuthority, { once: true });
-  return tracked;
+  if (!signal) return tracked;
+
+  return new Promise<Result>((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => signal.removeEventListener("abort", handleAbort);
+    const settle = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const handleAbort = (): void => settle(() => resolve(busy()));
+    signal.addEventListener("abort", handleAbort, { once: true });
+    tracked.then(
+      (result) => settle(() => resolve(result)),
+      (error: unknown) => settle(() => reject(error)),
+    );
+    if (signal.aborted) handleAbort();
+  });
 };
 
 /**
  * Serializes the collection's read/append/write transaction across tabs when
- * Web Locks is available. A simultaneous save must retry rather than lose a
- * take or implicitly overwrite a same-name take.
+ * a browser lock is available. The take is snapshotted before any wait, and
+ * aborting revokes a delayed callback's authority. A simultaneous save must
+ * retry rather than lose or implicitly overwrite a same-name take.
  */
 export const saveUserSequenceSafely = (
   name: string,
   input: SequenceInput,
   storage: UserSequenceStorage | null = defaultStorage(),
   lockManager: UserSequenceLockManager | null = defaultLockManager(),
-): Promise<SafeSaveUserSequenceResult> => runUserSequenceWriteSafely<SafeSaveUserSequenceResult>(
-  () => saveUserSequence(name, input, storage),
-  createUserSequenceBusyReader(storage),
-  lockManager,
-);
+  signal?: AbortSignal,
+): Promise<SafeSaveUserSequenceResult> => {
+  if (signal?.aborted) return Promise.resolve(createUserSequenceBusyReader(storage)());
+  const inputSnapshot = normalizeCapturedNoteSequence(input);
+  return runUserSequenceWriteSafely<SafeSaveUserSequenceResult>(
+    () => saveUserSequence(name, inputSnapshot ?? [], storage),
+    createUserSequenceBusyReader(storage),
+    lockManager,
+    signal,
+  );
+};
 
 /**
  * Serializes an explicitly confirmed replacement with every other sequence

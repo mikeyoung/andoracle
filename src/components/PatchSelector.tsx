@@ -1,5 +1,7 @@
+import { useRef } from "react";
 import { FACTORY_PRESETS } from "../synth/presets";
 import { userPatchNameKey, type UserPatch } from "../synth/user-patches";
+import { finishSelectChange, type SelectInteractionModality } from "./select-focus";
 
 const USER_PATCH_OPTION_PREFIX = "__andoracle_user_patch__:";
 
@@ -38,6 +40,7 @@ export function PatchSelector({
   onSelectUserPatch,
   onSelectFactoryPatch,
 }: PatchSelectorProps) {
+  const interactionModality = useRef<SelectInteractionModality>("keyboard");
   const activeUserPatch = activeUserPatchName
     ? userPatches.find(
       (patch) => userPatchNameKey(patch.name) === userPatchNameKey(activeUserPatchName),
@@ -52,11 +55,18 @@ export function PatchSelector({
       id="preset"
       aria-label="Patch"
       value={selectedValue}
+      onPointerDown={() => {
+        interactionModality.current = "pointer";
+      }}
+      onKeyDown={() => {
+        interactionModality.current = "keyboard";
+      }}
       onChange={(event) => {
         const selection = resolvePatchSelection(event.currentTarget.value, userPatches);
         if (selection?.kind === "user") onSelectUserPatch(selection.patch.name);
         else if (selection?.kind === "factory") onSelectFactoryPatch(selection.name);
-        event.currentTarget.blur();
+        finishSelectChange(event.currentTarget, interactionModality.current);
+        interactionModality.current = "keyboard";
       }}
     >
       <option value="Custom patch">Custom patch</option>

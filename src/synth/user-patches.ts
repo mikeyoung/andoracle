@@ -11,6 +11,10 @@ import {
   fitUserLibraryNameWithSuffix,
   isUserLibraryNameWithinLimit,
 } from "../user-library-name";
+import {
+  defaultLibraryWriteLockManager,
+  type LibraryWriteLockManager,
+} from "../library-write-lock";
 
 /** Storage key for the versioned collection of patches named by the user. */
 // Keep the pre-Andoracle key so existing named patches survive the product rename.
@@ -27,13 +31,7 @@ export interface UserPatchStorage {
   setItem(key: string, value: string): void;
 }
 
-export interface UserPatchLockManager {
-  request<T>(
-    name: string,
-    options: { readonly mode: "exclusive"; readonly ifAvailable: true },
-    callback: (lock: unknown | null) => T | PromiseLike<T>,
-  ): Promise<T>;
-}
+export interface UserPatchLockManager extends LibraryWriteLockManager {}
 
 export interface UserPatch {
   readonly name: string;
@@ -276,12 +274,7 @@ const defaultStorage = (): UserPatchStorage | null => {
 };
 
 const defaultLockManager = (): UserPatchLockManager | null => {
-  try {
-    if (typeof navigator === "undefined" || !("locks" in navigator)) return null;
-    return navigator.locks as unknown as UserPatchLockManager;
-  } catch {
-    return null;
-  }
+  return defaultLibraryWriteLockManager();
 };
 
 const normalizeStoredParams = (
@@ -640,12 +633,13 @@ export const deleteUserPatch = (
 };
 
 const runUserPatchWriteSafely = <Result>(
-  write: () => Result,
+  write: (() => Result) | null,
   busy: () => Result,
   lockManager: UserPatchLockManager | null,
   signal?: AbortSignal,
 ): Promise<Result> => {
   if (signal?.aborted) return Promise.resolve(busy());
+  if (!write) return Promise.resolve(busy());
   if (!lockManager) return Promise.resolve(write());
   // Never fall back to an unlocked write merely because a browser lock request
   // is slow. If the raw request eventually settles, finally() rehabilitates the
@@ -657,6 +651,9 @@ const runUserPatchWriteSafely = <Result>(
     write: (() => Result) | null;
     signal: AbortSignal | null;
   } = { write, signal: signal ?? null };
+  // From this point the revocable holder is the only reference that can
+  // retain the payload-bearing write closure.
+  write = null;
   let abortSignal: AbortSignal | null = signal ?? null;
   let retireTimer: ReturnType<typeof setTimeout> | null = null;
   let tracked: Promise<Result>;
@@ -694,15 +691,19 @@ const runUserPatchWriteSafely = <Result>(
       (lock): Result => lock ? guardedWrite() : busy(),
     ));
   } catch {
-    // Some privacy modes expose navigator.locks but reject requests. Retain
-    // normal single-tab storage behavior in that environment.
+    // A failed lock request cannot prove that another tab is absent. Never
+    // turn that failure into an unlocked read/modify/write transaction.
     authority.write = null;
     authority.signal = null;
-    return Promise.resolve(signal?.aborted ? busy() : write());
+    return Promise.resolve(busy());
   }
 
   tracked = request
-    .catch(() => guardedWrite())
+    .catch(() => {
+      authority.write = null;
+      authority.signal = null;
+      return busy();
+    })
     .finally(() => {
       authority.write = null;
       authority.signal = null;
@@ -716,24 +717,52 @@ const runUserPatchWriteSafely = <Result>(
   pendingLockWrites.set(lockManager, tracked);
   if (abortSignal?.aborted) revokeAuthority();
   else abortSignal?.addEventListener("abort", revokeAuthority, { once: true });
-  return tracked;
+  if (!signal) return tracked;
+
+  // Revocation must also release the caller immediately. The browser-owned
+  // lock promise remains observed by `tracked`, but it can retain only the
+  // small busy reader after revokeAuthority clears the write closure.
+  return new Promise<Result>((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => signal.removeEventListener("abort", handleAbort);
+    const settle = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const handleAbort = (): void => settle(() => resolve(busy()));
+    signal.addEventListener("abort", handleAbort, { once: true });
+    tracked.then(
+      (result) => settle(() => resolve(result)),
+      (error: unknown) => settle(() => reject(error)),
+    );
+    if (signal.aborted) handleAbort();
+  });
 };
 
 /**
  * Serializes the collection's read/append/write transaction across tabs when
- * Web Locks is available. A simultaneous save is asked to retry rather than
- * risking a lost patch or an implicit same-name overwrite.
+ * a browser lock is available. Proposed controls are snapshotted before any
+ * wait, and aborting revokes a delayed callback's authority. A simultaneous
+ * save is asked to retry rather than risking a lost patch or overwrite.
  */
 export const saveUserPatchSafely = (
   name: string,
   params: SynthParams,
   storage: UserPatchStorage | null = defaultStorage(),
   lockManager: UserPatchLockManager | null = defaultLockManager(),
-): Promise<SafeSaveUserPatchResult> => runUserPatchWriteSafely<SafeSaveUserPatchResult>(
-  () => saveUserPatch(name, params, storage),
-  createUserPatchBusyReader(storage),
-  lockManager,
-);
+  signal?: AbortSignal,
+): Promise<SafeSaveUserPatchResult> => {
+  if (signal?.aborted) return Promise.resolve(createUserPatchBusyReader(storage)());
+  const paramsSnapshot = normalizePatch(params);
+  return runUserPatchWriteSafely<SafeSaveUserPatchResult>(
+    () => saveUserPatch(name, paramsSnapshot, storage),
+    createUserPatchBusyReader(storage),
+    lockManager,
+    signal,
+  );
+};
 
 /**
  * Serializes an explicitly confirmed replacement with every other patch write.

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { createOperationCancellation } from "../cancellable-operation";
+import {
+  LIBRARY_WRITE_TIMEOUT_MS,
+  createOperationCancellation,
+} from "../cancellable-operation";
 import {
   USER_SEQUENCE_NAME_MAX_LENGTH,
   type CapturedNoteSequence,
@@ -17,7 +20,10 @@ export type SequenceSaveOutcome = string | null | SequenceSaveConflict;
 interface SequenceCommitDialogProps {
   take: CapturedNoteSequence;
   origin: HTMLElement | null;
-  onSave: (name: string) => SequenceSaveOutcome | Promise<SequenceSaveOutcome>;
+  onSave: (
+    name: string,
+    signal: AbortSignal,
+  ) => SequenceSaveOutcome | Promise<SequenceSaveOutcome>;
   onReplace: (
     expected: UserNoteSequence,
     signal: AbortSignal,
@@ -29,6 +35,7 @@ interface ActiveSubmission {
   readonly id: number;
   readonly cancelWait: () => void;
   readonly replacementController: AbortController | null;
+  timeoutId: number | null;
 }
 
 const snapshotSequence = (sequence: UserNoteSequence): UserNoteSequence => ({
@@ -74,14 +81,22 @@ export function SequenceCommitDialog({
     if (!active) return;
     activeSubmissionRef.current = null;
     submissionRef.current += 1;
-    active.replacementController?.abort(new DOMException(message, "AbortError"));
+    if (active.timeoutId !== null) {
+      window.clearTimeout(active.timeoutId);
+      active.timeoutId = null;
+    }
     active.cancelWait();
+    active.replacementController?.abort(new DOMException(message, "AbortError"));
     busyRef.current = false;
   };
 
   const releaseSubmission = (active: ActiveSubmission): boolean => {
     if (activeSubmissionRef.current !== active || active.id !== submissionRef.current) return false;
     activeSubmissionRef.current = null;
+    if (active.timeoutId !== null) {
+      window.clearTimeout(active.timeoutId);
+      active.timeoutId = null;
+    }
     busyRef.current = false;
     return true;
   };
@@ -96,19 +111,32 @@ export function SequenceCommitDialog({
       id: ++submissionRef.current,
       cancelWait: cancellation.cancel,
       replacementController,
+      timeoutId: null,
     };
     activeSubmissionRef.current = active;
+    active.timeoutId = window.setTimeout(() => {
+      if (activeSubmissionRef.current !== active) return;
+      const action = saveConflict ? "replacement" : "save";
+      cancelActiveSubmission(`Recording ${action} timed out.`);
+      setBusy(false);
+      if (saveConflict) setSaveConflict(null);
+      setError(`Recording ${action} timed out and may already have completed. Retrying this name is safe; Andoracle asks before any replacement.`);
+      setNameFocusRequest((request) => request + 1);
+    }, LIBRARY_WRITE_TIMEOUT_MS);
     setBusy(true);
     setError("");
     return { active, race: cancellation.race };
   };
 
   const returnToNameForm = (message = "Recording replacement cancelled."): void => {
+    const outcomeUncertain = busyRef.current;
     cancelActiveSubmission(message);
     busyRef.current = false;
     setBusy(false);
     setSaveConflict(null);
-    setError("");
+    setError(outcomeUncertain
+      ? "Recording replacement cancellation was requested, but it may already have completed. Retrying this name is safe; Andoracle asks before any replacement."
+      : "");
     setNameFocusRequest((request) => request + 1);
   };
 
@@ -174,9 +202,10 @@ export function SequenceCommitDialog({
       return;
     }
 
-    const { active, race } = beginSubmission(null);
+    const controller = new AbortController();
+    const { active, race } = beginSubmission(controller);
     try {
-      const result = await race(onSave(draftName));
+      const result = await race(onSave(draftName, controller.signal));
       if (!releaseSubmission(active)) return;
       setBusy(false);
       if (result !== null && typeof result === "object") {

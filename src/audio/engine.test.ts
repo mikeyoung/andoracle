@@ -333,6 +333,115 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
+  it("quarantines a cancelled raw worklet load across repeated startup retries", async () => {
+    const moduleLoad = deferred<void>();
+    installAudioFakes(
+      { addModule: () => moduleLoad.promise },
+      {},
+    );
+    const engine = new OdysseyAudioEngine();
+    const starting = engine.powerOn(DEFAULT_PARAMS);
+    await vi.waitFor(() => expect(contexts).toHaveLength(1));
+
+    await expect(engine.powerOff()).resolves.toBeUndefined();
+    await expect(starting).rejects.toMatchObject({ name: "AbortError" });
+    for (let retry = 0; retry < 10; retry += 1) {
+      await expect(engine.powerOn(DEFAULT_PARAMS)).rejects.toThrow(
+        "A previous audio processor load is still finishing. Try again shortly.",
+      );
+    }
+
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].audioWorklet.addModule).toHaveBeenCalledTimes(1);
+    moduleLoad.resolve();
+    await moduleLoad.promise;
+    await Promise.resolve();
+
+    await expect(engine.powerOn(DEFAULT_PARAMS)).resolves.toBeUndefined();
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1].audioWorklet.addModule).toHaveBeenCalledTimes(1);
+    await engine.dispose();
+  });
+
+  it("quarantines a cancelled raw resume across repeated power retries", async () => {
+    const resuming = deferred<void>();
+    installAudioFakes(
+      {
+        resume: async (context) => {
+          await resuming.promise;
+          context.state = "running";
+          context.onstatechange?.(new Event("statechange"));
+        },
+      },
+      {},
+    );
+    const engine = new OdysseyAudioEngine();
+    const starting = engine.powerOn(DEFAULT_PARAMS);
+    await vi.waitFor(() => expect(contexts[0]?.resume).toHaveBeenCalledTimes(1));
+
+    await expect(engine.powerOff()).resolves.toBeUndefined();
+    await expect(starting).rejects.toMatchObject({ name: "AbortError" });
+    for (let retry = 0; retry < 10; retry += 1) {
+      await expect(engine.powerOn(DEFAULT_PARAMS)).rejects.toThrow(
+        "A previous audio context transition is still finishing. Try again shortly.",
+      );
+    }
+
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].resume).toHaveBeenCalledTimes(1);
+    resuming.resolve();
+    await resuming.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    await expect(engine.powerOn(DEFAULT_PARAMS)).resolves.toBeUndefined();
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1].resume).toHaveBeenCalledTimes(1);
+    await engine.dispose();
+  });
+
+  it("quarantines a cancelled raw suspend across repeated power retries", async () => {
+    vi.useFakeTimers();
+    const suspending = deferred<void>();
+    installAudioFakes(
+      {
+        suspend: async (context) => {
+          await suspending.promise;
+          context.state = "suspended";
+          context.onstatechange?.(new Event("statechange"));
+        },
+      },
+      {},
+    );
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+
+    const stopping = engine.powerOff();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(contexts[0].suspend).toHaveBeenCalledTimes(1);
+    const interruptedStart = engine.powerOn(DEFAULT_PARAMS);
+    await expect(stopping).rejects.toMatchObject({ name: "AbortError" });
+    await expect(interruptedStart).rejects.toThrow(
+      "A previous audio context transition is still finishing. Try again shortly.",
+    );
+    for (let retry = 0; retry < 10; retry += 1) {
+      await expect(engine.powerOn(DEFAULT_PARAMS)).rejects.toThrow(
+        "A previous audio context transition is still finishing. Try again shortly.",
+      );
+    }
+
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].suspend).toHaveBeenCalledTimes(1);
+    suspending.resolve();
+    await suspending.promise;
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(engine.powerOn(DEFAULT_PARAMS)).resolves.toBeUndefined();
+    expect(contexts).toHaveLength(2);
+    await engine.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("rejects a non-44.1 kHz context, closes it, and permits a 44.1 kHz retry", async () => {
     installAudioFakes({ sampleRate: 48000 }, { sampleRate: 44100 });
     const engine = new OdysseyAudioEngine();

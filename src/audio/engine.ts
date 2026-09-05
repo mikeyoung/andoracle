@@ -1,5 +1,6 @@
 import workletUrl from "./odyssey-worklet.ts?worker&url";
 import type { OdysseyMeter, PerformanceState } from "./dsp-core";
+import { KeyedHostOperationGate } from "../host-operation";
 import type { SynthParams } from "../synth/params";
 
 export interface AudioEngineStatus {
@@ -35,6 +36,13 @@ export const AUDIO_CONTEXT_CLOSE_TIMEOUT_MS = 2_000;
 // engine has already returned an AbortError to its caller.
 let rawExternalPermissionSequence = 0;
 let pendingRawExternalPermissionId: number | null = null;
+
+// AudioWorklet.addModule() is another browser-owned operation with no abort
+// primitive. Keep at most one raw page-lifetime request so repeatedly
+// cancelling startup cannot accumulate abandoned module loads and promise
+// reactions. A retry is allowed once the raw request actually settles.
+const audioWorkletModuleLoadGate = new KeyedHostOperationGate<string, void>();
+const audioContextTransitionGate = new KeyedHostOperationGate<ContextTransitionKind, void>();
 
 const cancellationError = (message: string): Error => {
   const error = new Error(message);
@@ -299,12 +307,16 @@ export class OdysseyAudioEngine {
       return Promise.reject(cancellationError("An earlier audio-context transition is still pending."));
     }
 
-    let rawTransition: Promise<void>;
-    try {
-      rawTransition = Promise.resolve(kind === "resume" ? context.resume() : context.suspend());
-    } catch (error) {
-      return Promise.reject(error);
+    const hostTransition = audioContextTransitionGate.run(
+      kind,
+      () => kind === "resume" ? context.resume() : context.suspend(),
+    );
+    if (hostTransition.status === "busy") {
+      return Promise.reject(
+        new Error("A previous audio context transition is still finishing. Try again shortly."),
+      );
     }
+    const rawTransition = hostTransition.promise;
 
     const id = ++this.contextTransitionSequence;
     const owner = new WeakRef(this);
@@ -361,6 +373,12 @@ export class OdysseyAudioEngine {
     if (this.closingContexts.size > 0) {
       throw new Error("The previous audio context is still shutting down. Try again after it closes.");
     }
+    if (audioWorkletModuleLoadGate.isPending) {
+      throw new Error("A previous audio processor load is still finishing. Try again shortly.");
+    }
+    if (audioContextTransitionGate.isPending) {
+      throw new Error("A previous audio context transition is still finishing. Try again shortly.");
+    }
     const AudioContextConstructor = window.AudioContext
       ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextConstructor) throw new Error("This browser does not provide the Web Audio API.");
@@ -387,11 +405,18 @@ export class OdysseyAudioEngine {
           `A 44,100 Hz audio context is required; this device opened at ${context.sampleRate.toLocaleString()} Hz.`,
         );
       }
+      const moduleLoad = audioWorkletModuleLoadGate.run(
+        workletUrl,
+        () => context.audioWorklet.addModule(workletUrl),
+      );
+      if (moduleLoad.status === "busy") {
+        throw new Error("A previous audio processor load is still finishing. Try again shortly.");
+      }
       // Racing here (rather than only racing the public powerOn call) lets this
       // async frame release the engine and graph if the browser's module load
-      // promise never settles. The raw loser retains only the settled race.
+      // promise never settles. The page-wide gate owns the one raw loser.
       await Promise.race([
-        context.audioWorklet.addModule(workletUrl),
+        moduleLoad.promise,
         moduleLoadCancelled,
       ]);
       if (this.disposed || sequence !== this.lifecycleSequence || contextIsClosed(context)) {

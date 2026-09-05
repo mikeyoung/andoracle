@@ -29,6 +29,11 @@ import {
 import { PpcPads } from "./components/PpcPads";
 import { OperationCancellationRegistry } from "./cancellable-operation";
 import {
+  HOST_OPERATION_UI_TIMEOUT_MS,
+  KeyedHostOperationGate,
+  createHostOperationDeadline,
+} from "./host-operation";
+import {
   WebMidiSession,
   combinePerformanceSources,
   getWebMidiAvailability,
@@ -92,6 +97,32 @@ const RESERVED_PATCH_NAMES = new Set([
   userPatchNameKey("Custom patch"),
   ...FACTORY_PRESETS.map((preset) => userPatchNameKey(preset.name)),
 ]);
+
+type PatchShareResult = "shared" | "copied";
+
+// Web Share and clipboard promises are browser-owned and cannot be aborted.
+// Keep one page-lifetime pipeline so a released UI wait cannot let retries
+// stack native operations or accidentally share a different patch URL.
+const patchShareOperationGate = new KeyedHostOperationGate<string, PatchShareResult>();
+
+const performPatchShare = async (shareUrl: string): Promise<PatchShareResult> => {
+  if (typeof navigator.share === "function") {
+    try {
+      await navigator.share({
+        title: "Andoracle synthesizer patch",
+        text: "Playable patch for the Andoracle ARP Odyssey-inspired duophonic browser synthesizer.",
+        url: shareUrl,
+      });
+      return "shared";
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+    }
+  }
+
+  if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
+  await navigator.clipboard.writeText(shareUrl);
+  return "copied";
+};
 
 const EMPTY_METER: OdysseyMeter = {
   sampleRate: 44100,
@@ -259,6 +290,7 @@ function App() {
   const shareBusyRef = useRef(false);
   const clipboardToastTimerRef = useRef<number | null>(null);
   const updateBusyRef = useRef(false);
+  const cancelUpdateWaitRef = useRef<(() => void) | null>(null);
   const activeDeleteOperationRef = useRef<ActiveDeleteOperation | null>(null);
   const browserOperationsRef = useRef<OperationCancellationRegistry | null>(null);
   if (!browserOperationsRef.current) browserOperationsRef.current = new OperationCancellationRegistry();
@@ -278,6 +310,7 @@ function App() {
     param: ParamKey;
     origin: HTMLElement | null;
     displayScale: number;
+    restoreOriginFocus: boolean;
   } | null>(null);
   const [userPatches, setUserPatches] = useState<readonly UserPatch[]>(() => readUserPatches().patches);
   const [userSequences, setUserSequences] = useState<readonly UserNoteSequence[]>(() => readUserSequences().sequences);
@@ -533,6 +566,7 @@ function App() {
         clipboardToastTimerRef.current = null;
       }
       updateBusyRef.current = false;
+      cancelUpdateWaitRef.current = null;
       const deleteOperation = activeDeleteOperationRef.current;
       activeDeleteOperationRef.current = null;
       deleteOperation?.controller.abort(
@@ -858,15 +892,23 @@ function App() {
     setNotice(`Loaded sequence “${sequence.name}”.`);
   };
 
-  const saveSequenceTake = async (name: string): Promise<SequenceSaveOutcome> => {
+  const saveSequenceTake = async (
+    name: string,
+    signal: AbortSignal,
+  ): Promise<SequenceSaveOutcome> => {
     const take = sequenceTake?.take;
     if (!take) return "That recording is no longer available.";
     const cancellation = browserOperations.begin(
       "sequence-save",
       "Sequence save was cancelled because Andoracle closed.",
     );
+    const cancelWhenAborted = (): void => cancellation.cancel();
+    signal.addEventListener("abort", cancelWhenAborted, { once: true });
+    if (signal.aborted) cancellation.cancel();
     try {
-      const result = await cancellation.race(saveUserSequenceSafely(name, take));
+      const result = await cancellation.race(
+        saveUserSequenceSafely(name, take, undefined, undefined, cancellation.signal),
+      );
       switch (result.status) {
         case "saved":
           setUserSequences(result.sequences);
@@ -896,6 +938,13 @@ function App() {
           return "Another Andoracle tab is saving a sequence right now. Try again.";
       }
     } finally {
+      if (signal.aborted && mountedRef.current) {
+        const refreshed = readUserSequences();
+        if (refreshed.status === "ok" || refreshed.status === "recovered") {
+          setUserSequences(refreshed.sequences);
+        }
+      }
+      signal.removeEventListener("abort", cancelWhenAborted);
       browserOperations.finish("sequence-save", cancellation);
     }
   };
@@ -915,7 +964,7 @@ function App() {
     if (signal.aborted) cancellation.cancel();
     try {
       const result = await cancellation.race(
-        replaceUserSequenceSafely(expected, take, undefined, undefined, signal),
+        replaceUserSequenceSafely(expected, take, undefined, undefined, cancellation.signal),
       );
       switch (result.status) {
         case "replaced":
@@ -949,6 +998,12 @@ function App() {
           return "Another Andoracle tab is changing the sequence library right now. Try again.";
       }
     } finally {
+      if (signal.aborted && mountedRef.current) {
+        const refreshed = readUserSequences();
+        if (refreshed.status === "ok" || refreshed.status === "recovered") {
+          setUserSequences(refreshed.sequences);
+        }
+      }
       signal.removeEventListener("abort", cancelWhenAborted);
       browserOperations.finish("sequence-replace", cancellation);
     }
@@ -1000,7 +1055,10 @@ function App() {
     setPatchLibraryDialog({ mode, origin });
   };
 
-  const saveNamedPatch = async (name: string): Promise<PatchSaveOutcome> => {
+  const saveNamedPatch = async (
+    name: string,
+    signal: AbortSignal,
+  ): Promise<PatchSaveOutcome> => {
     const normalizedName = normalizeUserPatchName(name);
     if (normalizedName && RESERVED_PATCH_NAMES.has(userPatchNameKey(normalizedName))) {
       return `“${normalizedName}” is already used by the factory patch selector. Choose a different name.`;
@@ -1010,8 +1068,13 @@ function App() {
       "patch-save",
       "Patch save was cancelled because Andoracle closed.",
     );
+    const cancelWhenAborted = (): void => cancellation.cancel();
+    signal.addEventListener("abort", cancelWhenAborted, { once: true });
+    if (signal.aborted) cancellation.cancel();
     try {
-      const result = await cancellation.race(saveUserPatchSafely(name, paramsRef.current));
+      const result = await cancellation.race(
+        saveUserPatchSafely(name, paramsRef.current, undefined, undefined, cancellation.signal),
+      );
       switch (result.status) {
         case "saved":
           setUserPatches(result.patches);
@@ -1040,6 +1103,13 @@ function App() {
           return "Another Andoracle tab is saving a patch right now. Try again.";
       }
     } finally {
+      if (signal.aborted && mountedRef.current) {
+        const refreshed = readUserPatches();
+        if (refreshed.status === "ok" || refreshed.status === "recovered") {
+          setUserPatches(refreshed.patches);
+        }
+      }
+      signal.removeEventListener("abort", cancelWhenAborted);
       browserOperations.finish("patch-save", cancellation);
     }
   };
@@ -1057,7 +1127,7 @@ function App() {
     if (signal.aborted) cancellation.cancel();
     try {
       const result = await cancellation.race(
-        replaceUserPatchSafely(expected, paramsRef.current, undefined, undefined, signal),
+        replaceUserPatchSafely(expected, paramsRef.current, undefined, undefined, cancellation.signal),
       );
       switch (result.status) {
         case "replaced":
@@ -1087,6 +1157,12 @@ function App() {
           return "Another Andoracle tab is changing the patch library right now. Try again.";
       }
     } finally {
+      if (signal.aborted && mountedRef.current) {
+        const refreshed = readUserPatches();
+        if (refreshed.status === "ok" || refreshed.status === "recovered") {
+          setUserPatches(refreshed.patches);
+        }
+      }
       signal.removeEventListener("abort", cancelWhenAborted);
       browserOperations.finish("patch-replace", cancellation);
     }
@@ -1243,6 +1319,17 @@ function App() {
             return "Another Andoracle tab is changing the patch library right now. Try again.";
         }
       } finally {
+        if (authority.signal.aborted && mountedRef.current) {
+          const refreshed = readUserPatches();
+          if (refreshed.status === "ok" || refreshed.status === "recovered") {
+            setUserPatches(refreshed.patches);
+            if (!refreshed.patches.some(
+              (patch) => userPatchNameKey(patch.name) === userPatchNameKey(target.patch.name),
+            )) {
+              setNotice("Patch deletion cancellation was requested after the library changed. The patch may already have been deleted.");
+            }
+          }
+        }
         authority.signal.removeEventListener("abort", cancelWhenAborted);
         authority.release();
         browserOperations.finish("patch-delete", cancellation);
@@ -1313,6 +1400,27 @@ function App() {
           return "Another Andoracle tab is changing the recording library right now. Try again.";
       }
     } finally {
+      if (authority.signal.aborted && mountedRef.current) {
+        const refreshed = readUserSequences();
+        if (refreshed.status === "ok" || refreshed.status === "recovered") {
+          const targetStillExists = refreshed.sequences.some(
+            (sequence) => userSequenceNameKey(sequence.name) === userSequenceNameKey(target.sequence.name),
+          );
+          if (!targetStillExists) {
+            // Reconcile the loaded take before publishing the refreshed list.
+            // Otherwise the cross-tab effect sees a transient missing active
+            // name and overwrites this local cancellation/timeout explanation.
+            sequenceOperationRef.current += 1;
+            sequencePlayerRef.current?.stop(false);
+            activeSequenceTakeRef.current = null;
+            activeSequenceDataRef.current = null;
+            setSequencePlaybackState("stopped");
+            setActiveSequenceName(null);
+            setNotice("Recording deletion cancellation was requested after the library changed. The recording may already have been deleted.");
+          }
+          setUserSequences(refreshed.sequences);
+        }
+      }
       authority.signal.removeEventListener("abort", cancelWhenAborted);
       authority.release();
       browserOperations.finish("sequence-delete", cancellation);
@@ -1599,39 +1707,42 @@ function App() {
       return;
     }
 
+    const shareUrl = window.location.href;
+    const hostOperation = patchShareOperationGate.run(
+      shareUrl,
+      () => performPatchShare(shareUrl),
+    );
+    if (hostOperation.status === "busy") {
+      setNotice("A previous patch share is still finishing. Try again shortly.");
+      return;
+    }
+
     shareBusyRef.current = true;
     setShareBusy(true);
-    const shareUrl = window.location.href;
     const cancellation = browserOperations.begin(
       "share",
       "Patch sharing was cancelled because Andoracle closed.",
     );
+    const deadline = createHostOperationDeadline(
+      cancellation.cancel,
+      HOST_OPERATION_UI_TIMEOUT_MS,
+    );
     try {
-      if (typeof navigator.share === "function") {
-        try {
-          await cancellation.race(navigator.share({
-            title: "Andoracle synthesizer patch",
-            text: "Playable patch for the Andoracle ARP Odyssey-inspired duophonic browser synthesizer.",
-            url: shareUrl,
-          }));
-          if (mountedRef.current) setNotice("Patch shared.");
-          return;
-        } catch (error) {
-          if (error instanceof Error && error.name === "AbortError") {
-            if (mountedRef.current) setNotice("Patch sharing cancelled.");
-            return;
-          }
-        }
-      }
-
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
-      await cancellation.race(navigator.clipboard.writeText(shareUrl));
-      if (mountedRef.current) showClipboardToast();
-    } catch {
-      if (mountedRef.current) {
+      const result = await cancellation.race(hostOperation.promise);
+      if (!mountedRef.current) return;
+      if (result === "copied") showClipboardToast();
+      else setNotice("Patch shared.");
+    } catch (error) {
+      if (!mountedRef.current) return;
+      if (deadline.timedOut) {
+        setNotice("Patch sharing timed out. Copy the patch URL from the address bar.");
+      } else if (error instanceof Error && error.name === "AbortError") {
+        setNotice("Patch sharing cancelled.");
+      } else {
         setNotice("The current patch is in the URL. Copy it from your browser's address bar.");
       }
     } finally {
+      deadline.dispose();
       browserOperations.finish("share", cancellation);
       shareBusyRef.current = false;
       if (mountedRef.current) setShareBusy(false);
@@ -1795,12 +1906,27 @@ function App() {
     updateBusyRef.current = true;
     setUpdateBusy(true);
     const cancellation = browserOperations.begin("pwa-update", "App update wait was cancelled.");
+    cancelUpdateWaitRef.current = cancellation.cancel;
+    const deadline = createHostOperationDeadline(
+      cancellation.cancel,
+      HOST_OPERATION_UI_TIMEOUT_MS,
+    );
     try {
       await cancellation.race(updateServiceWorker(true));
     } catch (error) {
-      if (!mountedRef.current || (error instanceof Error && error.name === "AbortError")) return;
-      setNotice(error instanceof Error ? `The app update could not reload: ${error.message}` : "The app update could not reload.");
+      if (!mountedRef.current) return;
+      if (deadline.timedOut) {
+        setNotice("App update timed out. Try again or choose Later.");
+      } else if (!(error instanceof Error) || error.name !== "AbortError") {
+        setNotice(error instanceof Error && error.name === "PwaUpdatePendingError"
+          ? "A previous app update is still finishing. Try again shortly."
+          : error instanceof Error ? `The app update could not reload: ${error.message}` : "The app update could not reload.");
+      }
     } finally {
+      deadline.dispose();
+      if (cancelUpdateWaitRef.current === cancellation.cancel) {
+        cancelUpdateWaitRef.current = null;
+      }
       browserOperations.finish("pwa-update", cancellation);
       updateBusyRef.current = false;
       if (mountedRef.current) setUpdateBusy(false);
@@ -1811,10 +1937,15 @@ function App() {
     const shared = {
       accent,
       onChange: changeParam,
-      onDirectEdit: (param: ParamKey, origin: HTMLElement) => setDirectEditor({
+      onDirectEdit: (
+        param: ParamKey,
+        origin: HTMLElement,
+        restoreOriginFocus: boolean,
+      ) => setDirectEditor({
         param,
         origin,
         displayScale: param === "vco1Coarse" && paramsRef.current.vco1Mode < 0.5 ? 0.01 : 1,
+        restoreOriginFocus,
       }),
     };
     switch (item.kind) {
@@ -2024,7 +2155,18 @@ function App() {
           {needRefresh ? (
             <>
               <button type="button" disabled={updateBusy} onClick={() => void reloadUpdate()}>{updateBusy ? "Reloading…" : "Reload update"}</button>
-              <button type="button" disabled={updateBusy} onClick={() => setNeedRefresh(false)}>Later</button>
+              <button
+                type="button"
+                onClick={() => {
+                  cancelUpdateWaitRef.current?.();
+                  cancelUpdateWaitRef.current = null;
+                  updateBusyRef.current = false;
+                  setUpdateBusy(false);
+                  setNeedRefresh(false);
+                }}
+              >
+                Later
+              </button>
             </>
           ) : <button type="button" onClick={() => setOfflineReady(false)}>Dismiss</button>}
         </aside>
@@ -2090,6 +2232,8 @@ function App() {
           value={params[directEditor.param]}
           displayScale={directEditor.displayScale}
           origin={directEditor.origin}
+          fallbackOrigin={performanceFocusRef.current}
+          restoreOriginFocus={directEditor.restoreOriginFocus}
           onApply={changeParam}
           onClose={() => setDirectEditor(null)}
         />

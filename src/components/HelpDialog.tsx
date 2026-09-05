@@ -7,12 +7,15 @@ interface HelpDialogProps {
 
 export function HelpDialog({ origin, onClose }: HelpDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog && !dialog.open) dialog.showModal();
-    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+    const focusTimer = window.setTimeout(() => {
+      titleRef.current?.focus({ preventScroll: true });
+      if (dialogRef.current) dialogRef.current.scrollTop = 0;
+    }, 0);
     return () => {
       window.clearTimeout(focusTimer);
       origin?.focus({ preventScroll: true });
@@ -49,7 +52,7 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
         }}
       >
         <div className="modal-kicker">Andoracle quick start</div>
-        <h2 id="help-dialog-title">How to play</h2>
+        <h2 ref={titleRef} id="help-dialog-title" tabIndex={-1} autoFocus>How to play</h2>
         <p id="help-dialog-intro" className="modal-current">Press <strong>Power on</strong>, then use any input below.</p>
 
         <ul className="help-interface-list">
@@ -84,7 +87,7 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
         </ul>
 
         <div className="modal-actions">
-          <button ref={closeButtonRef} type="submit" className="button button--primary">Close help</button>
+          <button type="submit" className="button button--primary">Close help</button>
         </div>
       </form>
     </dialog>

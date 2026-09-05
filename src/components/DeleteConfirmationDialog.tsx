@@ -57,7 +57,7 @@ export const raceDeleteConfirmationWithAbort = <T,>(
 });
 
 export const deleteConfirmationTimeoutMessage = (kind: DeleteTargetKind): string => (
-  `Deleting this ${kind} took longer than 10 seconds and was cancelled. Check the library before retrying.`
+  `Deleting this ${kind} timed out and may already have completed. Review the library before retrying.`
 );
 
 /** Accessible, deliberately two-step confirmation for local-library deletion. */

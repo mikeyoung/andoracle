@@ -1,7 +1,12 @@
 export interface OperationCancellation {
   readonly cancel: () => void;
   readonly race: <T>(operation: T | PromiseLike<T>) => Promise<T>;
+  /** Aborts alongside the rejected race so underlying work can revoke writes. */
+  readonly signal: AbortSignal;
 }
+
+/** Bounds browser-owned library locks that fail to settle or invoke a callback. */
+export const LIBRARY_WRITE_TIMEOUT_MS = 10_000;
 
 /**
  * Lets a component release its async continuation even when the underlying
@@ -10,6 +15,8 @@ export interface OperationCancellation {
 export const createOperationCancellation = (message: string): OperationCancellation => {
   let rejectCancellation!: (error: Error) => void;
   let cancelled = false;
+  let cancellationError: Error | null = null;
+  const controller = new AbortController();
   const cancellation = new Promise<never>((_resolve, reject) => {
     rejectCancellation = reject;
   });
@@ -23,11 +30,22 @@ export const createOperationCancellation = (message: string): OperationCancellat
       cancelled = true;
       const error = new Error(message);
       error.name = "AbortError";
+      cancellationError = error;
+      // Queue the cancellation rejection before firing abort listeners so the
+      // public race always observes cancellation, even if an underlying API
+      // resolves its own abort path synchronously.
       rejectCancellation(error);
+      controller.abort(error);
     },
-    race: <T>(operation: T | PromiseLike<T>): Promise<T> => (
-      Promise.race([Promise.resolve(operation), cancellation])
-    ),
+    race: <T>(operation: T | PromiseLike<T>): Promise<T> => {
+      const observedOperation = Promise.resolve(operation);
+      if (cancellationError) {
+        void observedOperation.catch(() => undefined);
+        return Promise.reject(cancellationError);
+      }
+      return Promise.race([observedOperation, cancellation]);
+    },
+    signal: controller.signal,
   };
 };
 

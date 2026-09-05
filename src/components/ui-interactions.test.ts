@@ -14,8 +14,9 @@ import {
 import { OutputMeter, outputPeakPercent } from "./OutputMeter";
 import {
   DirectEntryInterruptionRegistry,
+  DeferredRangePointerFocusRelease,
   keyboardAdjustedRangeValue,
-  releaseRangePointerFocus,
+  LongPressClickSuppression,
   shouldConsumeLongPressClick,
   shouldEmitRangeChange,
 } from "./ParameterControls";
@@ -248,11 +249,44 @@ describe("output meter accessibility", () => {
 });
 
 describe("range control change filtering", () => {
-  it("releases focus after a pointer adjustment so computer-note keys resume", () => {
+  it("releases focus after Chromium's pointer default and owns the pending timer", () => {
     const blur = vi.fn();
+    const callbacks = new Map<number, () => void>();
+    const setTimer = vi.fn((callback: () => void) => {
+      callbacks.set(31, callback);
+      return 31;
+    });
+    const clearTimer = vi.fn((timerId: number) => callbacks.delete(timerId));
+    const release = new DeferredRangePointerFocusRelease(setTimer, clearTimer);
 
-    releaseRangePointerFocus({ blur });
+    release.schedule({ blur });
+    expect(blur).not.toHaveBeenCalled();
+    expect(setTimer).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 0);
+    callbacks.get(31)?.();
+    expect(blur).toHaveBeenCalledTimes(1);
 
+    release.schedule({ blur });
+    release.dispose();
+    expect(clearTimer).toHaveBeenCalledExactlyOnceWith(31);
+    expect(callbacks.size).toBe(0);
+  });
+
+  it("coalesces multiple terminal pointer events into one focus release", () => {
+    let nextTimer = 40;
+    const callbacks = new Map<number, () => void>();
+    const setTimer = vi.fn((callback: () => void) => {
+      const timer = nextTimer++;
+      callbacks.set(timer, callback);
+      return timer;
+    });
+    const clearTimer = vi.fn((timerId: number) => callbacks.delete(timerId));
+    const blur = vi.fn();
+    const release = new DeferredRangePointerFocusRelease(setTimer, clearTimer);
+
+    release.schedule({ blur });
+    release.schedule({ blur });
+    expect(clearTimer).toHaveBeenCalledExactlyOnceWith(40);
+    callbacks.get(41)?.();
     expect(blur).toHaveBeenCalledTimes(1);
   });
 
@@ -375,6 +409,66 @@ describe("direct-entry long-press click suppression", () => {
     expect(shouldConsumeLongPressClick(true, 2)).toBe(true);
     expect(shouldConsumeLongPressClick(true, 0)).toBe(false);
     expect(shouldConsumeLongPressClick(false, 1)).toBe(false);
+  });
+
+  it("expires a cancelled gesture latch at the next task boundary", () => {
+    const callbacks = new Map<number, () => void>();
+    const setTimer = vi.fn((callback: () => void) => {
+      callbacks.set(41, callback);
+      return 41;
+    });
+    const clearTimer = vi.fn((timerId: number) => callbacks.delete(timerId));
+    const suppression = new LongPressClickSuppression(setTimer, clearTimer);
+
+    suppression.arm();
+    suppression.expireAfterGesture();
+    expect(setTimer).toHaveBeenCalledExactlyOnceWith(expect.any(Function), 0);
+
+    callbacks.get(41)?.();
+    expect(suppression.consumeClick(1)).toBe(false);
+  });
+
+  it("still consumes the current gesture click before expiry", () => {
+    const callbacks = new Map<number, () => void>();
+    const setTimer = vi.fn((callback: () => void) => {
+      callbacks.set(42, callback);
+      return 42;
+    });
+    const clearTimer = vi.fn((timerId: number) => callbacks.delete(timerId));
+    const suppression = new LongPressClickSuppression(setTimer, clearTimer);
+
+    suppression.arm();
+    suppression.expireAfterGesture();
+
+    expect(suppression.consumeClick(1)).toBe(true);
+    expect(clearTimer).toHaveBeenCalledExactlyOnceWith(42);
+    expect(callbacks.size).toBe(0);
+    expect(suppression.consumeClick(1)).toBe(false);
+  });
+
+  it("never swallows an independent keyboard or assistive click", () => {
+    const suppression = new LongPressClickSuppression(vi.fn(() => 43), vi.fn());
+
+    suppression.arm();
+    expect(suppression.consumeClick(0)).toBe(false);
+    expect(suppression.consumeClick(1)).toBe(false);
+  });
+
+  it("clears its owned expiry timer on reset and disposal", () => {
+    let nextTimer = 50;
+    const setTimer = vi.fn(() => nextTimer++);
+    const clearTimer = vi.fn();
+    const suppression = new LongPressClickSuppression(setTimer, clearTimer);
+
+    suppression.arm();
+    suppression.expireAfterGesture();
+    suppression.reset();
+    suppression.arm();
+    suppression.expireAfterGesture();
+    suppression.dispose();
+
+    expect(clearTimer.mock.calls.map(([timerId]) => timerId)).toEqual([50, 51]);
+    expect(suppression.consumeClick(1)).toBe(false);
   });
 });
 
@@ -554,7 +648,7 @@ describe("local-library deletion confirmation", () => {
     await expect(raceDeleteConfirmationWithAbort(null, controller.signal))
       .rejects.toMatchObject({ name: "AbortError" });
     expect(deleteConfirmationTimeoutMessage("patch")).toBe(
-      "Deleting this patch took longer than 10 seconds and was cancelled. Check the library before retrying.",
+      "Deleting this patch timed out and may already have completed. Review the library before retrying.",
     );
   });
 });
