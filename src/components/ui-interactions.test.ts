@@ -8,7 +8,6 @@ import {
   isSyntheticActivationClick,
   isVisualActivationKey,
   Keyboard,
-  MOBILE_KEYBOARD_ROWS,
   shouldToggleAssistiveKey,
   visualKeySource,
 } from "./Keyboard";
@@ -91,12 +90,18 @@ describe("on-screen keyboard interaction contracts", () => {
   });
 
   it("partitions mobile keys into two octaves and one octave plus the final C", () => {
-    expect(MOBILE_KEYBOARD_ROWS.map((row) => [row.startNote, row.endNote, row.whiteCount])).toEqual([
+    const mobileRows = [
+      createKeyboardRowGeometry(36, 47),
+      createKeyboardRowGeometry(48, 59),
+      createKeyboardRowGeometry(60, 72),
+    ];
+
+    expect(mobileRows.map((row) => [row.startNote, row.endNote, row.whiteCount])).toEqual([
       [36, 47, 7],
       [48, 59, 7],
       [60, 72, 8],
     ]);
-    expect(MOBILE_KEYBOARD_ROWS.flatMap((row) => row.keys).map((key) => key.note)).toEqual(
+    expect(mobileRows.flatMap((row) => row.keys).map((key) => key.note)).toEqual(
       Array.from({ length: 37 }, (_, index) => 36 + index),
     );
   });

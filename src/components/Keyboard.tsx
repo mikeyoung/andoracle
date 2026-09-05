@@ -101,7 +101,7 @@ const KEYBOARD_GEOMETRY = createKeyboardRowGeometry(START_NOTE, END_NOTE);
 const KEYBOARD_GLOBAL_KEYS = new Map(KEYBOARD_GEOMETRY.keys.map((key) => [key.note, key]));
 const MOBILE_KEYBOARD_WHITE_COLUMNS = 8;
 const MOBILE_BLACK_KEY_WIDTH = 0.8;
-export const MOBILE_KEYBOARD_ROWS = [
+const MOBILE_KEYBOARD_ROWS = [
   createKeyboardRowGeometry(36, 47),
   createKeyboardRowGeometry(48, 59),
   createKeyboardRowGeometry(60, 72),
