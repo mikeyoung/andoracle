@@ -275,7 +275,7 @@ const PARAM_SPEC_DEFINITIONS = {
   ]),
   shInput1Level: percent("S/H input 1", "LFO / S&H", 0.55),
   shInput2Source: choice("S/H mixer input 2", "LFO / S&H", 0, [
-    { value: 0, label: "Pink noise" },
+    { value: 0, label: "Noise" },
     { value: 1, label: "VCO 2 pulse" },
   ]),
   shInput2Level: percent("S/H input 2", "LFO / S&H", 0.8),

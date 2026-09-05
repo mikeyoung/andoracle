@@ -15,6 +15,7 @@ import { OutputMeter, outputPeakPercent } from "./OutputMeter";
 import {
   DirectEntryInterruptionRegistry,
   keyboardAdjustedRangeValue,
+  releaseRangePointerFocus,
   shouldConsumeLongPressClick,
   shouldEmitRangeChange,
 } from "./ParameterControls";
@@ -246,6 +247,14 @@ describe("output meter accessibility", () => {
 });
 
 describe("range control change filtering", () => {
+  it("releases focus after a pointer adjustment so computer-note keys resume", () => {
+    const blur = vi.fn();
+
+    releaseRangePointerFocus({ blur });
+
+    expect(blur).toHaveBeenCalledTimes(1);
+  });
+
   it("does not emit an unchanged value but preserves real edits", () => {
     expect(shouldEmitRangeChange(0.5, 0.5)).toBe(false);
     expect(shouldEmitRangeChange(0.5, 0.51)).toBe(true);

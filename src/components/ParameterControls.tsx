@@ -182,6 +182,15 @@ const useDirectEntry = (
 export const shouldEmitRangeChange = (current: number, next: number): boolean => !Object.is(current, next);
 
 /**
+ * Pointer users expect the computer-note keys to become active again as soon
+ * as a fader gesture ends. Keyboard users never enter this path, so a fader
+ * reached with Tab keeps focus for Arrow, Home, End, and Page key adjustment.
+ */
+export const releaseRangePointerFocus = (target: Pick<HTMLInputElement, "blur">): void => {
+  target.blur();
+};
+
+/**
  * Gives controlled normalized faders predictable keyboard semantics. Native
  * one-unit movement in the 0–1000 presentation range can round straight back
  * to the current synth value (notably for integer and coarse-step controls),
@@ -272,6 +281,9 @@ export function RangeControl({
             const next = normalizedToParam(param, Number(event.target.value) / 1000);
             if (shouldEmitRangeChange(value, next)) onChange(param, next);
           }}
+          onPointerUp={(event) => releaseRangePointerFocus(event.currentTarget)}
+          onPointerCancel={(event) => releaseRangePointerFocus(event.currentTarget)}
+          onLostPointerCapture={(event) => releaseRangePointerFocus(event.currentTarget)}
         />
       </div>
       <output htmlFor={`param-${param}`}>{formatParamValue(param, displayedValue)}</output>
