@@ -1261,8 +1261,9 @@ kbd {
 
 .keyboard-banks {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 224px;
+  gap: 0;
   min-width: 0;
   padding: 4px;
   overflow: hidden;
@@ -1283,6 +1284,7 @@ kbd {
 .piano-key {
   position: absolute;
   top: 0;
+  min-width: 0;
   padding: 0;
   border-radius: 0 0 4px 4px;
   cursor: pointer;
@@ -1318,13 +1320,15 @@ kbd {
   bottom: 10px;
   left: 0;
   width: 100%;
+  overflow: hidden;
   font-size: 8px;
   font-weight: 750;
+  white-space: nowrap;
 }
 
 .piano-key--black {
   z-index: 3;
-  min-width: 24px;
+  min-width: 0;
   height: 139px;
   border: 1px solid #000;
   background:
@@ -1926,10 +1930,6 @@ footer span {
     text-align: left;
   }
 
-  .keyboard-banks {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .allocation-legend {
     justify-content: flex-start;
   }
@@ -1941,12 +1941,6 @@ footer span {
   footer span {
     display: block;
     margin-bottom: 6px;
-  }
-}
-
-@media (max-width: 700px) {
-  .keyboard-banks {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -2043,6 +2037,15 @@ footer span {
   .keyboard-header {
     padding-right: 10px;
     padding-left: 10px;
+  }
+
+  .piano-key:focus::after {
+    inset: 4px 1px;
+    border-width: 2px;
+  }
+
+  .piano-key--white span {
+    display: none;
   }
 
   .direct-entry form {

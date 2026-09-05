@@ -59,7 +59,7 @@ describe("1960s instrument finish", () => {
     expect(styles).toContain("--teal: #47746e");
     expect(styles).toMatch(/\.module\s*\{[\s\S]*?radial-gradient\(circle at 8px 8px,[\s\S]*?var\(--ivory-panel\)/);
     expect(styles).toMatch(/\.fader-shell input\[type="range"\]::\-webkit-slider-thumb\s*\{[\s\S]*?width:\s*34px;[\s\S]*?transform:\s*translateX\(\-14px\);/);
-    expect(styles).toMatch(/\.piano-key--black\s*\{[\s\S]*?min-width:\s*24px;/);
+    expect(styles).toMatch(/\.piano-key--black\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?height:\s*139px;/);
     expect(styles).toContain("@media (forced-colors: active)");
   });
 

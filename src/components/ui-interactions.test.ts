@@ -72,7 +72,8 @@ describe("on-screen keyboard interaction contracts", () => {
     expect(markup.match(/aria-keyshortcuts="Enter Space"/g)).toHaveLength(37);
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(37);
     expect(markup).toContain('role="group" aria-label="On-screen keyboard"');
-    expect(markup.match(/data-keyboard-row="true"/g)).toHaveLength(3);
+    expect(markup.match(/data-keyboard-row="true"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-label="C2 through C5"');
     expect(markup).not.toContain("Scrollable on-screen keyboard");
   });
 
@@ -94,21 +95,17 @@ describe("on-screen keyboard interaction contracts", () => {
     expect(highFocus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
   });
 
-  it("lays out each responsive keyboard bank entirely within its own width", () => {
-    const rows = [
-      createKeyboardRowGeometry(36, 47),
-      createKeyboardRowGeometry(48, 59),
-      createKeyboardRowGeometry(60, 72),
-    ];
+  it("lays out the complete keyboard as one proportional C2–C5 surface", () => {
+    const keyboard = createKeyboardRowGeometry(36, 72);
 
-    expect(rows.map((row) => row.keys.length)).toEqual([12, 12, 13]);
-    expect(rows.map((row) => row.whiteCount)).toEqual([7, 7, 8]);
-    for (const row of rows) {
-      for (const key of row.keys) {
-        const width = key.white ? 1 : 0.625;
-        expect(key.left).toBeGreaterThanOrEqual(0);
-        expect(key.left + width).toBeLessThanOrEqual(row.whiteCount);
-      }
+    expect(keyboard.keys).toHaveLength(37);
+    expect(keyboard.whiteCount).toBe(22);
+    for (const key of keyboard.keys) {
+      const width = key.white ? 1 : 0.625;
+      expect(key.left).toBeGreaterThanOrEqual(0);
+      expect(key.left + width).toBeLessThanOrEqual(keyboard.whiteCount);
+      expect((key.left / keyboard.whiteCount) * 100).toBeGreaterThanOrEqual(0);
+      expect(((key.left + width) / keyboard.whiteCount) * 100).toBeLessThanOrEqual(100);
     }
   });
 
