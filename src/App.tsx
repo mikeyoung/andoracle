@@ -33,6 +33,7 @@ import {
   KeyedHostOperationGate,
   createHostOperationDeadline,
 } from "./host-operation";
+import { NoteOwnershipIndex } from "./note-ownership";
 import {
   WebMidiSession,
   combinePerformanceSources,
@@ -137,6 +138,20 @@ const EMPTY_METER: OdysseyMeter = {
   peak: 0,
   rms: 0,
 };
+
+const metersMatch = (left: OdysseyMeter, right: OdysseyMeter): boolean => (
+  left.sampleRate === right.sampleRate
+  && left.gate === right.gate
+  && left.lowNote === right.lowNote
+  && left.highNote === right.highNote
+  && left.vco1Frequency === right.vco1Frequency
+  && left.vco2Frequency === right.vco2Frequency
+  && left.ar === right.ar
+  && left.adsr === right.adsr
+  && left.sampleHold === right.sampleHold
+  && left.peak === right.peak
+  && left.rms === right.rms
+);
 
 const KEYBOARD_MAP: Readonly<Record<string, number>> = {
   KeyA: 48,
@@ -273,6 +288,7 @@ function App() {
   const [activeNotes, setActiveNotes] = useState<ReadonlySet<number>>(new Set());
   const [inputResetEpoch, setInputResetEpoch] = useState(0);
   const noteSources = useRef(new Map<string, number>());
+  const noteOwnerCounts = useRef(new NoteOwnershipIndex());
   const sequenceRecorderRef = useRef<NoteSequenceRecorder | null>(null);
   const sequencePlayerRef = useRef<NoteSequencePlayer | null>(null);
   const finishRecordingRef = useRef<(reason: "manual" | "idle") => void>(() => undefined);
@@ -376,69 +392,76 @@ function App() {
     clearPwaRegistrationError();
   }, [clearPwaRegistrationError, pwaRegistrationError]);
 
-  useEffect(() => {
-    paramsRef.current = params;
+  const persistPatchState = useCallback((notifyFailure: boolean): void => {
+    if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
+    urlSyncTimerRef.current = null;
     try {
-      window.localStorage.setItem(PATCH_STORAGE_KEY, JSON.stringify(params));
+      window.localStorage.setItem(PATCH_STORAGE_KEY, JSON.stringify(paramsRef.current));
     } catch {
-      setNotice("This browser is blocking patch storage; the synth still works, but edits will not persist.");
+      if (notifyFailure) {
+        setNotice("This browser is blocking patch storage; the synth still works, but edits will not persist.");
+      }
     }
 
     if (urlSyncBlockedRef.current) return;
-    const syncUrl = (): void => {
-      urlSyncTimerRef.current = null;
-      if (window.location.href !== lastHandledPatchHrefRef.current) return;
-      try {
-        replacePatchUrl(paramsRef.current);
-        lastHandledPatchHrefRef.current = window.location.href;
-        urlSyncFailureNotifiedRef.current = false;
-      } catch {
-        if (!urlSyncFailureNotifiedRef.current) {
-          urlSyncFailureNotifiedRef.current = true;
-          setNotice("The patch is working, but this browser would not update its shareable URL.");
-        }
+    if (window.location.href !== lastHandledPatchHrefRef.current) return;
+    try {
+      replacePatchUrl(paramsRef.current);
+      lastHandledPatchHrefRef.current = window.location.href;
+      urlSyncFailureNotifiedRef.current = false;
+    } catch {
+      if (notifyFailure && !urlSyncFailureNotifiedRef.current) {
+        urlSyncFailureNotifiedRef.current = true;
+        setNotice("The patch is working, but this browser would not update its shareable URL.");
       }
-    };
+    }
+  }, []);
+
+  useEffect(() => {
+    paramsRef.current = params;
 
     if (!urlSyncStartedRef.current) {
       urlSyncStartedRef.current = true;
-      syncUrl();
+      persistPatchState(true);
       return;
     }
 
     if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
-    urlSyncTimerRef.current = window.setTimeout(syncUrl, 120);
+    // localStorage is synchronous. Sharing one trailing timer with URL updates
+    // prevents a touch-drag from blocking the main thread on every fader event.
+    urlSyncTimerRef.current = window.setTimeout(() => persistPatchState(true), 120);
     return () => {
       if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
       urlSyncTimerRef.current = null;
     };
-  }, [params]);
+  }, [params, persistPatchState]);
 
   useEffect(() => {
     const flushPatchUrl = (): void => {
-      if (urlSyncBlockedRef.current) return;
-      if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
-      urlSyncTimerRef.current = null;
-      if (window.location.href !== lastHandledPatchHrefRef.current) return;
-      try {
-        replacePatchUrl(paramsRef.current);
-        lastHandledPatchHrefRef.current = window.location.href;
-      } catch {
-        // A page that is already leaving cannot usefully surface this failure.
-      }
+      persistPatchState(false);
     };
     const flushWhenHidden = (): void => {
       if (document.hidden) flushPatchUrl();
     };
+    const flushAfterParameterCommit = (event: Event): void => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest("[data-param]")) flushPatchUrl();
+    };
     window.addEventListener("blur", flushPatchUrl);
+    window.addEventListener("beforeunload", flushPatchUrl);
+    window.addEventListener("change", flushAfterParameterCommit);
+    window.addEventListener("keyup", flushAfterParameterCommit);
     window.addEventListener("pagehide", flushPatchUrl);
     document.addEventListener("visibilitychange", flushWhenHidden);
     return () => {
       window.removeEventListener("blur", flushPatchUrl);
+      window.removeEventListener("beforeunload", flushPatchUrl);
+      window.removeEventListener("change", flushAfterParameterCommit);
+      window.removeEventListener("keyup", flushAfterParameterCommit);
       window.removeEventListener("pagehide", flushPatchUrl);
       document.removeEventListener("visibilitychange", flushWhenHidden);
     };
-  }, []);
+  }, [persistPatchState]);
 
   useEffect(() => {
     const storageChanged = (event: StorageEvent): void => {
@@ -530,7 +553,10 @@ function App() {
 
   useEffect(() => {
     mountedRef.current = true;
-    const unsubscribeMeter = engine.onMeter(setMeter);
+    const unsubscribeMeter = engine.onMeter((nextMeter) => {
+      if (!mountedRef.current) return;
+      setMeter((currentMeter) => metersMatch(currentMeter, nextMeter) ? currentMeter : nextMeter);
+    });
     const unsubscribeStatus = engine.onStatus((status) => {
       if (!mountedRef.current) return;
       setAudioStatus(status);
@@ -689,11 +715,10 @@ function App() {
     }
     if (previous !== undefined) {
       noteSources.current.delete(source);
-      if (![...noteSources.current.values()].includes(previous)) engine.noteOff(previous);
+      if (noteOwnerCounts.current.remove(previous)) engine.noteOff(previous);
     }
-    const alreadyHeld = [...noteSources.current.values()].includes(note);
     noteSources.current.set(source, note);
-    if (!alreadyHeld) engine.noteOn(note);
+    if (noteOwnerCounts.current.add(note)) engine.noteOn(note);
     else engine.keyboardTrigger();
     syncActiveNotes();
   }, [engine, syncActiveNotes]);
@@ -705,13 +730,14 @@ function App() {
       sequenceRecorderRef.current?.noteOff(source);
     }
     noteSources.current.delete(source);
-    if (![...noteSources.current.values()].includes(note)) engine.noteOff(note);
+    if (noteOwnerCounts.current.remove(note)) engine.noteOff(note);
     syncActiveNotes();
   }, [engine, syncActiveNotes]);
 
   const releasePhysicalNotes = useCallback((): void => {
     sequenceRecorderRef.current?.releaseMatching((source) => !source.startsWith(SEQUENCE_SOURCE_PREFIX));
     noteSources.current.clear();
+    noteOwnerCounts.current.clear();
     midiSessionRef.current?.forgetHeldNotes();
     performanceSources.current = {
       ppcBendSemitones: 0,
@@ -735,12 +761,9 @@ function App() {
     for (const [source, note] of noteSources.current) {
       if (!isUiSource(source)) continue;
       noteSources.current.delete(source);
-      releasedNotes.add(note);
+      if (noteOwnerCounts.current.remove(note)) releasedNotes.add(note);
     }
-    const remainingNotes = new Set(noteSources.current.values());
-    for (const note of releasedNotes) {
-      if (!remainingNotes.has(note)) engine.noteOff(note);
-    }
+    for (const note of releasedNotes) engine.noteOff(note);
     performanceSources.current.ppcBendSemitones = 0;
     performanceSources.current.ppcVibratoSemitones = 0;
     syncActiveNotes();
@@ -1021,6 +1044,19 @@ function App() {
     engine.setParams({ [key]: normalizedValue } as Partial<SynthParams>);
     if (key === "ppcBendRange" || key === "ppcVibratoRange") syncPerformance(next);
   }, [engine, syncPerformance]);
+
+  const openDirectEditor = useCallback((
+    param: ParamKey,
+    origin: HTMLElement,
+    restoreOriginFocus: boolean,
+  ): void => {
+    setDirectEditor({
+      param,
+      origin,
+      displayScale: param === "vco1Coarse" && paramsRef.current.vco1Mode < 0.5 ? 0.01 : 1,
+      restoreOriginFocus,
+    });
+  }, []);
 
   const applyPatch = useCallback((name: string): void => {
     const preset = FACTORY_PRESETS.find((candidate) => candidate.name === name);
@@ -1937,16 +1973,7 @@ function App() {
     const shared = {
       accent,
       onChange: changeParam,
-      onDirectEdit: (
-        param: ParamKey,
-        origin: HTMLElement,
-        restoreOriginFocus: boolean,
-      ) => setDirectEditor({
-        param,
-        origin,
-        displayScale: param === "vco1Coarse" && paramsRef.current.vco1Mode < 0.5 ? 0.01 : 1,
-        restoreOriginFocus,
-      }),
+      onDirectEdit: openDirectEditor,
     };
     switch (item.kind) {
       case "range":

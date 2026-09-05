@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 const PANEL_SCREW_CORNERS = [
   "top-left",
   "top-right",
@@ -6,7 +8,7 @@ const PANEL_SCREW_CORNERS = [
 ] as const;
 
 /** Four decorative fasteners shared by every framed synthesizer panel. */
-export function PanelScrews() {
+function PanelScrewsComponent() {
   return (
     <span className="panel-screws" aria-hidden="true">
       {PANEL_SCREW_CORNERS.map((corner) => (
@@ -19,3 +21,5 @@ export function PanelScrews() {
     </span>
   );
 }
+
+export const PanelScrews = memo(PanelScrewsComponent);

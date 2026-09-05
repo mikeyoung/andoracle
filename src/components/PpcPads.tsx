@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useRef,
@@ -59,7 +60,7 @@ export const clearPpcOwnership = (
   return wasActive;
 };
 
-export function PpcPads({ bendRange, vibratoRange, resetEpoch, onPerformance }: PpcPadsProps) {
+function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }: PpcPadsProps) {
   const [pressed, setPressed] = useState<Set<PadKind>>(new Set());
   const pointerValues = useRef(new Map<number, { kind: PadKind; depth: number }>());
   const keyboardActivations = useRef<Record<PadKind, Set<PadActivation>>>({
@@ -248,3 +249,5 @@ export function PpcPads({ bendRange, vibratoRange, resetEpoch, onPerformance }: 
     </div>
   );
 }
+
+export const PpcPads = memo(PpcPadsComponent);

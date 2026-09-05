@@ -2334,6 +2334,17 @@ footer span {
 }
 
 @media (max-width: 360px) {
+  .piano-key--white span,
+  .piano-key--white[data-note="36"] span,
+  .piano-key--white[data-note="72"] span {
+    right: auto;
+    bottom: 8px;
+    left: 50%;
+    font-size: 7px;
+    writing-mode: vertical-rl;
+    transform: translateX(-50%) rotate(180deg);
+  }
+
   .sequence-review-actions {
     flex-direction: column;
   }

@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useRef,
   type CSSProperties,
@@ -342,7 +343,7 @@ export const nextChoiceValue = (param: ParamKey, value: number): number | undefi
 
 const accentStyle = (accent: string): CSSProperties => ({ "--accent": accent } as CSSProperties);
 
-export function RangeControl({
+function RangeControlComponent({
   param,
   value,
   accent,
@@ -408,7 +409,9 @@ export function RangeControl({
   );
 }
 
-export function ChoiceControl({
+export const RangeControl = memo(RangeControlComponent);
+
+function ChoiceControlComponent({
   param,
   value,
   accent,
@@ -445,7 +448,9 @@ export function ChoiceControl({
   );
 }
 
-export function ToggleControl({
+export const ChoiceControl = memo(ChoiceControlComponent);
+
+function ToggleControlComponent({
   param,
   value,
   accent,
@@ -478,6 +483,8 @@ export function ToggleControl({
   );
 }
 
+export const ToggleControl = memo(ToggleControlComponent);
+
 interface RoutedFaderProps {
   source: ParamKey;
   amount: ParamKey;
@@ -487,7 +494,7 @@ interface RoutedFaderProps {
   onDirectEdit: SharedControlProps["onDirectEdit"];
 }
 
-export function RoutedFader({ source, amount, values, accent, onChange, onDirectEdit }: RoutedFaderProps) {
+function RoutedFaderComponent({ source, amount, values, accent, onChange, onDirectEdit }: RoutedFaderProps) {
   return (
     <div className="route-control" style={accentStyle(accent)}>
       <ChoiceControl
@@ -509,3 +516,14 @@ export function RoutedFader({ source, amount, values, accent, onChange, onDirect
     </div>
   );
 }
+
+export const RoutedFader = memo(
+  RoutedFaderComponent,
+  (previous, next) => previous.source === next.source
+    && previous.amount === next.amount
+    && previous.values[previous.source] === next.values[next.source]
+    && previous.values[previous.amount] === next.values[next.amount]
+    && previous.accent === next.accent
+    && previous.onChange === next.onChange
+    && previous.onDirectEdit === next.onDirectEdit,
+);

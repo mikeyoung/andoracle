@@ -1,4 +1,5 @@
 import {
+  memo,
   useEffect,
   useRef,
   useState,
@@ -96,8 +97,12 @@ export const createKeyboardRowGeometry = (startNote: number, endNote: number): K
 };
 
 const KEYBOARD_GEOMETRY = createKeyboardRowGeometry(START_NOTE, END_NOTE);
+const KEYBOARD_RENDER_KEYS = [
+  ...KEYBOARD_GEOMETRY.keys.filter((key) => key.white),
+  ...KEYBOARD_GEOMETRY.keys.filter((key) => !key.white),
+];
 
-export function Keyboard({
+function KeyboardComponent({
   activeNotes,
   allocatedLow,
   allocatedHigh,
@@ -306,7 +311,7 @@ export function Keyboard({
           aria-label={`${midiNoteName(KEYBOARD_GEOMETRY.startNote)} through ${midiNoteName(KEYBOARD_GEOMETRY.endNote)}`}
           data-keyboard-row
         >
-          {[true, false].flatMap((white) => KEYBOARD_GEOMETRY.keys.filter((key) => key.white === white)).map((key) => {
+          {KEYBOARD_RENDER_KEYS.map((key) => {
             const active = activeNotes.has(key.note);
             const low = allocatedLow === key.note;
             const high = allocatedHigh === key.note;
@@ -348,3 +353,5 @@ export function Keyboard({
     </section>
   );
 }
+
+export const Keyboard = memo(KeyboardComponent);

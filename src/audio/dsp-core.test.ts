@@ -970,6 +970,27 @@ describe("OdysseyDSP", () => {
     expect(dsp.getHeldNotes()).toEqual([48]);
   });
 
+  it("preserves bounded articulation order after the circular queue wraps", () => {
+    const dsp = new OdysseyDSP(44100);
+    dsp.noteOn(48);
+    for (let index = 0; index < 400; index += 1) dsp.keyboardTrigger();
+
+    render(dsp, 150);
+    expect(dsp.getDiagnostics().pendingArticulations).toBe(101);
+    for (let index = 0; index < 600; index += 1) dsp.keyboardTrigger();
+    expect(dsp.getDiagnostics().pendingArticulations).toBe(512);
+
+    const [left, right] = render(dsp, 4096);
+    assertFiniteAndBounded(left);
+    assertFiniteAndBounded(right);
+    expect(dsp.getDiagnostics()).toMatchObject({
+      pendingArticulations: 0,
+      pendingKeyboardTriggers: 0,
+      triggerCount: 812,
+    });
+    expect(dsp.getHeldNotes()).toEqual([48]);
+  });
+
   it("starts LFO-repeat ADSR immediately without falsely clocking LFO-selected S/H", () => {
     const dsp = new OdysseyDSP(44100);
     dsp.setParams({
@@ -1214,5 +1235,44 @@ describe("OdysseyDSP", () => {
     const typeThreeRatio = response(3, 8000) / response(3, 250);
     expect(typeOneRatio).toBeGreaterThan(typeTwoRatio * 2.5);
     expect(typeOneRatio).toBeGreaterThan(typeThreeRatio * 2.5);
+  });
+
+  it("switches repeatedly between all filter models without stale-state instability", () => {
+    const dsp = new OdysseyDSP(44100);
+    dsp.setParams({
+      mixer1Level: 0,
+      mixer2Level: 0,
+      mixer3Level: 0,
+      externalLevel: 1,
+      filterCutoff: 4200,
+      filterResonance: 1,
+      filterMod1Amount: 0,
+      filterMod2Amount: 0,
+      filterMod3Amount: 0,
+      hpfCutoff: 16,
+      vcaInitialGain: 1,
+      vcaEnvelopeAmount: 0,
+      masterVolume: 1,
+    });
+
+    let peak = 0;
+    for (let block = 0; block < 180; block += 1) {
+      dsp.setParams({ filterType: block % 3 + 1 });
+      const input = Float32Array.from(
+        { length: 128 },
+        (_, frame) => Math.sin((block * 128 + frame) * Math.PI * 2 * 733 / 44100) * 0.4,
+      );
+      const left = new Float32Array(input.length);
+      const right = new Float32Array(input.length);
+      dsp.process(left, right, input);
+      for (let frame = 0; frame < left.length; frame += 1) {
+        expect(Number.isFinite(left[frame])).toBe(true);
+        expect(Number.isFinite(right[frame])).toBe(true);
+        peak = Math.max(peak, Math.abs(left[frame]), Math.abs(right[frame]));
+      }
+    }
+
+    expect(peak).toBeGreaterThan(0.01);
+    expect(peak).toBeLessThanOrEqual(1);
   });
 });
