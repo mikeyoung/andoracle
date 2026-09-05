@@ -27,6 +27,7 @@ type WorkletMessage =
 
 class AndoracleProcessor extends AudioWorkletProcessor {
   private readonly dsp = new OdysseyDSP(sampleRate);
+  private externalInputBuffer = new Float32Array(0);
   private blocksUntilMeter = 1;
   private meterRequested = false;
 
@@ -66,12 +67,33 @@ class AndoracleProcessor extends AudioWorkletProcessor {
     };
   }
 
+  private foldExternalInput(
+    channels: Float32Array[] | undefined,
+    frameCount: number,
+  ): Float32Array | undefined {
+    if (!channels?.length) return undefined;
+    if (channels.length === 1) return channels[0];
+    if (this.externalInputBuffer.length !== frameCount) {
+      this.externalInputBuffer = new Float32Array(frameCount);
+    }
+
+    const gain = 1 / channels.length;
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      let sample = 0;
+      for (let channel = 0; channel < channels.length; channel += 1) {
+        sample += channels[channel]?.[frame] ?? 0;
+      }
+      this.externalInputBuffer[frame] = sample * gain;
+    }
+    return this.externalInputBuffer;
+  }
+
   process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const output = outputs[0];
     if (!output?.[0]) return true;
     const left = output[0];
     const right = output[1] ?? output[0];
-    this.dsp.process(left, right, inputs[0]?.[0]);
+    this.dsp.process(left, right, this.foldExternalInput(inputs[0], left.length));
     this.blocksUntilMeter -= 1;
     if (this.blocksUntilMeter <= 0) {
       if (this.meterRequested) {

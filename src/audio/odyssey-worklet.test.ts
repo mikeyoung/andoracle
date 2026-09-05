@@ -19,6 +19,7 @@ interface InspectableDsp {
   readonly performance: { bendSemitones: number; vibratoSemitones: number };
   getHeldNotes(): number[];
   getDiagnostics(): { pendingArticulations: number };
+  process(left: Float32Array, right: Float32Array, externalInput?: Float32Array): void;
 }
 
 describe("AndoracleProcessor", () => {
@@ -83,7 +84,7 @@ describe("AndoracleProcessor", () => {
     expect(processor.port.postMessage).toHaveBeenCalledTimes(2);
   });
 
-  it("routes every engine command and external input through the worklet bridge", async () => {
+  it("routes every engine command and right-only stereo input through the worklet bridge", async () => {
     let Processor: (new () => RegisteredProcessor) | undefined;
     class FakeAudioWorkletProcessor {
       readonly port: FakePort = {
@@ -153,7 +154,11 @@ describe("AndoracleProcessor", () => {
       (_, frame) => Math.sin(frame * Math.PI * 2 * 440 / 44_100) * 0.25,
     );
     send({ type: "all-sound-off" });
-    processor.process([[input]], [[silentLeft, silentRight]], {});
+    processor.process(
+      [[new Float32Array(input.length), input]],
+      [[silentLeft, silentRight]],
+      {},
+    );
     expect([...silentLeft, ...silentRight].every((sample) => sample === 0)).toBe(true);
 
     send({ type: "resume-sound" });
@@ -161,7 +166,11 @@ describe("AndoracleProcessor", () => {
     for (let block = 0; block < 32; block += 1) {
       const left = new Float32Array(128);
       const right = new Float32Array(128);
-      processor.process([[input]], [[left, right]], {});
+      processor.process(
+        [[new Float32Array(input.length), input]],
+        [[left, right]],
+        {},
+      );
       externalEnergy += left.reduce((sum, sample) => sum + Math.abs(sample), 0);
     }
     expect(externalEnergy).toBeGreaterThan(1);
@@ -175,5 +184,66 @@ describe("AndoracleProcessor", () => {
       type: "meter",
       meter: expect.objectContaining({ sampleRate: 44_100 }),
     });
+  });
+
+  it("folds every external-input channel to mono and reuses its stable-size buffer", async () => {
+    let Processor: (new () => RegisteredProcessor) | undefined;
+    class FakeAudioWorkletProcessor {
+      readonly port: FakePort = {
+        onmessage: null,
+        postMessage: vi.fn(),
+      };
+    }
+
+    vi.stubGlobal("sampleRate", 44_100);
+    vi.stubGlobal("AudioWorkletProcessor", FakeAudioWorkletProcessor);
+    vi.stubGlobal(
+      "registerProcessor",
+      (_name: string, constructor: new () => RegisteredProcessor) => {
+        Processor = constructor;
+      },
+    );
+    await import("./odyssey-worklet");
+    const processor = new (Processor as new () => RegisteredProcessor)();
+    const dsp = (processor as unknown as { dsp: InspectableDsp }).dsp;
+    const processSpy = vi.spyOn(dsp, "process");
+
+    const render = (channels: Float32Array[], frameCount: number): Float32Array => {
+      processor.process(
+        [channels],
+        [[new Float32Array(frameCount), new Float32Array(frameCount)]],
+        {},
+      );
+      const folded = processSpy.mock.lastCall?.[2];
+      expect(folded).toBeInstanceOf(Float32Array);
+      return folded as Float32Array;
+    };
+
+    const left = Float32Array.from([0, 0, 0, 0]);
+    const right = Float32Array.from([0.8, -0.4, 0.2, -1]);
+    const firstBuffer = render([left, right], 4);
+    expect(Array.from(firstBuffer)).toEqual(
+      Array.from(right, (sample) => Math.fround(sample * 0.5)),
+    );
+
+    const stableBuffer = render(
+      [Float32Array.from([0.2, 0.4, 0.6, 0.8]), new Float32Array(4)],
+      4,
+    );
+    expect(stableBuffer).toBe(firstBuffer);
+    expect(Array.from(stableBuffer)).toEqual(
+      Array.from(Float32Array.from([0.1, 0.2, 0.3, 0.4])),
+    );
+
+    const resizedBuffer = render(
+      [Float32Array.from([0.6, -0.2]), Float32Array.from([0.2, 0.4])],
+      2,
+    );
+    expect(resizedBuffer).not.toBe(firstBuffer);
+    expect(Array.from(resizedBuffer)).toEqual(Array.from(Float32Array.from([0.4, 0.1])));
+    expect(render([new Float32Array(2), new Float32Array(2)], 2)).toBe(resizedBuffer);
+
+    const mono = Float32Array.from([0.25, -0.5]);
+    expect(render([mono], 2)).toBe(mono);
   });
 });

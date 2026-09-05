@@ -117,6 +117,7 @@ export function PatchLibraryDialog({
               type="text"
               autoComplete="off"
               value={draftName}
+              readOnly={busy}
               aria-invalid={Boolean(error)}
               aria-describedby="patch-library-help patch-library-error"
               onChange={(event) => {

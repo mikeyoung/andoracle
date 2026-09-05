@@ -255,6 +255,22 @@ export class NoteSequencePlayer {
     this.paused = false;
     this.playing = true;
     const generation = ++this.generation;
+    // A user-input task can run before an already-due timer callback after a
+    // long main-thread stall. Bring the logical playhead up to the frozen
+    // pause position while sources are still silent so Resume never chases a
+    // note whose recorded release has already passed (or emits a whole stale
+    // phrase at once).
+    this.advanceSilentlyTo(this.pausedElapsedMs);
+    if (this.cursor >= this.events.length) {
+      this.playing = false;
+      this.releaseAllSources();
+      this.events = [];
+      this.cursor = 0;
+      this.nextDueMs = 0;
+      this.pausedElapsedMs = 0;
+      this.handlers.finished("ended");
+      return false;
+    }
     this.restoreSources();
     if (!this.playing || generation !== this.generation) return false;
     this.tick(generation);
@@ -331,7 +347,7 @@ export class NoteSequencePlayer {
       const sources = this.sourcesByNote.get(event.note) ?? [];
       sources.push(source);
       this.sourcesByNote.set(event.note, sources);
-      this.handlers.noteOn(source, event.note);
+      if (this.sourcesAudible) this.handlers.noteOn(source, event.note);
       return;
     }
 
@@ -340,6 +356,17 @@ export class NoteSequencePlayer {
     if (!sources || !source) return;
     if (sources.length === 0) this.sourcesByNote.delete(event.note);
     if (this.sourcesAudible) this.handlers.noteOff(source);
+  }
+
+  private advanceSilentlyTo(elapsedMs: number): void {
+    while (this.cursor < this.events.length && this.nextDueMs <= elapsedMs) {
+      const event = this.events[this.cursor];
+      if (!event) break;
+      this.cursor += 1;
+      const next = this.events[this.cursor];
+      if (next) this.nextDueMs += next.deltaMs;
+      this.dispatch(event);
+    }
   }
 
   private clearTimer(): void {

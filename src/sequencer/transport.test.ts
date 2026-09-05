@@ -408,6 +408,50 @@ describe("NoteSequencePlayer", () => {
     expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(1);
   });
 
+  it("does not chase a note whose overdue release was still waiting in the timer queue", () => {
+    const { time, calls, player } = setup();
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]));
+    const pending = [...time.tasks.entries()][0];
+    expect(pending).toBeDefined();
+    if (!pending) throw new Error("Expected a playback timer.");
+    time.tasks.delete(pending[0]);
+    time.time = 150;
+
+    expect(player.pause()).toBe(true);
+    expect(player.resume()).toBe(false);
+
+    expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(1);
+    expect(calls.filter((call) => call.startsWith("off:"))).toHaveLength(1);
+    expect(calls.at(-1)).toBe("finished:ended");
+    expect(player.isActive).toBe(false);
+    expect(time.tasks.size).toBe(0);
+  });
+
+  it("silently catches up an overdue attack and chases it only when still held", () => {
+    const { time, calls, player } = setup();
+    player.play(take([
+      { deltaMs: 100, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]));
+    const pending = [...time.tasks.entries()][0];
+    expect(pending).toBeDefined();
+    if (!pending) throw new Error("Expected a playback timer.");
+    time.tasks.delete(pending[0]);
+    time.time = 150;
+
+    expect(player.pause()).toBe(true);
+    expect(calls).toEqual([]);
+    expect(player.resume()).toBe(true);
+    expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(1);
+    expect(time.nextDelay()).toBe(50);
+    time.advance(50);
+    expect(calls.filter((call) => call.startsWith("off:"))).toHaveLength(1);
+    expect(calls.at(-1)).toBe("finished:ended");
+  });
+
   it("does not replay an event when a note callback pauses re-entrantly", () => {
     const time = new FakeTime();
     const calls: string[] = [];

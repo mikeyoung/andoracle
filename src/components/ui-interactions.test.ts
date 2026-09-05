@@ -410,6 +410,7 @@ describe("help dialog", () => {
       "MIDI keyboard",
       "Live audio",
       "Hands-free",
+      "Note sequencer",
     ]) expect(markup).toContain(label);
     expect(markup).toContain("A S D F G H J K L ;");
     expect(markup).toContain("W E T Y U O P");
