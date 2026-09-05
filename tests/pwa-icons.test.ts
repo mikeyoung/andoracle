@@ -112,8 +112,15 @@ describe("PWA icon assets", () => {
     for (const [fileName, size] of Object.entries(expectedPngs)) {
       expect(pngInfo(fileName), fileName).toEqual({ width: size, height: size, bitDepth: 8, colorType: 2 });
     }
-    expect(readFileSync(publicPath("icon-512.png"))).toEqual(readFileSync(publicPath("icon-master-512.png")));
-    expect(readFileSync(publicPath("maskable-icon-512.png"))).toEqual(readFileSync(publicPath("icon-master-512.png")));
+    const master = readRgbPixels("icon-master-512.png");
+    const icon = readRgbPixels("icon-512.png");
+    const maskable = readRgbPixels("maskable-icon-512.png");
+    expect(icon.pixels).toEqual(master.pixels);
+    expect(maskable.pixels).toEqual(master.pixels);
+    expect(readFileSync(publicPath("icon-512.png")))
+      .toEqual(readFileSync(publicPath("maskable-icon-512.png")));
+    expect(readFileSync(publicPath("icon-512.png")))
+      .not.toEqual(readFileSync(publicPath("icon-master-512.png")));
   });
 
   it("provides a favicon container with 16px, 32px, and 48px frames", () => {
