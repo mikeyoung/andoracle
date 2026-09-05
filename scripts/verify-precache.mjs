@@ -25,12 +25,18 @@ export const extractPrecacheUrls = (serviceWorkerSource) => [
   ...serviceWorkerSource.matchAll(PRECACHE_URL_PATTERN),
 ].map((match) => match[1]);
 
+export const isRequiredOfflineUrl = (url) => {
+  // The canonical 512 px source is retained in public/ for deterministic icon
+  // generation, but the application never requests it at runtime. Some static
+  // hosts also reject this build-only filename, so it must not gate SW install.
+  if (url === "icon-master-512.png") return false;
+  if (url === "sw.js" || /^workbox-[^/]+\.js$/i.test(url)) return false;
+  return OFFLINE_EXTENSIONS.has(extname(url).toLowerCase());
+};
+
 export const requiredOfflineUrls = (distDirectory) => listFiles(distDirectory)
   .map((path) => relative(distDirectory, path).replaceAll("\\", "/"))
-  .filter((url) => {
-    if (url === "sw.js" || /^workbox-[^/]+\.js$/i.test(url)) return false;
-    return OFFLINE_EXTENSIONS.has(extname(url).toLowerCase());
-  })
+  .filter(isRequiredOfflineUrl)
   .sort();
 
 export const validatePrecache = (serviceWorkerSource, requiredUrls) => {

@@ -6,7 +6,6 @@ export const PWA_INCLUDE_ASSETS = [
   "favicon.ico",
   "favicon-*.png",
   "apple-touch-icon*.png",
-  "icon-master-512.png",
 ] as const;
 
 export const PWA_WORKBOX_GLOB_PATTERNS = [
