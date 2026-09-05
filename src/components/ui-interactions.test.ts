@@ -8,6 +8,7 @@ import {
   isSyntheticActivationClick,
   isVisualActivationKey,
   Keyboard,
+  MOBILE_KEYBOARD_ROWS,
   shouldToggleAssistiveKey,
   visualKeySource,
 } from "./Keyboard";
@@ -82,9 +83,22 @@ describe("on-screen keyboard interaction contracts", () => {
     expect(markup.match(/aria-keyshortcuts="Enter Space"/g)).toHaveLength(37);
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(37);
     expect(markup).toContain('role="group" aria-label="On-screen keyboard"');
-    expect(markup.match(/data-keyboard-row="true"/g)).toHaveLength(1);
-    expect(markup).toContain('aria-label="C2 through C5"');
+    expect(markup.match(/data-keyboard-row="[123]"/g)).toHaveLength(3);
+    expect(markup).toContain('aria-label="C2 through B2"');
+    expect(markup).toContain('aria-label="C3 through B3"');
+    expect(markup).toContain('aria-label="C4 through C5"');
     expect(markup).not.toContain("Scrollable on-screen keyboard");
+  });
+
+  it("partitions mobile keys into two octaves and one octave plus the final C", () => {
+    expect(MOBILE_KEYBOARD_ROWS.map((row) => [row.startNote, row.endNote, row.whiteCount])).toEqual([
+      [36, 47, 7],
+      [48, 59, 7],
+      [60, 72, 8],
+    ]);
+    expect(MOBILE_KEYBOARD_ROWS.flatMap((row) => row.keys).map((key) => key.note)).toEqual(
+      Array.from({ length: 37 }, (_, index) => 36 + index),
+    );
   });
 
   it("focuses a pointer-struck piano key without scrolling the page", () => {

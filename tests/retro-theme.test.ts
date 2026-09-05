@@ -38,9 +38,10 @@ describe("1950s electronics-console finish", () => {
   });
 
   it("keeps bright off-white modules, dark legible text, and period hardware geometry", () => {
-    expect(styles).toContain("--ivory-panel: #dddddd");
-    expect(styles).toContain("--ivory-raised: #f0f0f0");
-    expect(styles).toMatch(/\.module-header\s*\{[\s\S]*?linear-gradient\(180deg, #d7d7d7, #b6b6b6\)/);
+    expect(styles).toContain("--ivory-panel: #e9e9e9");
+    expect(styles).toContain("--ivory-raised: #f7f7f7");
+    expect(styles).toMatch(/\.topbar\s*\{[\s\S]*?linear-gradient\(180deg, #eeeeee, #d4d4d4 58%, #b9b9b9\)/);
+    expect(styles).toMatch(/\.module-header\s*\{[\s\S]*?linear-gradient\(180deg, #f0f0f0, #d6d6d6\)/);
     expect(styles).toMatch(/\.module-header h2,[\s\S]*?color:\s*#202020;/);
     expect(styles).toMatch(/\.panel-screw\s*\{[\s\S]*?border-radius:\s*50%;[\s\S]*?radial-gradient\(circle at 34% 28%,/);
     expect(styles).toMatch(/\.fader-shell input\[type="range"\]::\-webkit-slider-thumb\s*\{[\s\S]*?width:\s*34px;[\s\S]*?transform:\s*translateX\(\-14px\);/);

@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
+  type CSSProperties,
 } from "react";
 import { PanelScrews } from "./PanelScrews";
 import { midiNoteName } from "../synth/params";
@@ -97,9 +98,18 @@ export const createKeyboardRowGeometry = (startNote: number, endNote: number): K
 };
 
 const KEYBOARD_GEOMETRY = createKeyboardRowGeometry(START_NOTE, END_NOTE);
-const KEYBOARD_RENDER_KEYS = [
-  ...KEYBOARD_GEOMETRY.keys.filter((key) => key.white),
-  ...KEYBOARD_GEOMETRY.keys.filter((key) => !key.white),
+const KEYBOARD_GLOBAL_KEYS = new Map(KEYBOARD_GEOMETRY.keys.map((key) => [key.note, key]));
+const MOBILE_KEYBOARD_WHITE_COLUMNS = 8;
+const MOBILE_BLACK_KEY_WIDTH = 0.8;
+export const MOBILE_KEYBOARD_ROWS = [
+  createKeyboardRowGeometry(36, 47),
+  createKeyboardRowGeometry(48, 59),
+  createKeyboardRowGeometry(60, 72),
+] as const;
+
+const renderKeysForRow = (row: KeyboardRowGeometry): KeyGeometry[] => [
+  ...row.keys.filter((key) => key.white),
+  ...row.keys.filter((key) => !key.white),
 ];
 
 function KeyboardComponent({
@@ -305,46 +315,58 @@ function KeyboardComponent({
         onLostPointerCapture={end}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <div
-          className="keyboard-surface"
-          role="group"
-          aria-label={`${midiNoteName(KEYBOARD_GEOMETRY.startNote)} through ${midiNoteName(KEYBOARD_GEOMETRY.endNote)}`}
-          data-keyboard-row
-        >
-          {KEYBOARD_RENDER_KEYS.map((key) => {
-            const active = activeNotes.has(key.note);
-            const low = allocatedLow === key.note;
-            const high = allocatedHigh === key.note;
-            const width = key.white ? 1 : BLACK_KEY_WIDTH;
-            return (
-              <button
-                key={key.note}
-                type="button"
-                className={`piano-key piano-key--${key.white ? "white" : "black"}${active ? " is-active" : ""}${low ? " is-low" : ""}${high ? " is-high" : ""}`}
-                style={{
-                  left: `${(key.left / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
-                  width: `${(width / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
-                }}
-                data-note={key.note}
-                aria-label={midiNoteName(key.note)}
-                aria-pressed={active}
-                aria-keyshortcuts="Enter Space"
-                tabIndex={focusedNote === key.note ? 0 : -1}
-                ref={(element) => {
-                  if (element) keyElements.current.set(key.note, element);
-                  else keyElements.current.delete(key.note);
-                }}
-                onFocus={() => setFocusedNote(key.note)}
-                onKeyDown={(event) => keyboardDown(key.note, event)}
-                onKeyUp={(event) => keyboardUp(key.note, event)}
-                onClick={(event) => syntheticClick(key.note, event)}
-                onBlur={() => releaseVisualNote(key.note)}
-              >
-                {key.white && key.note % 12 === 0 && <span>{midiNoteName(key.note)}</span>}
-              </button>
-            );
-          })}
-        </div>
+        {MOBILE_KEYBOARD_ROWS.map((row, rowIndex) => (
+          <div
+            key={row.startNote}
+            className="keyboard-surface"
+            role="group"
+            aria-label={`${midiNoteName(row.startNote)} through ${midiNoteName(row.endNote)}`}
+            data-keyboard-row={rowIndex + 1}
+          >
+            {renderKeysForRow(row).map((key) => {
+              const active = activeNotes.has(key.note);
+              const low = allocatedLow === key.note;
+              const high = allocatedHigh === key.note;
+              const width = key.white ? 1 : BLACK_KEY_WIDTH;
+              const mobileWidth = key.white ? 1 : MOBILE_BLACK_KEY_WIDTH;
+              const mobileLeft = key.white
+                ? key.left
+                : key.left + (BLACK_KEY_WIDTH - MOBILE_BLACK_KEY_WIDTH) / 2;
+              const desktopKey = KEYBOARD_GLOBAL_KEYS.get(key.note)!;
+              const style = {
+                "--desktop-key-left": `${(desktopKey.left / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
+                "--desktop-key-width": `${(width / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
+                "--mobile-key-left": `${(mobileLeft / MOBILE_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+                "--mobile-key-width": `${(mobileWidth / MOBILE_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+              } as CSSProperties;
+              return (
+                <button
+                  key={key.note}
+                  type="button"
+                  className={`piano-key piano-key--${key.white ? "white" : "black"}${active ? " is-active" : ""}${low ? " is-low" : ""}${high ? " is-high" : ""}`}
+                  style={style}
+                  data-note={key.note}
+                  data-row-start={key.note === row.startNote || undefined}
+                  aria-label={midiNoteName(key.note)}
+                  aria-pressed={active}
+                  aria-keyshortcuts="Enter Space"
+                  tabIndex={focusedNote === key.note ? 0 : -1}
+                  ref={(element) => {
+                    if (element) keyElements.current.set(key.note, element);
+                    else keyElements.current.delete(key.note);
+                  }}
+                  onFocus={() => setFocusedNote(key.note)}
+                  onKeyDown={(event) => keyboardDown(key.note, event)}
+                  onKeyUp={(event) => keyboardUp(key.note, event)}
+                  onClick={(event) => syntheticClick(key.note, event)}
+                  onBlur={() => releaseVisualNote(key.note)}
+                >
+                  {key.white && key.note % 12 === 0 && <span>{midiNoteName(key.note)}</span>}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
       <div className="allocation-legend" aria-hidden="true">
         <span><i className="dot dot--low" /> VCO 1 / lowest</span>

@@ -96,11 +96,13 @@ describe("synth control styling", () => {
     expect(styles).not.toMatch(/overflow-x:\s*auto/);
     expect(styles).toMatch(/\.signal-flow\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?\}/);
     expect(styles).toMatch(/\.control-bank\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?\}/);
-    expect(styles.match(/\.keyboard-banks\s*\{/g)).toHaveLength(1);
+    expect(styles.match(/\.keyboard-banks\s*\{/g)).toHaveLength(2);
     expect(styles).toMatch(/\.keyboard-banks\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*?grid-template-rows:\s*224px;[\s\S]*?overflow:\s*hidden;[\s\S]*?\}/);
-    expect(styles).toMatch(/\.keyboard-surface\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?height:\s*224px;[\s\S]*?overflow:\s*hidden;[\s\S]*?\}/);
+    expect(styles).toMatch(/\.keyboard-surface\s*\{[\s\S]*?display:\s*contents;[\s\S]*?\}/);
     expect(styles).toMatch(/\.piano-key--white\s*\{[\s\S]*?height:\s*218px;[\s\S]*?\}/);
     expect(styles).toMatch(/\.piano-key--black\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?height:\s*139px;[\s\S]*?\}/);
+    expect(styles).toMatch(/@media \(max-width:\s*960px\)\s*\{[\s\S]*?\.keyboard-banks\s*\{[\s\S]*?grid-template-rows:\s*repeat\(3, 144px\);[\s\S]*?\.keyboard-surface\s*\{[\s\S]*?display:\s*block;[\s\S]*?grid-area:\s*auto;[\s\S]*?height:\s*144px;/);
+    expect(styles).toMatch(/\.piano-key\s*\{[\s\S]*?left:\s*var\(--mobile-key-left\);[\s\S]*?width:\s*var\(--mobile-key-width\);/);
     expect(styles).toMatch(/\.status-deck\s*\{[\s\S]*?repeat\(auto-fit, minmax\(min\(112px, 100%\), 1fr\)\);[\s\S]*?\}/);
   });
 
