@@ -58,10 +58,11 @@ body {
   margin: 0;
   overflow-x: clip;
   color: var(--paper);
+  /* Four unscaled 768px mirrored quadrants form one edge-seamless 1536px tile. */
   background:
     linear-gradient(90deg, rgba(23, 11, 6, 0.34), transparent 9%, transparent 91%, rgba(23, 11, 6, 0.34)),
     linear-gradient(180deg, rgba(255, 231, 177, 0.08), rgba(14, 8, 5, 0.28)),
-    url("./assets/walnut-veneer-60s.jpg") center top / 768px 768px repeat;
+    url("./assets/walnut-veneer-60s-seamless.png") center top / 1536px 1536px repeat;
 }
 
 button,
@@ -1215,7 +1216,7 @@ main {
   border-radius: 1px;
   background:
     linear-gradient(rgba(37, 19, 11, 0.16), rgba(37, 19, 11, 0.16)),
-    url("./assets/walnut-veneer-60s.jpg") center / 768px 768px repeat;
+    url("./assets/walnut-veneer-60s-seamless.png") center / 1536px 1536px repeat;
   box-shadow: inset 0 0 0 2px rgba(222, 179, 115, 0.12), 0 8px 18px rgba(24, 12, 6, 0.48), 0 0 0 1px #110a06;
 }
 
