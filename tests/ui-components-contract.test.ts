@@ -3,6 +3,39 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("dialog source contracts", () => {
+  it("marks every panel containing routed faders for aligned selector spacing", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+
+    expect(source).toContain('section.items.some((item) => item.kind === "route")');
+    expect(source).toContain('`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}`');
+  });
+
+  it("shows a temporary toast only after a direct clipboard write succeeds", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const shareStart = source.indexOf("const sharePatch = async");
+    const shareEnd = source.indexOf("const performance = useCallback", shareStart);
+    const share = source.slice(shareStart, shareEnd);
+    const clipboardWrite = share.indexOf("await cancellation.race(navigator.clipboard.writeText(shareUrl));");
+    const toastShown = share.indexOf("showClipboardToast();", clipboardWrite);
+    const nativeShareSuccess = share.indexOf('setNotice("Patch shared.")');
+
+    expect(source).toContain("const CLIPBOARD_TOAST_DURATION_MS = 2500;");
+    expect(source).toContain("const clipboardToastTimerRef = useRef<number | null>(null);");
+    expect(source).toContain('setClipboardToast("Copied to clipboard")');
+    expect(source).toContain("}, CLIPBOARD_TOAST_DURATION_MS);");
+    expect(share).toContain("clearClipboardToast();");
+    expect(clipboardWrite).toBeGreaterThanOrEqual(0);
+    expect(toastShown).toBeGreaterThan(clipboardWrite);
+    expect(nativeShareSuccess).toBeGreaterThanOrEqual(0);
+    expect(nativeShareSuccess).toBeLessThan(clipboardWrite);
+    expect(share.slice(nativeShareSuccess, clipboardWrite)).not.toContain("showClipboardToast();");
+    expect(source).toContain('<div className="clipboard-toast" role="status" aria-live="polite" aria-atomic="true">');
+
+    const unmountStart = source.indexOf("mountedRef.current = false;");
+    const unmountEnd = source.indexOf("browserOperations.cancelAll();", unmountStart);
+    expect(source.slice(unmountStart, unmountEnd)).toContain("window.clearTimeout(clipboardToastTimerRef.current)");
+  });
+
   it("keeps the submitted patch name immutable until its async save settles", () => {
     const source = readFileSync(resolve("src/components/PatchLibraryDialog.tsx"), "utf8");
     const nameFieldStart = source.indexOf('id="patch-library-name"');
@@ -119,6 +152,29 @@ describe("dialog source contracts", () => {
     expect(stopped).toBeGreaterThan(invalidated);
     expect(decoded).toBeGreaterThan(stopped);
     expect(installed).toBeGreaterThan(decoded);
+  });
+
+  it("stops playback before installing an explicitly confirmed recording replacement", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const replacementStart = source.indexOf("const replaceSequenceTake");
+    const replacementEnd = source.indexOf("const changeParam", replacementStart);
+    const replacement = source.slice(replacementStart, replacementEnd);
+    const replacedCase = replacement.indexOf('case "replaced":');
+    const invalidated = replacement.indexOf("sequenceOperationRef.current += 1", replacedCase);
+    const stopped = replacement.indexOf("sequencePlayerRef.current?.stop(false)", replacedCase);
+    const stateStopped = replacement.indexOf('setSequencePlaybackState("stopped")', replacedCase);
+    const installed = replacement.indexOf("activeSequenceTakeRef.current = take", replacedCase);
+    const closed = replacement.indexOf("setSequenceTake(null)", replacedCase);
+
+    expect(replacementStart).toBeGreaterThanOrEqual(0);
+    expect(replacement).toContain(
+      "replaceUserSequenceSafely(expected, take, undefined, undefined, signal)",
+    );
+    expect(invalidated).toBeGreaterThan(replacedCase);
+    expect(stopped).toBeGreaterThan(invalidated);
+    expect(stateStopped).toBeGreaterThan(stopped);
+    expect(installed).toBeGreaterThan(stateStopped);
+    expect(closed).toBeGreaterThan(installed);
   });
 
   it("revokes stale delete authority on patch navigation and active-target replacement", () => {

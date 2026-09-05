@@ -28,6 +28,7 @@ import { ExternalInputControl } from "./ExternalInputControl";
 import { HelpDialog } from "./HelpDialog";
 import { MidiInputControl } from "./MidiInputControl";
 import { PatchLibraryDialog } from "./PatchLibraryDialog";
+import patchLibraryDialogSource from "./PatchLibraryDialog.tsx?raw";
 import { PARAM_KEYS, PARAM_SPECS, normalizedToParam } from "../synth/params";
 import {
   clearPpcOwnership,
@@ -409,12 +410,13 @@ describe("cancellable device connection controls", () => {
 });
 
 describe("user patch library dialogs", () => {
-  it("renders a labeled name field and explains trim and uniqueness rules", () => {
+  it("renders a labeled name field and explains trim and confirmed replacement rules", () => {
     const markup = renderToStaticMarkup(createElement(PatchLibraryDialog, {
       mode: "save",
       patchNames: ["Bass"],
       origin: null,
       onSave: vi.fn(),
+      onReplace: vi.fn(),
       onLoad: vi.fn(),
       onClose: vi.fn(),
     }));
@@ -422,6 +424,7 @@ describe("user patch library dialogs", () => {
     expect(markup).toContain("Save patch");
     expect(markup).toContain('id="patch-library-name"');
     expect(markup).toContain("Leading and trailing whitespace is removed");
+    expect(markup).toContain("Matching names can be replaced after confirmation");
     expect(markup).toContain("regardless of capitalization");
   });
 
@@ -432,6 +435,7 @@ describe("user patch library dialogs", () => {
       patchNames: ["Bass", "Wide Pad"],
       origin: null,
       onSave: vi.fn(),
+      onReplace: vi.fn(),
       onLoad,
       onClose: vi.fn(),
     }));
@@ -449,12 +453,43 @@ describe("user patch library dialogs", () => {
       patchNames: [],
       origin: null,
       onSave: vi.fn(),
+      onReplace: vi.fn(),
       onLoad: vi.fn(),
       onClose: vi.fn(),
     }));
 
     expect(markup).toContain("No user patches have been saved");
     expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Load selected<\/button>/);
+  });
+
+  it("uses a cancellable, two-stage replacement confirmation without weakening load mode", () => {
+    const source = patchLibraryDialogSource;
+    const replacementStart = source.indexOf("if (saveConflict)");
+    const replacementEnd = source.indexOf("const backdropClose", replacementStart);
+    const replacement = source.slice(replacementStart, replacementEnd);
+
+    expect(source).toContain('readonly status: "duplicate"');
+    expect(source).toContain("readonly existingPatch: UserPatch");
+    expect(source).toContain("export type PatchSaveOutcome = string | null | PatchSaveConflict");
+    expect(source).toContain("onReplace: (");
+    expect(source).toContain("signal: AbortSignal");
+    expect(source).toContain('"Replace saved patch?"');
+    expect(source).toContain("replaceCancelRef.current?.focus()");
+    expect(source).toContain("active.replacementController?.abort(");
+    expect(source).toContain("if (busyRef.current) return;");
+    expect(replacementStart).toBeGreaterThanOrEqual(0);
+    expect(replacement).toContain("new AbortController()");
+    expect(replacement).toContain("onReplace(expected, controller.signal)");
+    expect(replacement).toContain("setSaveConflict(null)");
+    expect(replacement).toContain("setNameFocusRequest");
+
+    const confirmationActions = source.slice(
+      source.indexOf("{saveConflict ? (", source.indexOf('className="modal-actions"')),
+      source.indexOf(") : (", source.indexOf("{saveConflict ? (", source.indexOf('className="modal-actions"'))),
+    );
+    expect(confirmationActions).toMatch(/>\s*Cancel\s*<\/button>/);
+    expect(confirmationActions).toMatch(/>\s*Replace\s*<\/button>/);
+    expect(confirmationActions).not.toMatch(/ref=\{replaceCancelRef\}[\s\S]*?disabled=\{busy\}[\s\S]*?>\s*Cancel/);
   });
 });
 

@@ -14,6 +14,9 @@ const OFFLINE_EXTENSIONS = new Set([
   ".webmanifest",
   ".woff2",
 ]);
+const VERSION_PLACEHOLDER = "%VITE_APP_VERSION%";
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const listFiles = (directory) => readdirSync(directory, { withFileTypes: true })
   .flatMap((entry) => {
@@ -62,12 +65,42 @@ export const validatePrecache = (serviceWorkerSource, requiredUrls) => {
   return urls;
 };
 
+export const validateBuiltVersion = (html, expectedVersion) => {
+  if (typeof expectedVersion !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(expectedVersion)) {
+    throw new Error("The expected Andoracle version is not valid semantic version metadata.");
+  }
+  if (html.includes(VERSION_PLACEHOLDER)) {
+    throw new Error(`Unresolved ${VERSION_PLACEHOLDER} placeholder in built index.html.`);
+  }
+
+  const escapedVersion = escapeRegExp(expectedVersion);
+  const versionMeta = new RegExp(
+    `<meta\\s+name=["']application-version["']\\s+content=["']${escapedVersion}["']\\s*/?>`,
+    "i",
+  );
+  if (!versionMeta.test(html)) {
+    throw new Error(`Built index.html does not declare application-version ${expectedVersion}.`);
+  }
+  const structuredVersion = new RegExp(
+    `"softwareVersion"\\s*:\\s*"${escapedVersion}"`,
+  );
+  if (!structuredVersion.test(html)) {
+    throw new Error(`Built index.html does not declare structured softwareVersion ${expectedVersion}.`);
+  }
+
+  return expectedVersion;
+};
+
 export const verifyBuiltPrecache = (distDirectory = resolve("dist")) => {
   const serviceWorkerPath = resolve(distDirectory, "sw.js");
+  const indexPath = resolve(distDirectory, "index.html");
   if (!existsSync(serviceWorkerPath)) throw new Error(`Missing generated service worker: ${serviceWorkerPath}`);
+  if (!existsSync(indexPath)) throw new Error(`Missing built application document: ${indexPath}`);
+  const packageMetadata = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
+  const version = validateBuiltVersion(readFileSync(indexPath, "utf8"), packageMetadata.version);
   const requiredUrls = requiredOfflineUrls(distDirectory);
   const urls = validatePrecache(readFileSync(serviceWorkerPath, "utf8"), requiredUrls);
-  return { precacheCount: urls.length, requiredCount: requiredUrls.length };
+  return { precacheCount: urls.length, requiredCount: requiredUrls.length, version };
 };
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
@@ -75,7 +108,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
   try {
     const result = verifyBuiltPrecache();
     console.log(
-      `Verified ${result.precacheCount} unique Workbox precache URLs, including all ${result.requiredCount} required offline assets.`,
+      `Verified Andoracle ${result.version} in index.html and ${result.precacheCount} unique Workbox precache URLs, including all ${result.requiredCount} required offline assets.`,
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

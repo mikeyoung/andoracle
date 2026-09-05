@@ -80,10 +80,35 @@ export type SaveUserSequenceResult =
   | {
       readonly status: "duplicate-name";
       readonly existingName: string;
+      /** Immutable snapshot that a later, explicit replace confirmation can target safely. */
+      readonly existingSequence: UserNoteSequence;
       readonly sequences: readonly UserNoteSequence[];
     };
 
 export type SafeSaveUserSequenceResult = SaveUserSequenceResult | {
+  /** Another tab currently owns the short sequence-library write lock. */
+  readonly status: "busy";
+  readonly sequences: readonly UserNoteSequence[];
+};
+
+export type ReplaceUserSequenceResult =
+  | {
+      readonly status: "replaced";
+      readonly sequence: UserNoteSequence;
+      readonly sequences: readonly UserNoteSequence[];
+    }
+  | {
+      readonly status: "empty-name" | "invalid-sequence" | "not-found" | "storage-error" | "unsupported-version";
+      readonly sequences: readonly UserNoteSequence[];
+    }
+  | {
+      /** The stored sequence changed after the user was asked to confirm replacement. */
+      readonly status: "stale-target";
+      readonly currentSequence: UserNoteSequence;
+      readonly sequences: readonly UserNoteSequence[];
+    };
+
+export type SafeReplaceUserSequenceResult = ReplaceUserSequenceResult | {
   /** Another tab currently owns the short sequence-library write lock. */
   readonly status: "busy";
   readonly sequences: readonly UserNoteSequence[];
@@ -625,6 +650,23 @@ const serializeUserSequences = (
   })),
 } satisfies StoredUserSequenceCollection);
 
+const snapshotUserSequence = (sequence: UserNoteSequence): UserNoteSequence => ({
+  name: sequence.name,
+  data: sequence.data,
+  durationMs: sequence.durationMs,
+  noteCount: sequence.noteCount,
+  eventCount: sequence.eventCount,
+});
+
+const matchesUserSequenceSnapshot = (
+  stored: UserNoteSequence,
+  expected: UserNoteSequence,
+): boolean => userSequenceNameKey(stored.name) === userSequenceNameKey(expected.name)
+  && stored.data === expected.data
+  && Object.is(stored.durationMs, expected.durationMs)
+  && Object.is(stored.noteCount, expected.noteCount)
+  && Object.is(stored.eventCount, expected.eventCount);
+
 /** Adds a new named sequence without ever overwriting an existing name. */
 export const saveUserSequence = (
   name: string,
@@ -657,6 +699,7 @@ export const saveUserSequence = (
     return {
       status: "duplicate-name",
       existingName: duplicate.name,
+      existingSequence: snapshotUserSequence(duplicate),
       sequences,
     };
   }
@@ -682,22 +725,62 @@ export const saveUserSequence = (
   }
 };
 
-const snapshotUserSequence = (sequence: UserNoteSequence): UserNoteSequence => ({
-  name: sequence.name,
-  data: sequence.data,
-  durationMs: sequence.durationMs,
-  noteCount: sequence.noteCount,
-  eventCount: sequence.eventCount,
-});
-
-const matchesUserSequenceSnapshot = (
-  stored: UserNoteSequence,
+/**
+ * Replaces one saved take only when it still exactly matches the snapshot the
+ * user confirmed. The persisted display name and collection position remain
+ * stable even when the submitted name uses different case or Unicode form.
+ */
+export const replaceUserSequence = (
   expected: UserNoteSequence,
-): boolean => userSequenceNameKey(stored.name) === userSequenceNameKey(expected.name)
-  && stored.data === expected.data
-  && stored.durationMs === expected.durationMs
-  && stored.noteCount === expected.noteCount
-  && stored.eventCount === expected.eventCount;
+  input: SequenceInput,
+  storage: UserSequenceStorage | null = defaultStorage(),
+): ReplaceUserSequenceResult => {
+  const readResult = readUserSequences(storage);
+  const sequences = readResult.sequences;
+  if (readResult.status === "storage-error" || !storage) {
+    return { status: "storage-error", sequences };
+  }
+  if (readResult.status === "unsupported-version") {
+    return { status: "unsupported-version", sequences };
+  }
+
+  const normalizedName = normalizeUserSequenceName(expected.name);
+  if (!normalizedName) return { status: "empty-name", sequences };
+
+  const nameKey = userSequenceNameKey(normalizedName);
+  const sequenceIndex = sequences.findIndex(
+    (sequence) => userSequenceNameKey(sequence.name) === nameKey,
+  );
+  if (sequenceIndex < 0) return { status: "not-found", sequences };
+
+  const currentSequence = sequences[sequenceIndex];
+  if (!matchesUserSequenceSnapshot(currentSequence, expected)) {
+    return { status: "stale-target", currentSequence, sequences };
+  }
+
+  const captured = normalizeCapturedNoteSequence(input);
+  if (!captured) return { status: "invalid-sequence", sequences };
+
+  const sequence: UserNoteSequence = {
+    name: currentSequence.name,
+    data: encodeValidatedEvents(captured.events),
+    durationMs: captured.durationMs,
+    noteCount: captured.noteCount,
+    eventCount: captured.events.length,
+  };
+  const nextSequences = [
+    ...sequences.slice(0, sequenceIndex),
+    sequence,
+    ...sequences.slice(sequenceIndex + 1),
+  ];
+
+  try {
+    storage.setItem(USER_SEQUENCES_STORAGE_KEY, serializeUserSequences(nextSequences));
+    return { status: "replaced", sequence, sequences: nextSequences };
+  } catch {
+    return { status: "storage-error", sequences };
+  }
+};
 
 /**
  * Removes one saved take only when it still exactly matches the snapshot shown
@@ -832,6 +915,28 @@ export const saveUserSequenceSafely = (
   createUserSequenceBusyReader(storage),
   lockManager,
 );
+
+/**
+ * Serializes an explicitly confirmed replacement with every other sequence
+ * write. Both the confirmed target and proposed performance are snapshotted
+ * before a browser-owned lock request can defer the transaction.
+ */
+export const replaceUserSequenceSafely = (
+  expected: UserNoteSequence,
+  input: SequenceInput,
+  storage: UserSequenceStorage | null = defaultStorage(),
+  lockManager: UserSequenceLockManager | null = defaultLockManager(),
+  signal?: AbortSignal,
+): Promise<SafeReplaceUserSequenceResult> => {
+  const expectedSnapshot = snapshotUserSequence(expected);
+  const inputSnapshot = normalizeCapturedNoteSequence(input);
+  return runUserSequenceWriteSafely<SafeReplaceUserSequenceResult>(
+    () => replaceUserSequence(expectedSnapshot, inputSnapshot ?? [], storage),
+    createUserSequenceBusyReader(storage),
+    lockManager,
+    signal,
+  );
+};
 
 /**
  * Serializes delete with every other sequence-library write. A contended or

@@ -11,20 +11,20 @@ describe("synth control styling", () => {
     );
   });
 
-  it("makes dropdown-style selector text 50% larger and safely multiline", () => {
+  it("sizes dropdown-style selectors to their complete multiline text", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
 
     expect(styles).toMatch(
       /\.parameter--choice\s*\{[\s\S]*?min-width:\s*min\(118px, 100%\);[\s\S]*?flex:\s*1 1 118px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*64px;[\s\S]*?font-size:\s*13\.5px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
+      /\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*0;[\s\S]*?font-size:\s*13\.5px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.route-control\s*\{[\s\S]*?min-width:\s*min\(116px, 100%\);[\s\S]*?flex:\s*1 1 116px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*56px;[\s\S]*?font-size:\s*12px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
+      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?font-size:\s*12px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.choice-button span\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?overflow:\s*visible;[\s\S]*?white-space:\s*normal;[\s\S]*?overflow-wrap:\s*normal;[\s\S]*?word-break:\s*normal;[\s\S]*?hyphens:\s*none;[\s\S]*?\}/,
@@ -46,6 +46,34 @@ describe("synth control styling", () => {
       /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[^}]*font-size:\s*13\.5px;/,
     );
     expect(styles).not.toContain(".choice-switch-bank");
+  });
+
+  it("gives selectors adaptive space while bottom-aligning every full-length fader", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+
+    expect(styles).toMatch(
+      /\.control-bank--routed > \.parameter--range,\s*\.control-bank--routed > \.route-control\s*\{[\s\S]*?justify-content:\s*flex-end;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /\.control-bank--routed \.parameter--range \.fader-shell\s*\{[\s\S]*?flex:\s*0 0 196px;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /\.control-bank--routed \.parameter--range output\s*\{[\s\S]*?margin-top:\s*0;[\s\S]*?\}/,
+    );
+    expect(styles).not.toMatch(/\.route-control \.fader-shell(?:\s|\{|::)/);
+  });
+
+  it("keeps clipboard confirmation visible, responsive, and nonblocking", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+    const start = styles.indexOf(".clipboard-toast {");
+    const rule = styles.slice(start, styles.indexOf("\n}", start) + 2);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(rule).toMatch(/position:\s*fixed;/);
+    expect(rule).toMatch(/bottom:\s*calc\(18px \+ env\(safe-area-inset-bottom\)\);/);
+    expect(rule).toMatch(/max-width:\s*calc\(100vw - 24px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\);/);
+    expect(rule).toMatch(/pointer-events:\s*none;/);
+    expect(rule).not.toMatch(/text-overflow|max-height|white-space:\s*nowrap|overflow:\s*(?:hidden|clip)/);
   });
 
   it("reflows every formerly horizontal strip instead of requiring sideways scrolling", () => {
@@ -84,5 +112,17 @@ describe("synth control styling", () => {
     expect(styles).toMatch(
       /@media \(max-width:\s*260px\)[\s\S]*?\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*?\}/,
     );
+  });
+
+  it("sizes the desktop patch selector from its widest option without page overflow", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+    const desktopRuleStart = styles.lastIndexOf("@media (min-width: 701px)");
+    const desktopRule = styles.slice(desktopRuleStart, styles.indexOf("@media (hover: hover)", desktopRuleStart));
+
+    expect(desktopRuleStart).toBeGreaterThanOrEqual(0);
+    expect(desktopRule).toMatch(
+      /\.patch-strip #preset\s*\{[\s\S]*?width:\s*auto;[\s\S]*?min-width:\s*0;[\s\S]*?max-width:\s*100%;[\s\S]*?flex:\s*0 1 auto;/,
+    );
+    expect(styles).not.toMatch(/field-sizing:\s*content/);
   });
 });

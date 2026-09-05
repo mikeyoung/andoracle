@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { CapturedNoteSequence } from "../sequencer/user-sequences";
 import { SequenceCommitDialog } from "./SequenceCommitDialog";
+import sequenceCommitDialogSource from "./SequenceCommitDialog.tsx?raw";
 
 const renderDialog = (take: CapturedNoteSequence): string => renderToStaticMarkup(createElement(
   SequenceCommitDialog,
@@ -10,6 +11,7 @@ const renderDialog = (take: CapturedNoteSequence): string => renderToStaticMarku
     take,
     origin: null,
     onSave: vi.fn(),
+    onReplace: vi.fn(),
     onDiscard: vi.fn(),
   },
 ));
@@ -62,5 +64,49 @@ describe("SequenceCommitDialog", () => {
     });
     expect(markup).toContain("2:00.0");
     expect(markup).not.toContain("1:60.0");
+  });
+
+  it("uses an accessible, cancellable confirmation before replacing a recording", () => {
+    const source = sequenceCommitDialogSource;
+    const replacementStart = source.indexOf("if (saveConflict)");
+    const replacementEnd = source.indexOf("const handleEscape", replacementStart);
+    const replacement = source.slice(replacementStart, replacementEnd);
+
+    expect(source).toContain('readonly status: "duplicate"');
+    expect(source).toContain("readonly existingSequence: UserNoteSequence");
+    expect(source).toContain("export type SequenceSaveOutcome = string | null | SequenceSaveConflict");
+    expect(source).toContain("onReplace: (");
+    expect(source).toContain("signal: AbortSignal");
+    expect(source).toContain('role={saveConflict ? "alertdialog" : undefined}');
+    expect(source).toContain('"Replace saved recording?"');
+    expect(source).toContain("replaceCancelRef.current?.focus()");
+    expect(source).toContain("active.replacementController?.abort(");
+    expect(source).toContain('cancelActiveSubmission("Sequence dialog unmounted during submission.")');
+    expect(source).toContain("if (busyRef.current || stage !== \"name\"");
+    expect(replacementStart).toBeGreaterThanOrEqual(0);
+    expect(replacement).toContain("snapshotSequence(saveConflict)");
+    expect(replacement).toContain("new AbortController()");
+    expect(replacement).toContain("onReplace(expected, controller.signal)");
+    expect(replacement).toContain("setSaveConflict(null)");
+    expect(replacement).toContain("setNameFocusRequest");
+
+    const confirmation = source.slice(
+      source.indexOf(") : saveConflict ? ("),
+      source.indexOf(") : (", source.indexOf(") : saveConflict ? (") + 1),
+    );
+    expect(confirmation).toContain('id="sequence-replace-description"');
+    expect(confirmation).toMatch(/>\s*Cancel\s*<\/button>/);
+    expect(confirmation).toMatch(/>\s*Replace\s*<\/button>/);
+    expect(confirmation).not.toMatch(/ref=\{replaceCancelRef\}[\s\S]*?disabled=\{busy\}[\s\S]*?>\s*Cancel/);
+
+    const cancelStart = source.indexOf("const returnToNameForm");
+    const cancelEnd = source.indexOf("useEffect", cancelStart);
+    const cancel = source.slice(cancelStart, cancelEnd);
+    expect(cancel).toContain("cancelActiveSubmission(message)");
+    expect(cancel).toContain("setSaveConflict(null)");
+    expect(cancel).toContain("setNameFocusRequest");
+    expect(cancel).not.toContain("setDraftName");
+    expect(cancel).not.toContain("onDiscard");
+    expect(source).toMatch(/if \(saveConflict\) \{\s*returnToNameForm\(\);\s*\} else if/);
   });
 });

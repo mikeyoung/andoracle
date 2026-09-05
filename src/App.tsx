@@ -9,8 +9,16 @@ import { Keyboard } from "./components/Keyboard";
 import { MidiInputControl } from "./components/MidiInputControl";
 import { OutputMeter } from "./components/OutputMeter";
 import { PanelScrews } from "./components/PanelScrews";
-import { PatchLibraryDialog, type PatchLibraryMode } from "./components/PatchLibraryDialog";
-import { SequenceCommitDialog } from "./components/SequenceCommitDialog";
+import {
+  PatchLibraryDialog,
+  type PatchLibraryMode,
+  type PatchSaveOutcome,
+} from "./components/PatchLibraryDialog";
+import { PatchSelector } from "./components/PatchSelector";
+import {
+  SequenceCommitDialog,
+  type SequenceSaveOutcome,
+} from "./components/SequenceCommitDialog";
 import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
 import {
   ChoiceControl,
@@ -45,6 +53,7 @@ import {
   deleteUserPatchSafely,
   normalizeUserPatchName,
   readUserPatches,
+  replaceUserPatchSafely,
   saveUserPatchSafely,
   userPatchNameKey,
   type UserPatch,
@@ -54,6 +63,7 @@ import {
   decodeUserSequence,
   deleteUserSequenceSafely,
   readUserSequences,
+  replaceUserSequenceSafely,
   saveUserSequenceSafely,
   userSequenceNameKey,
   type CapturedNoteSequence,
@@ -68,7 +78,7 @@ import { PANEL_SECTIONS, type LayoutItem } from "./ui/layout";
 
 // Keep the pre-Andoracle key so existing users retain their last patch after the rename.
 const PATCH_STORAGE_KEY = "arpy-odyssey:last-patch:v1";
-const USER_PATCH_PRESET_VALUE = "__saved-user-patch__";
+const CLIPBOARD_TOAST_DURATION_MS = 2500;
 const NOOP_MIDI_HANDLERS: WebMidiHandlers = {
   noteOn: () => undefined,
   noteOff: () => undefined,
@@ -247,6 +257,7 @@ function App() {
   const externalInputStartedPowerRef = useRef(false);
   const midiOperationRef = useRef(0);
   const shareBusyRef = useRef(false);
+  const clipboardToastTimerRef = useRef<number | null>(null);
   const updateBusyRef = useRef(false);
   const activeDeleteOperationRef = useRef<ActiveDeleteOperation | null>(null);
   const browserOperationsRef = useRef<OperationCancellationRegistry | null>(null);
@@ -284,6 +295,7 @@ function App() {
   const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationTarget | null>(null);
   const [helpDialogOrigin, setHelpDialogOrigin] = useState<HTMLElement | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
+  const [clipboardToast, setClipboardToast] = useState<string | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [online, setOnline] = useState(navigator.onLine);
@@ -516,6 +528,10 @@ function App() {
       midiOperationRef.current += 1;
       externalInputEnabledRef.current = false;
       shareBusyRef.current = false;
+      if (clipboardToastTimerRef.current !== null) {
+        window.clearTimeout(clipboardToastTimerRef.current);
+        clipboardToastTimerRef.current = null;
+      }
       updateBusyRef.current = false;
       const deleteOperation = activeDeleteOperationRef.current;
       activeDeleteOperationRef.current = null;
@@ -842,7 +858,7 @@ function App() {
     setNotice(`Loaded sequence “${sequence.name}”.`);
   };
 
-  const saveSequenceTake = async (name: string): Promise<string | null> => {
+  const saveSequenceTake = async (name: string): Promise<SequenceSaveOutcome> => {
     const take = sequenceTake?.take;
     if (!take) return "That recording is no longer available.";
     const cancellation = browserOperations.begin(
@@ -868,7 +884,7 @@ function App() {
           return `Sequence names can contain no more than ${result.maxLength} characters.`;
         case "duplicate-name":
           setUserSequences(result.sequences);
-          return `A saved sequence named “${result.existingName}” already exists. Choose a different name.`;
+          return { status: "duplicate", existingSequence: result.existingSequence };
         case "invalid-sequence":
           return "This recording is incomplete and cannot be saved. Discard it and record again.";
         case "storage-error":
@@ -881,6 +897,60 @@ function App() {
       }
     } finally {
       browserOperations.finish("sequence-save", cancellation);
+    }
+  };
+
+  const replaceSequenceTake = async (
+    expected: UserNoteSequence,
+    signal: AbortSignal,
+  ): Promise<string | null> => {
+    const take = sequenceTake?.take;
+    if (!take) return "That recording is no longer available.";
+    const cancellation = browserOperations.begin(
+      "sequence-replace",
+      "Sequence replacement was cancelled before it completed.",
+    );
+    const cancelWhenAborted = (): void => cancellation.cancel();
+    signal.addEventListener("abort", cancelWhenAborted, { once: true });
+    if (signal.aborted) cancellation.cancel();
+    try {
+      const result = await cancellation.race(
+        replaceUserSequenceSafely(expected, take, undefined, undefined, signal),
+      );
+      switch (result.status) {
+        case "replaced":
+          setUserSequences(result.sequences);
+          sequenceOperationRef.current += 1;
+          sequencePlayerRef.current?.stop(false);
+          setSequencePlaybackState("stopped");
+          activeSequenceTakeRef.current = take;
+          activeSequenceDataRef.current = result.sequence.data;
+          setActiveSequenceName(result.sequence.name);
+          setSequenceTake(null);
+          setNotice(`Replaced and loaded sequence “${result.sequence.name}” on this device.`);
+          return null;
+        case "empty-name":
+          setUserSequences(result.sequences);
+          return "That saved sequence no longer has a valid name. Choose another name.";
+        case "not-found":
+          setUserSequences(result.sequences);
+          return "That saved sequence was removed before it could be replaced. Choose another name.";
+        case "stale-target":
+          setUserSequences(result.sequences);
+          return "That saved sequence changed in another Andoracle tab. Review it before replacing it.";
+        case "invalid-sequence":
+          return "This recording is incomplete and cannot replace the saved sequence. Discard it and record again.";
+        case "storage-error":
+          return "This sequence could not be replaced. Local storage may be blocked or full.";
+        case "unsupported-version":
+          return "This sequence library was created by a newer Andoracle version and cannot be changed safely.";
+        case "busy":
+          setUserSequences(result.sequences);
+          return "Another Andoracle tab is changing the sequence library right now. Try again.";
+      }
+    } finally {
+      signal.removeEventListener("abort", cancelWhenAborted);
+      browserOperations.finish("sequence-replace", cancellation);
     }
   };
 
@@ -930,7 +1000,7 @@ function App() {
     setPatchLibraryDialog({ mode, origin });
   };
 
-  const saveNamedPatch = async (name: string): Promise<string | null> => {
+  const saveNamedPatch = async (name: string): Promise<PatchSaveOutcome> => {
     const normalizedName = normalizeUserPatchName(name);
     if (normalizedName && RESERVED_PATCH_NAMES.has(userPatchNameKey(normalizedName))) {
       return `“${normalizedName}” is already used by the factory patch selector. Choose a different name.`;
@@ -946,7 +1016,7 @@ function App() {
         case "saved":
           setUserPatches(result.patches);
           setActiveUserPatchName(result.patch.name);
-          setPresetName(USER_PATCH_PRESET_VALUE);
+          setPresetName("Custom patch");
           setNotice(`Saved user patch “${result.patch.name}” on this device.`);
           return null;
         case "empty-name":
@@ -957,7 +1027,7 @@ function App() {
           return `Patch names can contain no more than ${result.maxLength} characters.`;
         case "duplicate-name":
           setUserPatches(result.patches);
-          return `A saved patch named “${result.existingName}” already exists. Choose a different name.`;
+          return { status: "duplicate", existingPatch: result.existingPatch };
         case "immutable-name":
           setUserPatches(result.patches);
           return `“${result.immutableName}” is a built-in patch name and can never be modified. Choose a different name.`;
@@ -974,6 +1044,54 @@ function App() {
     }
   };
 
+  const replaceNamedPatch = async (
+    expected: UserPatch,
+    signal: AbortSignal,
+  ): Promise<string | null> => {
+    const cancellation = browserOperations.begin(
+      "patch-replace",
+      "Patch replacement was cancelled before it completed.",
+    );
+    const cancelWhenAborted = (): void => cancellation.cancel();
+    signal.addEventListener("abort", cancelWhenAborted, { once: true });
+    if (signal.aborted) cancellation.cancel();
+    try {
+      const result = await cancellation.race(
+        replaceUserPatchSafely(expected, paramsRef.current, undefined, undefined, signal),
+      );
+      switch (result.status) {
+        case "replaced":
+          setUserPatches(result.patches);
+          setActiveUserPatchName(result.patch.name);
+          setPresetName("Custom patch");
+          setNotice(`Replaced user patch “${result.patch.name}” with the current settings.`);
+          return null;
+        case "empty-name":
+          setUserPatches(result.patches);
+          return "That saved patch no longer has a valid name. Choose another name.";
+        case "not-found":
+          setUserPatches(result.patches);
+          return "That saved patch was removed before it could be replaced. Choose another name.";
+        case "stale-target":
+          setUserPatches(result.patches);
+          return "That saved patch changed in another Andoracle tab. Review it before replacing it.";
+        case "immutable-name":
+          setUserPatches(result.patches);
+          return `“${result.immutableName}” is built in and can never be modified.`;
+        case "storage-error":
+          return "This patch could not be replaced. Local storage may be blocked or full.";
+        case "unsupported-version":
+          return "This patch library was created by a newer Andoracle version and cannot be changed safely.";
+        case "busy":
+          setUserPatches(result.patches);
+          return "Another Andoracle tab is changing the patch library right now. Try again.";
+      }
+    } finally {
+      signal.removeEventListener("abort", cancelWhenAborted);
+      browserOperations.finish("patch-replace", cancellation);
+    }
+  };
+
   const loadNamedPatch = (name: string): string | null => {
     const patch = userPatches.find((candidate) => candidate.name === name);
     if (!patch) return "That saved patch is no longer available. Close this dialog and try again.";
@@ -983,7 +1101,7 @@ function App() {
     paramsRef.current = next;
     setParams(next);
     setActiveUserPatchName(patch.name);
-    setPresetName(USER_PATCH_PRESET_VALUE);
+    setPresetName("Custom patch");
     setDirectEditor(null);
     engine.setParams(next);
     syncPerformance(next);
@@ -1447,8 +1565,28 @@ function App() {
     setNotice("All notes and performance controls released.");
   };
 
+  const clearClipboardToast = (): void => {
+    if (clipboardToastTimerRef.current !== null) {
+      window.clearTimeout(clipboardToastTimerRef.current);
+      clipboardToastTimerRef.current = null;
+    }
+    setClipboardToast(null);
+  };
+
+  const showClipboardToast = (): void => {
+    if (clipboardToastTimerRef.current !== null) {
+      window.clearTimeout(clipboardToastTimerRef.current);
+    }
+    setClipboardToast("Copied to clipboard");
+    clipboardToastTimerRef.current = window.setTimeout(() => {
+      clipboardToastTimerRef.current = null;
+      if (mountedRef.current) setClipboardToast(null);
+    }, CLIPBOARD_TOAST_DURATION_MS);
+  };
+
   const sharePatch = async (): Promise<void> => {
     if (shareBusyRef.current) return;
+    clearClipboardToast();
 
     if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
     urlSyncTimerRef.current = null;
@@ -1488,7 +1626,7 @@ function App() {
 
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
       await cancellation.race(navigator.clipboard.writeText(shareUrl));
-      if (mountedRef.current) setNotice("Patch URL copied to the clipboard.");
+      if (mountedRef.current) showClipboardToast();
     } catch {
       if (mountedRef.current) {
         setNotice("The current patch is in the URL. Copy it from your browser's address bar.");
@@ -1748,21 +1886,16 @@ function App() {
         <div className="library-deck">
           <div className="patch-strip">
             <label htmlFor="preset">Patch</label>
-            <select
-              id="preset"
-              aria-label="Patch"
-              value={presetName}
-              onChange={(event) => {
-                applyPatch(event.target.value);
-                event.currentTarget.blur();
+            <PatchSelector
+              userPatches={userPatches}
+              activeUserPatchName={activeUserPatchName}
+              selectedFactoryName={presetName}
+              onSelectUserPatch={(name) => {
+                const error = loadNamedPatch(name);
+                if (error) setNotice(error);
               }}
-            >
-              {activeUserPatchName && (
-                <option value={USER_PATCH_PRESET_VALUE}>Saved · {activeUserPatchName}</option>
-              )}
-              <option value="Custom patch">Custom patch</option>
-              {FACTORY_PRESETS.map((preset) => <option key={preset.name}>{preset.name}</option>)}
-            </select>
+              onSelectFactoryPatch={applyPatch}
+            />
             <button
               type="button"
               className="button button--quiet"
@@ -1815,7 +1948,7 @@ function App() {
               disabled={shareBusy}
               onClick={() => void sharePatch()}
             >
-              {shareBusy ? "Sharing…" : "Share patch"}
+              {shareBusy ? "Sharing…" : "Share Patch"}
             </button>
           </div>
           <SequenceTransport
@@ -1874,6 +2007,12 @@ function App() {
         <div className="network-status"><i className={online ? "is-online" : ""} />{online ? "Online" : offlineCapable ? "Offline ready" : "Offline unavailable"}</div>
       </div>
 
+      {clipboardToast && (
+        <div className="clipboard-toast" role="status" aria-live="polite" aria-atomic="true">
+          {clipboardToast}
+        </div>
+      )}
+
       {audioStatus.error && (
         <aside className="system-banner system-banner--warning" role="alert" aria-live="assertive">
           <span>{audioStatus.error}</span>
@@ -1901,18 +2040,21 @@ function App() {
           <span>VCO 1 / VCO 2 / noise / ring</span><i>→</i><span>mixer</span><i>→</i><span>delay</span><i>→</i><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA</span><i>→</i><span>output</span>
         </div>
         <div className="panel-grid">
-          {PANEL_SECTIONS.map((section) => (
-            <section key={section.id} className={`module module--${section.id}`} style={{ "--module-accent": section.accent } as React.CSSProperties}>
-              <PanelScrews />
-              <header className="module-header">
-                <span className="module-eyebrow">{section.eyebrow}</span>
-                <h2>{section.title}</h2>
-              </header>
-              <div className="control-bank">
-                {section.items.map((item, index) => renderItem(item, section.accent, index))}
-              </div>
-            </section>
-          ))}
+          {PANEL_SECTIONS.map((section) => {
+            const hasRoutedFaders = section.items.some((item) => item.kind === "route");
+            return (
+              <section key={section.id} className={`module module--${section.id}`} style={{ "--module-accent": section.accent } as React.CSSProperties}>
+                <PanelScrews />
+                <header className="module-header">
+                  <span className="module-eyebrow">{section.eyebrow}</span>
+                  <h2>{section.title}</h2>
+                </header>
+                <div className={`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}`}>
+                  {section.items.map((item, index) => renderItem(item, section.accent, index))}
+                </div>
+              </section>
+            );
+          })}
         </div>
 
         <MidiInputControl
@@ -1958,6 +2100,7 @@ function App() {
           patchNames={userPatches.map((patch) => patch.name)}
           origin={patchLibraryDialog.origin}
           onSave={saveNamedPatch}
+          onReplace={replaceNamedPatch}
           onLoad={loadNamedPatch}
           onClose={() => setPatchLibraryDialog(null)}
         />
@@ -1979,6 +2122,7 @@ function App() {
           take={sequenceTake.take}
           origin={sequenceTake.origin}
           onSave={saveSequenceTake}
+          onReplace={replaceSequenceTake}
           onDiscard={() => {
             setSequenceTake(null);
             setNotice("Recording discarded. The previously loaded sequence was kept.");

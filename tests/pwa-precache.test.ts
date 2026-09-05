@@ -9,6 +9,7 @@ import {
 import {
   extractPrecacheUrls,
   isRequiredOfflineUrl,
+  validateBuiltVersion,
   validatePrecache,
 } from "../scripts/verify-precache.mjs";
 
@@ -57,5 +58,18 @@ describe("PWA precache manifest", () => {
     const incomplete = 'precacheAndRoute([{url:"index.html",revision:"one"}],{})';
     expect(() => validatePrecache(incomplete, ["index.html", "assets/odyssey-worklet.js"]))
       .toThrow(/Required offline assets missing.*odyssey-worklet\.js/);
+  });
+
+  it("requires the built HTML to expose one resolved release version", () => {
+    const valid = [
+      '<meta name="application-version" content="1.0.1" />',
+      '<script type="application/ld+json">{"softwareVersion":"1.0.1"}</script>',
+    ].join("\n");
+
+    expect(validateBuiltVersion(valid, "1.0.1")).toBe("1.0.1");
+    expect(() => validateBuiltVersion(valid.replaceAll("1.0.1", "%VITE_APP_VERSION%"), "1.0.1"))
+      .toThrow(/Unresolved %VITE_APP_VERSION%/);
+    expect(() => validateBuiltVersion(valid, "1.0.2"))
+      .toThrow(/does not declare application-version 1\.0\.2/);
   });
 });

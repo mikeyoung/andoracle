@@ -3,15 +3,41 @@ import { createOperationCancellation } from "../cancellable-operation";
 import {
   USER_SEQUENCE_NAME_MAX_LENGTH,
   type CapturedNoteSequence,
+  type UserNoteSequence,
 } from "../sequencer/user-sequences";
 import { truncateUserLibraryName } from "../user-library-name";
+
+export interface SequenceSaveConflict {
+  readonly status: "duplicate";
+  readonly existingSequence: UserNoteSequence;
+}
+
+export type SequenceSaveOutcome = string | null | SequenceSaveConflict;
 
 interface SequenceCommitDialogProps {
   take: CapturedNoteSequence;
   origin: HTMLElement | null;
-  onSave: (name: string) => string | null | Promise<string | null>;
+  onSave: (name: string) => SequenceSaveOutcome | Promise<SequenceSaveOutcome>;
+  onReplace: (
+    expected: UserNoteSequence,
+    signal: AbortSignal,
+  ) => string | null | Promise<string | null>;
   onDiscard: () => void;
 }
+
+interface ActiveSubmission {
+  readonly id: number;
+  readonly cancelWait: () => void;
+  readonly replacementController: AbortController | null;
+}
+
+const snapshotSequence = (sequence: UserNoteSequence): UserNoteSequence => ({
+  name: sequence.name,
+  data: sequence.data,
+  durationMs: sequence.durationMs,
+  noteCount: sequence.noteCount,
+  eventCount: sequence.eventCount,
+});
 
 const formatDuration = (durationMs: number): string => {
   const totalTenths = Math.round(Math.max(0, durationMs) / 100);
@@ -25,29 +51,78 @@ export function SequenceCommitDialog({
   take,
   origin,
   onSave,
+  onReplace,
   onDiscard,
 }: SequenceCommitDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const keepButtonRef = useRef<HTMLButtonElement>(null);
   const discardButtonRef = useRef<HTMLButtonElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const replaceCancelRef = useRef<HTMLButtonElement>(null);
   const [stage, setStage] = useState<"review" | "name">("review");
   const [draftName, setDraftName] = useState("");
+  const [saveConflict, setSaveConflict] = useState<UserNoteSequence | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const submissionRef = useRef(0);
-  const cancelSubmissionRef = useRef<(() => void) | null>(null);
+  const activeSubmissionRef = useRef<ActiveSubmission | null>(null);
+  const [nameFocusRequest, setNameFocusRequest] = useState(0);
+
+  const cancelActiveSubmission = (message: string): void => {
+    const active = activeSubmissionRef.current;
+    if (!active) return;
+    activeSubmissionRef.current = null;
+    submissionRef.current += 1;
+    active.replacementController?.abort(new DOMException(message, "AbortError"));
+    active.cancelWait();
+    busyRef.current = false;
+  };
+
+  const releaseSubmission = (active: ActiveSubmission): boolean => {
+    if (activeSubmissionRef.current !== active || active.id !== submissionRef.current) return false;
+    activeSubmissionRef.current = null;
+    busyRef.current = false;
+    return true;
+  };
+
+  const beginSubmission = (replacementController: AbortController | null): {
+    readonly active: ActiveSubmission;
+    readonly race: <T>(operation: T | PromiseLike<T>) => Promise<T>;
+  } => {
+    busyRef.current = true;
+    const cancellation = createOperationCancellation("Sequence dialog closed during submission.");
+    const active: ActiveSubmission = {
+      id: ++submissionRef.current,
+      cancelWait: cancellation.cancel,
+      replacementController,
+    };
+    activeSubmissionRef.current = active;
+    setBusy(true);
+    setError("");
+    return { active, race: cancellation.race };
+  };
+
+  const returnToNameForm = (message = "Recording replacement cancelled."): void => {
+    cancelActiveSubmission(message);
+    busyRef.current = false;
+    setBusy(false);
+    setSaveConflict(null);
+    setError("");
+    setNameFocusRequest((request) => request + 1);
+  };
 
   useEffect(() => {
     const dialog = dialogRef.current;
     if (dialog && !dialog.open) dialog.showModal();
     return () => {
-      submissionRef.current += 1;
-      const cancelSubmission = cancelSubmissionRef.current;
-      cancelSubmissionRef.current = null;
-      cancelSubmission?.();
+      cancelActiveSubmission("Sequence dialog unmounted during submission.");
+      busyRef.current = false;
       origin?.focus({ preventScroll: true });
     };
+    // Each dialog instance owns one submission lifecycle. Refs provide the
+    // latest active operation without restarting that lifecycle on rerenders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [origin]);
 
   useEffect(() => {
@@ -56,32 +131,66 @@ export function SequenceCommitDialog({
         if (take.noteCount > 0) keepButtonRef.current?.focus();
         else discardButtonRef.current?.focus();
       }
-      else nameInputRef.current?.focus();
+      else if (!saveConflict) nameInputRef.current?.focus();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [stage, take.noteCount]);
+  }, [saveConflict, stage, take.noteCount]);
+
+  useEffect(() => {
+    if (!saveConflict) return;
+    const timer = window.setTimeout(() => replaceCancelRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [saveConflict]);
+
+  useEffect(() => {
+    if (saveConflict || nameFocusRequest === 0) return;
+    const timer = window.setTimeout(() => nameInputRef.current?.focus(), 0);
+    return () => window.clearTimeout(timer);
+  }, [nameFocusRequest, saveConflict]);
 
   const save = async (event: FormEvent): Promise<void> => {
     event.preventDefault();
-    if (busy || stage !== "name" || take.noteCount === 0) return;
-    const submission = ++submissionRef.current;
-    const cancellation = createOperationCancellation("Sequence dialog closed during submission.");
-    cancelSubmissionRef.current = cancellation.cancel;
-    setBusy(true);
-    setError("");
+    if (busyRef.current || stage !== "name" || take.noteCount === 0) return;
+    if (saveConflict) {
+      const expected = snapshotSequence(saveConflict);
+      const controller = new AbortController();
+      const { active, race } = beginSubmission(controller);
+      try {
+        const result = await race(onReplace(expected, controller.signal));
+        if (!releaseSubmission(active)) return;
+        setBusy(false);
+        if (result) {
+          setSaveConflict(null);
+          setError(result);
+          setNameFocusRequest((request) => request + 1);
+        }
+      } catch {
+        if (!releaseSubmission(active)) return;
+        setBusy(false);
+        setSaveConflict(null);
+        setError("This recording could not be replaced. Try again.");
+        setNameFocusRequest((request) => request + 1);
+      }
+      return;
+    }
+
+    const { active, race } = beginSubmission(null);
     try {
-      const result = await cancellation.race(onSave(draftName));
-      if (submission !== submissionRef.current) return;
+      const result = await race(onSave(draftName));
+      if (!releaseSubmission(active)) return;
+      setBusy(false);
+      if (result !== null && typeof result === "object") {
+        setSaveConflict(snapshotSequence(result.existingSequence));
+        return;
+      }
       if (result) {
         setError(result);
         nameInputRef.current?.focus();
       }
     } catch {
-      if (submission !== submissionRef.current) return;
+      if (!releaseSubmission(active)) return;
+      setBusy(false);
       setError("This sequence could not be saved. Try again.");
-    } finally {
-      if (cancelSubmissionRef.current === cancellation.cancel) cancelSubmissionRef.current = null;
-      if (submission === submissionRef.current) setBusy(false);
     }
   };
 
@@ -89,7 +198,9 @@ export function SequenceCommitDialog({
     if (event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
-    if (!busy && stage === "name") {
+    if (saveConflict) {
+      returnToNameForm();
+    } else if (!busyRef.current && stage === "name") {
       setError("");
       setStage("review");
     }
@@ -99,10 +210,16 @@ export function SequenceCommitDialog({
     <dialog
       ref={dialogRef}
       className="direct-entry sequence-commit-dialog"
+      role={saveConflict ? "alertdialog" : undefined}
       aria-labelledby="sequence-commit-title"
+      aria-describedby={saveConflict
+        ? "sequence-replace-description sequence-library-error"
+        : undefined}
       onCancel={(event) => {
         event.preventDefault();
-        if (!busy && stage === "name") {
+        if (saveConflict) {
+          returnToNameForm();
+        } else if (!busyRef.current && stage === "name") {
           setError("");
           setStage("review");
         }
@@ -111,7 +228,13 @@ export function SequenceCommitDialog({
     >
       <form noValidate aria-busy={busy} onSubmit={(event) => void save(event)}>
         <div className="modal-kicker">Note sequencer</div>
-        <h2 id="sequence-commit-title">{stage === "review" ? "Keep this recording?" : "Name sequence"}</h2>
+        <h2 id="sequence-commit-title">
+          {stage === "review"
+            ? "Keep this recording?"
+            : saveConflict
+              ? "Replace saved recording?"
+              : "Name sequence"}
+        </h2>
 
         <p className="modal-current sequence-take-summary">
           {take.noteCount > 0
@@ -148,6 +271,26 @@ export function SequenceCommitDialog({
               </button>
             </div>
           </>
+        ) : saveConflict ? (
+          <>
+            <p id="sequence-replace-description" className="modal-current delete-target-name">
+              Replace “{saveConflict.name}” with this recording?
+            </p>
+            <p id="sequence-library-error" className="modal-error" role="alert">{error}</p>
+            <div className="modal-actions">
+              <button
+                ref={replaceCancelRef}
+                type="button"
+                className="button button--quiet"
+                onClick={() => returnToNameForm()}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="button button--danger" disabled={busy}>
+                Replace
+              </button>
+            </div>
+          </>
         ) : (
           <>
             <label htmlFor="sequence-library-name">Sequence name</label>
@@ -168,7 +311,7 @@ export function SequenceCommitDialog({
               }}
             />
             <p id="sequence-library-help" className="valid-range">
-              Up to {USER_SEQUENCE_NAME_MAX_LENGTH} characters. Leading and trailing whitespace is removed. Names must be unique, regardless of capitalization.
+              Up to {USER_SEQUENCE_NAME_MAX_LENGTH} characters. Leading and trailing whitespace is removed. Matching names can be replaced after confirmation, regardless of capitalization.
             </p>
             <p id="sequence-library-error" className="modal-error" role="alert">{error}</p>
             <div className="modal-actions">

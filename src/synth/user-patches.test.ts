@@ -10,11 +10,14 @@ import {
   hasUserPatchNamed,
   loadUserPatches,
   readUserPatches,
+  replaceUserPatch,
+  replaceUserPatchSafely,
   saveUserPatch,
   saveUserPatchSafely,
   userPatchNameKey,
   userPatchNameCategory,
   type SafeDeleteUserPatchResult,
+  type SafeReplaceUserPatchResult,
   type SafeSaveUserPatchResult,
   type UserPatch,
   type UserPatchLockManager,
@@ -140,6 +143,9 @@ describe("user patch storage", () => {
     expect(duplicate.status).toBe("duplicate-name");
     if (duplicate.status !== "duplicate-name") throw new Error("Expected a duplicate name.");
     expect(duplicate.existingName).toBe("Bass");
+    expect(duplicate.existingPatch).toEqual(duplicate.patches[0]);
+    expect(duplicate.existingPatch).not.toBe(duplicate.patches[0]);
+    expect(duplicate.existingPatch.params).not.toBe(duplicate.patches[0].params);
     expect(storage.writes).toBe(1);
     expect(storage.raw()).toBe(beforeDuplicate);
     expect(loadUserPatches(storage)[0].params.filterCutoff).toBe(800);
@@ -506,6 +512,144 @@ describe("user patch storage", () => {
     expect(hasUserPatchNamed([], "Café")).toBe(false);
   });
 
+  it("atomically replaces a canonically matched patch in place and preserves its display name", () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("One", { ...DEFAULT_PARAMS, lfoRate: 1 }, storage);
+    saveUserPatch("Café", { ...DEFAULT_PARAMS, lfoRate: 2 }, storage);
+    saveUserPatch("Three", { ...DEFAULT_PARAMS, lfoRate: 3 }, storage);
+    const duplicate = saveUserPatch(" CAFE\u0301 ", { ...DEFAULT_PARAMS, lfoRate: 4 }, storage);
+    if (duplicate.status !== "duplicate-name") throw new Error("Expected a duplicate name.");
+
+    const result = replaceUserPatch(
+      { ...duplicate.existingPatch, name: "  CAFE\u0301  " },
+      { ...DEFAULT_PARAMS, filterCutoff: 16_001, masterVolume: 0.7346 },
+      storage,
+    );
+
+    expect(result.status).toBe("replaced");
+    if (result.status !== "replaced") throw new Error("Expected the patch to be replaced.");
+    expect(result.patch).toMatchObject({
+      name: "Café",
+      params: { filterCutoff: 16_000, masterVolume: 0.735 },
+    });
+    expect(result.patches.map((patch) => patch.name)).toEqual(["One", "Café", "Three"]);
+    expect(loadUserPatches(storage).map((patch) => [patch.name, patch.params.filterCutoff]))
+      .toEqual([
+        ["One", DEFAULT_PARAMS.filterCutoff],
+        ["Café", 16_000],
+        ["Three", DEFAULT_PARAMS.filterCutoff],
+      ]);
+    expect(storage.writes).toBe(4);
+  });
+
+  it("refuses immutable, empty, missing, and stale replacement targets without writing", () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Target", { ...DEFAULT_PARAMS, filterCutoff: 800 }, storage);
+    const original = requireStoredPatch("Target", storage);
+    const beforeRejectedTargets = storage.raw();
+
+    expect(replaceUserPatch(patchSnapshot(" custom PATCH "), DEFAULT_PARAMS, storage)).toMatchObject({
+      status: "immutable-name",
+      category: "default",
+      immutableName: "Custom patch",
+    });
+    expect(replaceUserPatch(patchSnapshot(" RUBBER BASS "), DEFAULT_PARAMS, storage)).toMatchObject({
+      status: "immutable-name",
+      category: "factory",
+      immutableName: "Rubber Bass",
+    });
+    expect(replaceUserPatch(patchSnapshot(" \n\t "), DEFAULT_PARAMS, storage)).toMatchObject({
+      status: "empty-name",
+    });
+    expect(replaceUserPatch(patchSnapshot("Missing"), DEFAULT_PARAMS, storage)).toMatchObject({
+      status: "not-found",
+    });
+    expect(storage.raw()).toBe(beforeRejectedTargets);
+
+    const concurrent = replaceUserPatch(original, { ...DEFAULT_PARAMS, filterCutoff: 4_000 }, storage);
+    expect(concurrent.status).toBe("replaced");
+    const writesBeforeStaleAttempt = storage.writes;
+    expect(replaceUserPatch(original, { ...DEFAULT_PARAMS, filterCutoff: 9_000 }, storage)).toMatchObject({
+      status: "stale-target",
+      currentPatch: { name: "Target", params: { filterCutoff: 4_000 } },
+      patches: [{ name: "Target", params: { filterCutoff: 4_000 } }],
+    });
+    expect(storage.writes).toBe(writesBeforeStaleAttempt);
+    expect(findUserPatch("Target", storage)?.params.filterCutoff).toBe(4_000);
+  });
+
+  it("does not recreate a replacement target deleted after confirmation", () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Gone", DEFAULT_PARAMS, storage);
+    const expected = requireStoredPatch("Gone", storage);
+    expect(deleteUserPatch(expected, storage).status).toBe("deleted");
+    const writesBeforeReplacement = storage.writes;
+
+    expect(replaceUserPatch(expected, { ...DEFAULT_PARAMS, lfoRate: 4 }, storage)).toEqual({
+      status: "not-found",
+      patches: [],
+    });
+    expect(storage.writes).toBe(writesBeforeReplacement);
+    expect(loadUserPatches(storage)).toEqual([]);
+  });
+
+  it("protects replacement transactions from storage failures and future schemas", () => {
+    const readFailure: UserPatchStorage = {
+      getItem: () => { throw new Error("blocked"); },
+      setItem: () => undefined,
+    };
+    expect(replaceUserPatch(patchSnapshot("Target"), DEFAULT_PARAMS, readFailure)).toEqual({
+      status: "storage-error",
+      patches: [],
+    });
+
+    const writeFailure: UserPatchStorage = {
+      getItem: () => JSON.stringify({
+        version: 1,
+        patches: [{ name: "Target", params: DEFAULT_PARAMS }],
+      }),
+      setItem: () => { throw new Error("quota"); },
+    };
+    expect(replaceUserPatch(
+      requireStoredPatch("Target", writeFailure),
+      { ...DEFAULT_PARAMS, lfoRate: 4 },
+      writeFailure,
+    )).toMatchObject({ status: "storage-error", patches: [{ name: "Target" }] });
+
+    const future = new MemoryStorage(JSON.stringify({
+      version: 2,
+      patches: [{ name: "Target", params: DEFAULT_PARAMS }],
+    }));
+    const futureRaw = future.raw();
+    expect(replaceUserPatch(patchSnapshot("Target"), DEFAULT_PARAMS, future)).toEqual({
+      status: "unsupported-version",
+      patches: [],
+    });
+    expect(future.writes).toBe(0);
+    expect(future.raw()).toBe(futureRaw);
+  });
+
+  it("does not accumulate duplicates through repeated confirmed replacements", () => {
+    const storage = new MemoryStorage();
+    const saved = saveUserPatch("Stable identity", DEFAULT_PARAMS, storage);
+    if (saved.status !== "saved") throw new Error("Expected the initial patch to save.");
+    let expected = saved.patch;
+
+    for (let iteration = 0; iteration < 1_000; iteration += 1) {
+      const result = replaceUserPatch(
+        expected,
+        { ...DEFAULT_PARAMS, filterCutoff: 100 + iteration },
+        storage,
+      );
+      if (result.status !== "replaced") throw new Error(`Replace churn failed at ${iteration}.`);
+      expected = result.patch;
+    }
+
+    expect(loadUserPatches(storage)).toHaveLength(1);
+    expect(findUserPatch("stable identity", storage)).toEqual(expected);
+    expect(storage.writes).toBe(1_001);
+  });
+
   it("deletes a canonically matched user patch and preserves the remaining order", () => {
     const storage = new MemoryStorage();
     saveUserPatch("One", { ...DEFAULT_PARAMS, lfoRate: 1 }, storage);
@@ -706,6 +850,170 @@ describe("user patch storage", () => {
     expect(results.map((result) => result.status)).toEqual(["saved", "busy"]);
     expect((await saveUserPatchSafely("Two", DEFAULT_PARAMS, storage, locks)).status).toBe("saved");
     expect(loadUserPatches(storage).map((patch) => patch.name)).toEqual(["One", "Two"]);
+  });
+
+  it("serializes replacement with other patch-library writes", async () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Target", { ...DEFAULT_PARAMS, filterCutoff: 800 }, storage);
+    const target = requireStoredPatch("Target", storage);
+    const locks = new IfAvailableLockManager();
+
+    const replacing = replaceUserPatchSafely(
+      target,
+      { ...DEFAULT_PARAMS, filterCutoff: 4_000 },
+      storage,
+      locks,
+    );
+    const blockedSave = saveUserPatchSafely("Concurrent", DEFAULT_PARAMS, storage, locks);
+
+    await expect(blockedSave).resolves.toMatchObject({
+      status: "busy",
+      patches: [{ name: "Target", params: { filterCutoff: 800 } }],
+    });
+    await expect(replacing).resolves.toMatchObject({
+      status: "replaced",
+      patch: { name: "Target", params: { filterCutoff: 4_000 } },
+    });
+    expect(loadUserPatches(storage).map((patch) => patch.name)).toEqual(["Target"]);
+    expect(storage.writes).toBe(2);
+  });
+
+  it("returns a fresh busy snapshot without replacing when another tab owns the lock", async () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Target", { ...DEFAULT_PARAMS, filterCutoff: 800 }, storage);
+    const unavailableLock: UserPatchLockManager = {
+      request: async (_name, _options, callback) => callback(null),
+    };
+
+    const result = await replaceUserPatchSafely(
+      requireStoredPatch("Target", storage),
+      { ...DEFAULT_PARAMS, filterCutoff: 4_000 },
+      storage,
+      unavailableLock,
+    );
+
+    expect(result).toMatchObject({
+      status: "busy",
+      patches: [{ name: "Target", params: { filterCutoff: 800 } }],
+    });
+    expect(findUserPatch("Target", storage)?.params.filterCutoff).toBe(800);
+    expect(storage.writes).toBe(1);
+  });
+
+  it("revokes replacement authority before a delayed lock callback can write", async () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Target", { ...DEFAULT_PARAMS, filterCutoff: 800 }, storage);
+    const expected = requireStoredPatch("Target", storage);
+    let releaseLock!: () => void;
+    const locks: UserPatchLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const pending = replaceUserPatchSafely(
+      expected,
+      { ...DEFAULT_PARAMS, filterCutoff: 4_000 },
+      storage,
+      locks,
+      controller.signal,
+    );
+    controller.abort(new DOMException("Confirmation cancelled.", "AbortError"));
+    releaseLock();
+
+    await expect(pending).resolves.toMatchObject({
+      status: "busy",
+      patches: [{ name: "Target", params: { filterCutoff: 800 } }],
+    });
+    expect(findUserPatch("Target", storage)?.params.filterCutoff).toBe(800);
+    expect(storage.writes).toBe(1);
+  });
+
+  it("detects a target changed by another tab before the replacement lock is acquired", async () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Target", { ...DEFAULT_PARAMS, filterCutoff: 800 }, storage);
+    const expected = requireStoredPatch("Target", storage);
+    let releaseLock!: () => void;
+    const locks: UserPatchLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+
+    const pending = replaceUserPatchSafely(
+      expected,
+      { ...DEFAULT_PARAMS, filterCutoff: 9_000 },
+      storage,
+      locks,
+    );
+    expect(replaceUserPatch(expected, { ...DEFAULT_PARAMS, filterCutoff: 4_000 }, storage).status)
+      .toBe("replaced");
+    const writesBeforeDelayedLock = storage.writes;
+    releaseLock();
+
+    await expect(pending).resolves.toMatchObject({
+      status: "stale-target",
+      currentPatch: { name: "Target", params: { filterCutoff: 4_000 } },
+    });
+    expect(storage.writes).toBe(writesBeforeDelayedLock);
+    expect(findUserPatch("Target", storage)?.params.filterCutoff).toBe(4_000);
+  });
+
+  it("snapshots the confirmed target and proposed controls before a delayed replacement lock", async () => {
+    const storage = new MemoryStorage();
+    saveUserPatch("Target", { ...DEFAULT_PARAMS, filterCutoff: 800 }, storage);
+    saveUserPatch("Other", { ...DEFAULT_PARAMS, filterCutoff: 6_000 }, storage);
+    const target = requireStoredPatch("Target", storage);
+    const mutableExpected = { name: target.name, params: { ...target.params } };
+    const mutableParams = { ...DEFAULT_PARAMS, filterCutoff: 4_000, masterVolume: 0.7346 };
+    let releaseLock!: () => void;
+    const locks: UserPatchLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+
+    const replacing: Promise<SafeReplaceUserPatchResult> = replaceUserPatchSafely(
+      mutableExpected,
+      mutableParams,
+      storage,
+      locks,
+    );
+    mutableExpected.name = "Other";
+    mutableExpected.params.filterCutoff = 6_000;
+    mutableParams.filterCutoff = 12_000;
+    mutableParams.masterVolume = 0.1;
+    releaseLock();
+
+    await expect(replacing).resolves.toMatchObject({
+      status: "replaced",
+      patch: { name: "Target", params: { filterCutoff: 4_000, masterVolume: 0.735 } },
+      patches: [
+        { name: "Target", params: { filterCutoff: 4_000, masterVolume: 0.735 } },
+        { name: "Other", params: { filterCutoff: 6_000 } },
+      ],
+    });
+    expect(findUserPatch("Other", storage)?.params.filterCutoff).toBe(6_000);
+    expect(storage.writes).toBe(3);
   });
 
   it("serializes delete against save so cross-tab writes cannot lose or resurrect patches", async () => {

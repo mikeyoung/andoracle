@@ -1,6 +1,13 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import packageMetadata from "./package.json";
+
+if (typeof packageMetadata.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(packageMetadata.version)) {
+  throw new Error("package.json must contain a valid semantic version for the Andoracle HTML metadata.");
+}
+
+export const ANDORACLE_VERSION = packageMetadata.version;
 
 export const PWA_INCLUDE_ASSETS = [
   "favicon.ico",
@@ -31,6 +38,11 @@ export default defineConfig({
   // Relative production URLs keep the same build valid at / and at any
   // directory-style subpath (for example, /andoracle/).
   base: "./",
+  // Vite applies import.meta.env.* definitions to both client modules and
+  // %VITE_APP_VERSION% placeholders in index.html.
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(ANDORACLE_VERSION),
+  },
   plugins: [
     react(),
     VitePWA({

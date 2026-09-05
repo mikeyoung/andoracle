@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { ANDORACLE_VERSION } from "../vite.config";
 
 const DESCRIPTION = "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.";
 const SITE_URL = "https://mikeyoung.org/andoracle/";
@@ -12,11 +13,14 @@ describe("Andoracle project metadata", () => {
   it("describes the application and its technology in package metadata", () => {
     const packageJson = JSON.parse(readProjectFile("package.json")) as {
       name: string;
+      version: string;
       description: string;
       keywords: string[];
     };
 
     expect(packageJson.name).toBe("andoracle");
+    expect(packageJson.version).toBe(ANDORACLE_VERSION);
+    expect(packageJson.version).toMatch(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/);
     expect(packageJson.description).toBe(DESCRIPTION);
     expect(packageJson.keywords).toEqual(expect.arrayContaining([
       "synthesizer",
@@ -33,6 +37,7 @@ describe("Andoracle project metadata", () => {
     const html = readProjectFile("index.html");
 
     expect(html).toContain(`<meta name="description" content="${DESCRIPTION}" />`);
+    expect(html).toContain('<meta name="application-version" content="%VITE_APP_VERSION%" />');
     expect(html).toContain(`<meta property="og:description" content="${DESCRIPTION}" />`);
     expect(html).toContain(`<meta name="twitter:description" content="${DESCRIPTION}" />`);
     expect(html).toContain('<meta property="og:type" content="website" />');
@@ -55,7 +60,7 @@ describe("Andoracle project metadata", () => {
       description: DESCRIPTION,
       applicationCategory: "MultimediaApplication",
       operatingSystem: "Any",
-      softwareVersion: "1.0.0",
+      softwareVersion: "%VITE_APP_VERSION%",
       inLanguage: "en",
     });
     expect(structured.browserRequirements).toContain("44.1 kHz");
@@ -75,6 +80,7 @@ describe("Andoracle project metadata", () => {
     expect(viteConfig).toContain('lang: "en"');
     expect(viteConfig).toContain('dir: "ltr"');
     expect(viteConfig).toContain('categories: ["music", "entertainment"]');
+    expect(viteConfig).toContain('"import.meta.env.VITE_APP_VERSION": JSON.stringify(ANDORACLE_VERSION)');
   });
 
   it("ships IIS configuration required by the deployed PWA", () => {

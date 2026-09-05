@@ -12,11 +12,14 @@ import {
   loadUserSequences,
   normalizeCapturedNoteSequence,
   readUserSequences,
+  replaceUserSequence,
+  replaceUserSequenceSafely,
   saveUserSequence,
   saveUserSequenceSafely,
   userSequenceNameKey,
   type NoteSequenceEvent,
   type SafeDeleteUserSequenceResult,
+  type SafeReplaceUserSequenceResult,
   type SafeSaveUserSequenceResult,
   type UserNoteSequence,
   type UserSequenceLockManager,
@@ -325,6 +328,8 @@ describe("user sequence storage", () => {
     expect(duplicate.status).toBe("duplicate-name");
     if (duplicate.status !== "duplicate-name") throw new Error("Expected duplicate name.");
     expect(duplicate.existingName).toBe("Verse");
+    expect(duplicate.existingSequence).toEqual(duplicate.sequences[0]);
+    expect(duplicate.existingSequence).not.toBe(duplicate.sequences[0]);
     expect(storage.writes).toBe(1);
     expect(storage.raw()).toBe(before);
     const found = findUserSequence("verse", storage);
@@ -597,6 +602,165 @@ describe("user sequence storage", () => {
     expect(findUserSequence("   ", storage)).toBeNull();
     expect(hasUserSequenceNamed(sequences, " CAFE\u0301 ")).toBe(true);
     expect(hasUserSequenceNamed(sequences, "missing")).toBe(false);
+  });
+
+  it("atomically replaces a canonically matched sequence in place and preserves its display name", () => {
+    const replacementEvents: readonly NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 72, on: true },
+      { deltaMs: 900, note: 72, on: false },
+    ];
+    const storage = new MemoryStorage();
+    saveUserSequence("One", SIMPLE_EVENTS, storage);
+    saveUserSequence("Caf\u00e9", SIMPLE_EVENTS, storage);
+    saveUserSequence("Three", SIMPLE_EVENTS, storage);
+    const duplicate = saveUserSequence(" CAFE\u0301 ", replacementEvents, storage);
+    if (duplicate.status !== "duplicate-name") throw new Error("Expected a duplicate name.");
+
+    const result = replaceUserSequence(
+      { ...duplicate.existingSequence, name: "  CAFE\u0301  " },
+      replacementEvents,
+      storage,
+    );
+
+    expect(result.status).toBe("replaced");
+    if (result.status !== "replaced") throw new Error("Expected the sequence to be replaced.");
+    expect(result.sequence).toMatchObject({
+      name: "Caf\u00e9",
+      durationMs: 900,
+      noteCount: 1,
+      eventCount: 2,
+    });
+    expect(result.sequences.map((sequence) => sequence.name)).toEqual(["One", "Caf\u00e9", "Three"]);
+    expect(decodeUserSequence(result.sequence)?.events).toEqual(replacementEvents);
+    expect(loadUserSequences(storage).map((sequence) => sequence.name))
+      .toEqual(["One", "Caf\u00e9", "Three"]);
+    expect(storage.writes).toBe(4);
+  });
+
+  it("refuses empty, missing, invalid, and stale replacement attempts without overwriting", () => {
+    const replacementEvents: readonly NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 67, on: true },
+      { deltaMs: 750, note: 67, on: false },
+    ];
+    const storage = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, storage);
+    const original = storedSequence(storage, "Target");
+    const beforeRejectedTargets = storage.raw();
+
+    expect(replaceUserSequence({ ...original, name: " \n\t " }, replacementEvents, storage))
+      .toMatchObject({ status: "empty-name" });
+    expect(replaceUserSequence({ ...original, name: "Missing" }, replacementEvents, storage))
+      .toMatchObject({ status: "not-found" });
+    expect(replaceUserSequence(original, [{ deltaMs: 0, note: 60, on: true }], storage))
+      .toMatchObject({ status: "invalid-sequence" });
+    expect(storage.raw()).toBe(beforeRejectedTargets);
+
+    const changedSnapshots: readonly UserNoteSequence[] = [
+      { ...original, data: `${original.data}A` },
+      { ...original, durationMs: original.durationMs + 1 },
+      { ...original, noteCount: original.noteCount + 1 },
+      { ...original, eventCount: original.eventCount + 1 },
+    ];
+    for (const changed of changedSnapshots) {
+      expect(replaceUserSequence(changed, replacementEvents, storage)).toMatchObject({
+        status: "stale-target",
+        currentSequence: original,
+        sequences: [original],
+      });
+    }
+    expect(storage.writes).toBe(1);
+    expect(findUserSequence("Target", storage)).toEqual(original);
+  });
+
+  it("rejects an old confirmation after replacement and never recreates a deleted target", () => {
+    const firstReplacement: readonly NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 64, on: true },
+      { deltaMs: 600, note: 64, on: false },
+    ];
+    const secondReplacement: readonly NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 76, on: true },
+      { deltaMs: 1_200, note: 76, on: false },
+    ];
+    const storage = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, storage);
+    const original = storedSequence(storage, "Target");
+
+    expect(replaceUserSequence(original, firstReplacement, storage).status).toBe("replaced");
+    const writesBeforeStaleAttempt = storage.writes;
+    expect(replaceUserSequence(original, secondReplacement, storage)).toMatchObject({
+      status: "stale-target",
+      currentSequence: { name: "Target", durationMs: 600 },
+      sequences: [{ name: "Target", durationMs: 600 }],
+    });
+    expect(storage.writes).toBe(writesBeforeStaleAttempt);
+    expect(decodeUserSequence(storedSequence(storage, "Target"))?.events).toEqual(firstReplacement);
+
+    const current = storedSequence(storage, "Target");
+    expect(deleteUserSequence(current, storage).status).toBe("deleted");
+    const writesBeforeDeletedReplacement = storage.writes;
+    expect(replaceUserSequence(current, secondReplacement, storage)).toEqual({
+      status: "not-found",
+      sequences: [],
+    });
+    expect(storage.writes).toBe(writesBeforeDeletedReplacement);
+    expect(loadUserSequences(storage)).toEqual([]);
+  });
+
+  it("protects replacement transactions from storage failures and future schemas", () => {
+    const readFailure: UserSequenceStorage = {
+      getItem: () => { throw new Error("blocked"); },
+      setItem: () => undefined,
+    };
+    expect(replaceUserSequence(sequenceSnapshot("Target"), SIMPLE_EVENTS, readFailure)).toEqual({
+      status: "storage-error",
+      sequences: [],
+    });
+
+    const source = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, source);
+    const writeFailure: UserSequenceStorage = {
+      getItem: (key) => source.getItem(key),
+      setItem: () => { throw new Error("quota"); },
+    };
+    expect(replaceUserSequence(
+      storedSequence(source, "Target"),
+      [
+        { deltaMs: 0, note: 72, on: true },
+        { deltaMs: 900, note: 72, on: false },
+      ],
+      writeFailure,
+    )).toMatchObject({ status: "storage-error", sequences: [{ name: "Target" }] });
+    expect(decodeUserSequence(storedSequence(source, "Target"))?.events).toEqual(SIMPLE_EVENTS);
+
+    const future = new MemoryStorage(JSON.stringify({ version: 2, sequences: [] }));
+    const futureRaw = future.raw();
+    expect(replaceUserSequence(sequenceSnapshot("Target"), SIMPLE_EVENTS, future)).toEqual({
+      status: "unsupported-version",
+      sequences: [],
+    });
+    expect(future.writes).toBe(0);
+    expect(future.raw()).toBe(futureRaw);
+  });
+
+  it("does not accumulate duplicate entries through repeated confirmed replacements", () => {
+    const storage = new MemoryStorage();
+    const saved = saveUserSequence("Stable identity", SIMPLE_EVENTS, storage);
+    if (saved.status !== "saved") throw new Error("Expected the initial sequence to save.");
+    let expected = saved.sequence;
+
+    for (let iteration = 0; iteration < 1_000; iteration += 1) {
+      const replacementEvents: readonly NoteSequenceEvent[] = [
+        { deltaMs: 0, note: iteration % 128, on: true },
+        { deltaMs: iteration, note: iteration % 128, on: false },
+      ];
+      const result = replaceUserSequence(expected, replacementEvents, storage);
+      if (result.status !== "replaced") throw new Error(`Replace churn failed at ${iteration}.`);
+      expected = result.sequence;
+    }
+
+    expect(loadUserSequences(storage)).toHaveLength(1);
+    expect(findUserSequence("stable identity", storage)).toEqual(expected);
+    expect(storage.writes).toBe(1_001);
   });
 
   it("deletes exactly one canonically named sequence and preserves library order", () => {
@@ -930,6 +1094,191 @@ describe("user sequence storage", () => {
       sequences: [{ name: "Take" }],
     });
     expect(findUserSequence("Take", deleteWriteFailure)).not.toBeNull();
+  });
+
+  it("serializes replacement with other sequence-library writes", async () => {
+    const replacementEvents: readonly NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 72, on: true },
+      { deltaMs: 900, note: 72, on: false },
+    ];
+    const storage = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, storage);
+    const target = storedSequence(storage, "Target");
+    const locks = new IfAvailableLockManager();
+
+    const replacing = replaceUserSequenceSafely(target, replacementEvents, storage, locks);
+    const blockedSave = saveUserSequenceSafely("Concurrent", SIMPLE_EVENTS, storage, locks);
+
+    await expect(blockedSave).resolves.toMatchObject({
+      status: "busy",
+      sequences: [{ name: "Target", durationMs: 500 }],
+    });
+    await expect(replacing).resolves.toMatchObject({
+      status: "replaced",
+      sequence: { name: "Target", durationMs: 900 },
+    });
+    expect(loadUserSequences(storage).map((sequence) => sequence.name)).toEqual(["Target"]);
+    expect(decodeUserSequence(storedSequence(storage, "Target"))?.events).toEqual(replacementEvents);
+    expect(storage.writes).toBe(2);
+  });
+
+  it("returns a fresh busy snapshot without replacing when another tab owns the lock", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, storage);
+    const unavailableLock: UserSequenceLockManager = {
+      request: async (_name, _options, callback) => callback(null),
+    };
+
+    const result = await replaceUserSequenceSafely(
+      storedSequence(storage, "Target"),
+      [
+        { deltaMs: 0, note: 72, on: true },
+        { deltaMs: 900, note: 72, on: false },
+      ],
+      storage,
+      unavailableLock,
+    );
+
+    expect(result).toMatchObject({
+      status: "busy",
+      sequences: [{ name: "Target", durationMs: 500 }],
+    });
+    expect(decodeUserSequence(storedSequence(storage, "Target"))?.events).toEqual(SIMPLE_EVENTS);
+    expect(storage.writes).toBe(1);
+  });
+
+  it("revokes replacement authority before a delayed lock callback can write", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, storage);
+    const expected = storedSequence(storage, "Target");
+    let releaseLock!: () => void;
+    const locks: UserSequenceLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+    const controller = new AbortController();
+
+    const pending = replaceUserSequenceSafely(
+      expected,
+      [
+        { deltaMs: 0, note: 72, on: true },
+        { deltaMs: 900, note: 72, on: false },
+      ],
+      storage,
+      locks,
+      controller.signal,
+    );
+    controller.abort(new DOMException("Confirmation cancelled.", "AbortError"));
+    releaseLock();
+
+    await expect(pending).resolves.toMatchObject({
+      status: "busy",
+      sequences: [{ name: "Target", durationMs: 500 }],
+    });
+    expect(findUserSequence("Target", storage)).toEqual(expected);
+    expect(storage.writes).toBe(1);
+  });
+
+  it("detects a changed target and snapshots proposed events before a delayed replacement lock", async () => {
+    const concurrentEvents: readonly NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 64, on: true },
+      { deltaMs: 600, note: 64, on: false },
+    ];
+    const storage = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, storage);
+    const expected = storedSequence(storage, "Target");
+    let releaseLock!: () => void;
+    const locks: UserSequenceLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+
+    const pending = replaceUserSequenceSafely(
+      expected,
+      [
+        { deltaMs: 0, note: 76, on: true },
+        { deltaMs: 1_200, note: 76, on: false },
+      ],
+      storage,
+      locks,
+    );
+    expect(replaceUserSequence(expected, concurrentEvents, storage).status).toBe("replaced");
+    const writesBeforeDelayedLock = storage.writes;
+    releaseLock();
+
+    await expect(pending).resolves.toMatchObject({
+      status: "stale-target",
+      currentSequence: { name: "Target", durationMs: 600 },
+    });
+    expect(storage.writes).toBe(writesBeforeDelayedLock);
+    expect(decodeUserSequence(storedSequence(storage, "Target"))?.events).toEqual(concurrentEvents);
+  });
+
+  it("snapshots the confirmed target and proposed performance before a delayed replacement lock", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Target", SIMPLE_EVENTS, storage);
+    saveUserSequence("Other", SIMPLE_EVENTS, storage);
+    const target = storedSequence(storage, "Target");
+    const mutableExpected = { ...target };
+    const mutableEvents = [
+      { deltaMs: 0, note: 72, on: true },
+      { deltaMs: 900, note: 72, on: false },
+    ];
+    let releaseLock!: () => void;
+    const locks: UserSequenceLockManager = {
+      request<T>(
+        _name: string,
+        _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+        callback: (lock: unknown | null) => T | PromiseLike<T>,
+      ): Promise<T> {
+        return new Promise<T>((resolve) => {
+          releaseLock = () => { void Promise.resolve(callback({})).then(resolve); };
+        });
+      },
+    };
+
+    const replacing: Promise<SafeReplaceUserSequenceResult> = replaceUserSequenceSafely(
+      mutableExpected,
+      mutableEvents,
+      storage,
+      locks,
+    );
+    mutableExpected.name = "Other";
+    mutableExpected.data = storedSequence(storage, "Other").data;
+    mutableExpected.durationMs = 999;
+    mutableEvents[0].note = 84;
+    mutableEvents[1].note = 84;
+    mutableEvents[1].deltaMs = 1_800;
+    releaseLock();
+
+    await expect(replacing).resolves.toMatchObject({
+      status: "replaced",
+      sequence: { name: "Target", durationMs: 900, noteCount: 1, eventCount: 2 },
+      sequences: [
+        { name: "Target", durationMs: 900 },
+        { name: "Other", durationMs: 500 },
+      ],
+    });
+    expect(decodeUserSequence(storedSequence(storage, "Target"))?.events).toEqual([
+      { deltaMs: 0, note: 72, on: true },
+      { deltaMs: 900, note: 72, on: false },
+    ]);
+    expect(decodeUserSequence(storedSequence(storage, "Other"))?.events).toEqual(SIMPLE_EVENTS);
+    expect(storage.writes).toBe(3);
   });
 
   it("allows only one simultaneous same-name save into the write transaction", async () => {

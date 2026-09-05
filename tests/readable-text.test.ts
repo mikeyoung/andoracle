@@ -29,6 +29,8 @@ describe("readable responsive text", () => {
     ".direct-entry h2",
     ".help-interface-list kbd",
     ".modal-actions .button",
+    ".choice-button span",
+    ".clipboard-toast",
   ])("keeps %s on whole-word wrapping boundaries", (selector) => {
     const rule = ruleFor(selector);
     expect(rule).toMatch(/overflow-wrap:\s*normal/);
@@ -49,6 +51,11 @@ describe("readable responsive text", () => {
     expect(output).toMatch(/overflow:\s*visible/);
     expect(output).toMatch(/white-space:\s*normal/);
     expect(output).not.toMatch(/overflow:\s*hidden|white-space:\s*nowrap/);
+
+    const choiceText = ruleFor(".choice-button span");
+    expect(choiceText).toMatch(/overflow:\s*visible/);
+    expect(choiceText).toMatch(/white-space:\s*normal/);
+    expect(choiceText).not.toMatch(/max-height|line-clamp|overflow:\s*(?:hidden|clip)/);
   });
 
   it("never hides responsive patch, status, or piano-key labels", () => {

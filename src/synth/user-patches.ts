@@ -40,7 +40,7 @@ export interface UserPatch {
   readonly params: SynthParams;
 }
 
-/** Only user-category names may ever be created or removed by this module. */
+/** Only user-category names may ever be created, replaced, or removed by this module. */
 export type PatchNameCategory = "user" | "factory" | "default";
 
 export interface ImmutablePatchName {
@@ -89,6 +89,8 @@ export type SaveUserPatchResult =
   | {
       readonly status: "duplicate-name";
       readonly existingName: string;
+      /** Immutable snapshot that a later, explicit replace confirmation can target safely. */
+      readonly existingPatch: UserPatch;
       readonly patches: readonly UserPatch[];
     }
   | ({
@@ -105,6 +107,45 @@ export type SaveUserPatchResult =
     };
 
 export type SafeSaveUserPatchResult = SaveUserPatchResult | {
+  /** Another tab currently owns the short patch-library write lock. */
+  readonly status: "busy";
+  readonly patches: readonly UserPatch[];
+};
+
+export type ReplaceUserPatchResult =
+  | {
+      readonly status: "replaced";
+      readonly patch: UserPatch;
+      readonly patches: readonly UserPatch[];
+    }
+  | {
+      readonly status: "empty-name";
+      readonly patches: readonly UserPatch[];
+    }
+  | {
+      readonly status: "not-found";
+      readonly patches: readonly UserPatch[];
+    }
+  | {
+      /** The stored patch changed after the user was asked to confirm replacement. */
+      readonly status: "stale-target";
+      readonly currentPatch: UserPatch;
+      readonly patches: readonly UserPatch[];
+    }
+  | ({
+      readonly status: "immutable-name";
+      readonly patches: readonly UserPatch[];
+    } & ImmutablePatchName)
+  | {
+      readonly status: "storage-error";
+      readonly patches: readonly UserPatch[];
+    }
+  | {
+      readonly status: "unsupported-version";
+      readonly patches: readonly UserPatch[];
+    };
+
+export type SafeReplaceUserPatchResult = ReplaceUserPatchResult | {
   /** Another tab currently owns the short patch-library write lock. */
   readonly status: "busy";
   readonly patches: readonly UserPatch[];
@@ -422,6 +463,17 @@ export const findUserPatch = (
   return loadUserPatches(storage).find((patch) => userPatchNameKey(patch.name) === nameKey) ?? null;
 };
 
+const snapshotUserPatch = (patch: UserPatch): UserPatch => ({
+  name: patch.name,
+  params: { ...patch.params },
+});
+
+const matchesUserPatchSnapshot = (
+  stored: UserPatch,
+  expected: UserPatch,
+): boolean => userPatchNameKey(stored.name) === userPatchNameKey(expected.name)
+  && PARAM_KEYS.every((key) => Object.is(stored.params[key], expected.params[key]));
+
 /**
  * Adds a new named patch. Existing names are never overwritten, including
  * names that differ only by surrounding whitespace or letter case.
@@ -459,6 +511,7 @@ export const saveUserPatch = (
     return {
       status: "duplicate-name",
       existingName: duplicate.name,
+      existingPatch: snapshotUserPatch(duplicate),
       patches,
     };
   }
@@ -476,6 +529,63 @@ export const saveUserPatch = (
   try {
     storage.setItem(USER_PATCHES_STORAGE_KEY, JSON.stringify(collection));
     return { status: "saved", patch, patches: nextPatches };
+  } catch {
+    return { status: "storage-error", patches };
+  }
+};
+
+/**
+ * Replaces one user-created patch only when it still exactly matches the
+ * snapshot the user confirmed. The existing display name and collection order
+ * are retained, including when the submitted name used different case or a
+ * canonically equivalent Unicode representation.
+ */
+export const replaceUserPatch = (
+  expected: UserPatch,
+  params: SynthParams,
+  storage: UserPatchStorage | null = defaultStorage(),
+): ReplaceUserPatchResult => {
+  const readResult = readUserPatches(storage);
+  const patches = readResult.patches;
+  if (readResult.status === "storage-error" || !storage) {
+    return { status: "storage-error", patches };
+  }
+  if (readResult.status === "unsupported-version") {
+    return { status: "unsupported-version", patches };
+  }
+
+  const normalizedName = normalizeUserPatchName(expected.name);
+  if (!normalizedName) return { status: "empty-name", patches };
+
+  const immutable = immutablePatchName(normalizedName);
+  if (immutable) return { status: "immutable-name", ...immutable, patches };
+
+  const nameKey = userPatchNameKey(normalizedName);
+  const patchIndex = patches.findIndex((patch) => userPatchNameKey(patch.name) === nameKey);
+  if (patchIndex < 0) return { status: "not-found", patches };
+
+  const currentPatch = patches[patchIndex];
+  if (!matchesUserPatchSnapshot(currentPatch, expected)) {
+    return { status: "stale-target", currentPatch, patches };
+  }
+
+  const patch: UserPatch = {
+    name: currentPatch.name,
+    params: normalizePatch(params),
+  };
+  const nextPatches = [
+    ...patches.slice(0, patchIndex),
+    patch,
+    ...patches.slice(patchIndex + 1),
+  ];
+  const collection: StoredUserPatchCollection = {
+    version: USER_PATCHES_STORAGE_VERSION,
+    patches: nextPatches,
+  };
+
+  try {
+    storage.setItem(USER_PATCHES_STORAGE_KEY, JSON.stringify(collection));
+    return { status: "replaced", patch, patches: nextPatches };
   } catch {
     return { status: "storage-error", patches };
   }
@@ -510,9 +620,9 @@ export const deleteUserPatch = (
   if (patchIndex < 0) return { status: "not-found", patches };
 
   const currentPatch = patches[patchIndex];
-  const unchanged = userPatchNameKey(currentPatch.name) === userPatchNameKey(expected.name)
-    && PARAM_KEYS.every((key) => Object.is(currentPatch.params[key], expected.params[key]));
-  if (!unchanged) return { status: "stale-target", currentPatch, patches };
+  if (!matchesUserPatchSnapshot(currentPatch, expected)) {
+    return { status: "stale-target", currentPatch, patches };
+  }
 
   const deletedName = currentPatch.name;
   const nextPatches = [...patches.slice(0, patchIndex), ...patches.slice(patchIndex + 1)];
@@ -626,6 +736,28 @@ export const saveUserPatchSafely = (
 );
 
 /**
+ * Serializes an explicitly confirmed replacement with every other patch write.
+ * Both the confirmed target and the proposed controls are captured before a
+ * browser-owned lock request can defer the transaction.
+ */
+export const replaceUserPatchSafely = (
+  expected: UserPatch,
+  params: SynthParams,
+  storage: UserPatchStorage | null = defaultStorage(),
+  lockManager: UserPatchLockManager | null = defaultLockManager(),
+  signal?: AbortSignal,
+): Promise<SafeReplaceUserPatchResult> => {
+  const expectedSnapshot = snapshotUserPatch(expected);
+  const paramsSnapshot = normalizePatch(params);
+  return runUserPatchWriteSafely<SafeReplaceUserPatchResult>(
+    () => replaceUserPatch(expectedSnapshot, paramsSnapshot, storage),
+    createUserPatchBusyReader(storage),
+    lockManager,
+    signal,
+  );
+};
+
+/**
  * Serializes delete with every other patch-library write. A stale tab must
  * retry instead of overwriting a save or resurrecting another tab's deletion.
  */
@@ -637,10 +769,7 @@ export const deleteUserPatchSafely = (
 ): Promise<SafeDeleteUserPatchResult> => {
   // The Web Locks host may defer the callback. Capture the confirmed target
   // now so caller mutation cannot silently retarget that later transaction.
-  const expectedSnapshot: UserPatch = {
-    name: expected.name,
-    params: { ...expected.params },
-  };
+  const expectedSnapshot = snapshotUserPatch(expected);
   return runUserPatchWriteSafely<SafeDeleteUserPatchResult>(
     () => deleteUserPatch(expectedSnapshot, storage),
     createUserPatchBusyReader(storage),

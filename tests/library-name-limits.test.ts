@@ -27,7 +27,9 @@ describe("user library name limits", () => {
     expect(source).toContain("truncateUserLibraryName(event.target.value)");
     expect(source).toContain(`Up to {${constantName}} characters.`);
     expect(source).toContain("Leading and trailing whitespace is removed.");
-    expect(source).toContain("Names must be unique, regardless of capitalization.");
+    expect(source).toContain(
+      "Matching names can be replaced after confirmation, regardless of capitalization.",
+    );
   });
 
   it("reports defensive over-limit save failures in both app flows", () => {
