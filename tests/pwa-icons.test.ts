@@ -115,8 +115,12 @@ describe("PWA icon assets", () => {
     const master = readRgbPixels("icon-master-512.png");
     const icon = readRgbPixels("icon-512.png");
     const maskable = readRgbPixels("maskable-icon-512.png");
-    expect(icon.pixels).toEqual(master.pixels);
-    expect(maskable.pixels).toEqual(master.pixels);
+    // Vitest's element-by-element diffing of two 786,432-byte typed arrays can
+    // exceed the suite timeout when the DSP stress files run in parallel.
+    // Buffer.equals performs the same exact byte comparison without building
+    // a massive diagnostic structure for equal images.
+    expect(Buffer.from(icon.pixels).equals(Buffer.from(master.pixels))).toBe(true);
+    expect(Buffer.from(maskable.pixels).equals(Buffer.from(master.pixels))).toBe(true);
     expect(readFileSync(publicPath("icon-512.png")))
       .toEqual(readFileSync(publicPath("maskable-icon-512.png")));
     expect(readFileSync(publicPath("icon-512.png")))
