@@ -3,6 +3,18 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("dialog source contracts", () => {
+  it("places the playable keyboard between the patch indicator and signal path", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const indicator = source.indexOf('<div className="usage-note">');
+    const keyboard = source.indexOf("<Keyboard", indicator);
+    const signalPath = source.indexOf('<div className="signal-flow"', indicator);
+
+    expect(indicator).toBeGreaterThanOrEqual(0);
+    expect(keyboard).toBeGreaterThan(indicator);
+    expect(signalPath).toBeGreaterThan(keyboard);
+    expect(source.match(/<Keyboard/g)).toHaveLength(1);
+  });
+
   it("marks every panel containing routed faders for aligned selector spacing", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
 

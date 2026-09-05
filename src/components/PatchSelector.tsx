@@ -1,7 +1,7 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { FACTORY_PRESETS } from "../synth/presets";
 import { userPatchNameKey, type UserPatch } from "../synth/user-patches";
-import { finishSelectChange, type SelectInteractionModality } from "./select-focus";
+import { DeferredSelectFocusRelease, type SelectInteractionModality } from "./select-focus";
 
 const USER_PATCH_OPTION_PREFIX = "__andoracle_user_patch__:";
 
@@ -41,6 +41,9 @@ export function PatchSelector({
   onSelectFactoryPatch,
 }: PatchSelectorProps) {
   const interactionModality = useRef<SelectInteractionModality>("keyboard");
+  const focusRelease = useRef<DeferredSelectFocusRelease | null>(null);
+  focusRelease.current ??= new DeferredSelectFocusRelease();
+  useEffect(() => () => focusRelease.current?.dispose(), []);
   const activeUserPatch = activeUserPatchName
     ? userPatches.find(
       (patch) => userPatchNameKey(patch.name) === userPatchNameKey(activeUserPatchName),
@@ -65,13 +68,13 @@ export function PatchSelector({
         const selection = resolvePatchSelection(event.currentTarget.value, userPatches);
         if (selection?.kind === "user") onSelectUserPatch(selection.patch.name);
         else if (selection?.kind === "factory") onSelectFactoryPatch(selection.name);
-        finishSelectChange(event.currentTarget, interactionModality.current);
+        focusRelease.current?.finish(event.currentTarget, interactionModality.current);
         interactionModality.current = "keyboard";
       }}
     >
       <option value="Custom patch">Custom patch</option>
       {userPatches.length > 0 && (
-        <optgroup label="User patches">
+        <optgroup label="Custom Patches">
           {userPatches.map((patch) => (
             <option
               key={userPatchOptionValue(patch.name)}

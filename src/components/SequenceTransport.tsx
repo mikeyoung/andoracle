@@ -1,5 +1,5 @@
-import { useRef, type Ref } from "react";
-import { finishSelectChange, type SelectInteractionModality } from "./select-focus";
+import { useEffect, useRef, type Ref } from "react";
+import { DeferredSelectFocusRelease, type SelectInteractionModality } from "./select-focus";
 
 export type SequencePlaybackState = "stopped" | "playing" | "paused";
 
@@ -36,6 +36,9 @@ export function SequenceTransport({
   const playbackActive = playing || paused;
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const selectInteractionModality = useRef<SelectInteractionModality>("keyboard");
+  const selectFocusRelease = useRef<DeferredSelectFocusRelease | null>(null);
+  selectFocusRelease.current ??= new DeferredSelectFocusRelease();
+  useEffect(() => () => selectFocusRelease.current?.dispose(), []);
   const returnFocusToPlay = (): void => {
     queueMicrotask(() => playButtonRef.current?.focus({ preventScroll: true }));
   };
@@ -56,7 +59,10 @@ export function SequenceTransport({
         }}
         onChange={(event) => {
           onSelect(event.target.value);
-          finishSelectChange(event.currentTarget, selectInteractionModality.current);
+          selectFocusRelease.current?.finish(
+            event.currentTarget,
+            selectInteractionModality.current,
+          );
           selectInteractionModality.current = "keyboard";
         }}
       >

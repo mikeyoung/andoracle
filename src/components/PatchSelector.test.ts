@@ -26,10 +26,23 @@ describe("persistent patch selector controls", () => {
       onSelectFactoryPatch: vi.fn(),
     }));
 
-    expect(markup).toContain('<optgroup label="User patches">');
+    expect(markup).toContain('<optgroup label="Custom Patches">');
     expect(markup).toContain(">Wide Pad</option>");
     expect(markup).toContain(">Acid Lead</option>");
     expect(markup).toContain('<option value="Init Andoracle" selected="">Init Andoracle</option>');
+  });
+
+  it("omits the custom-patch heading when there are no saved custom patches", () => {
+    const markup = renderToStaticMarkup(createElement(PatchSelector, {
+      userPatches: [],
+      activeUserPatchName: null,
+      selectedFactoryName: "Init Andoracle",
+      onSelectUserPatch: vi.fn(),
+      onSelectFactoryPatch: vi.fn(),
+    }));
+
+    expect(markup).not.toContain('<optgroup label="Custom Patches">');
+    expect(markup).toContain('<optgroup label="Factory patches">');
   });
 
   it("keeps the active user patch selected without hiding its siblings", () => {

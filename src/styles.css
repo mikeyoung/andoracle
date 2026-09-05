@@ -1012,6 +1012,8 @@ main {
 }
 
 .toggle-switch {
+  --toggle-accent: #8a805f;
+
   position: relative;
   display: flex;
   width: 58px;
@@ -1059,14 +1061,14 @@ main {
 }
 
 .toggle-switch[aria-checked="true"] {
-  border-color: color-mix(in srgb, var(--accent), #111 28%);
-  color: color-mix(in srgb, var(--accent), #111 55%);
+  border-color: color-mix(in srgb, var(--toggle-accent), #111 28%);
+  color: color-mix(in srgb, var(--toggle-accent), #111 55%);
 }
 
 .toggle-switch[aria-checked="true"] span::after {
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.23), transparent 40% 60%, rgba(0, 0, 0, 0.18)),
-    color-mix(in srgb, var(--accent), #c8c6b6 56%);
+    color-mix(in srgb, var(--toggle-accent), #c8c6b6 56%);
   transform: translate(-50%, -21px);
 }
 
@@ -2377,9 +2379,13 @@ footer span {
 
 @media (hover: hover) {
   .choice-button:hover,
-  .toggle-switch:hover,
   .external-input-button:hover {
     border-color: color-mix(in srgb, var(--accent, var(--orange)), var(--cream) 30%);
+    filter: brightness(1.08);
+  }
+
+  .toggle-switch:hover {
+    border-color: color-mix(in srgb, var(--toggle-accent), var(--cream) 30%);
     filter: brightness(1.08);
   }
 }

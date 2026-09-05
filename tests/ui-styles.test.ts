@@ -3,6 +3,20 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("synth control styling", () => {
+  it("uses the VCA output switch color for every on/off switch", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+    const toggleStart = styles.indexOf(".toggle-switch {");
+    const toggleEnd = styles.indexOf(".route-control {", toggleStart);
+    const toggleRules = styles.slice(toggleStart, toggleEnd);
+
+    expect(toggleRules).toContain("--toggle-accent: #8a805f;");
+    expect(toggleRules).toContain("var(--toggle-accent)");
+    expect(toggleRules).not.toContain("var(--accent)");
+    expect(styles).toMatch(
+      /\.toggle-switch:hover\s*\{[\s\S]*?border-color:\s*color-mix\(in srgb, var\(--toggle-accent\), var\(--cream\) 30%\);/,
+    );
+  });
+
   it("centers Blink and WebKit fader thumbs on their vertical tracks", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
 

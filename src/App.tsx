@@ -2178,6 +2178,14 @@ function App() {
           <span role="status" aria-live="polite" aria-atomic="true">{notice}</span>
           <span><b>Tip:</b> right-click or long-press any parameter to enter its exact value and see its valid range.</span>
         </div>
+        <Keyboard
+          activeNotes={activeNotes}
+          allocatedLow={allocatedLow}
+          allocatedHigh={allocatedHigh}
+          resetEpoch={inputResetEpoch}
+          onNoteOn={noteOn}
+          onNoteOff={noteOff}
+        />
         <div className="signal-flow" role="group" aria-label="Synthesizer signal flow">
           <span>VCO 1 / VCO 2 / noise / ring</span><i>→</i><span>mixer</span><i>→</i><span>delay</span><i>→</i><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA</span><i>→</i><span>output</span>
         </div>
@@ -2208,15 +2216,6 @@ function App() {
           inputs={midiInputs}
           onToggle={() => void toggleMidi()}
           onRefresh={() => void refreshMidi()}
-        />
-
-        <Keyboard
-          activeNotes={activeNotes}
-          allocatedLow={allocatedLow}
-          allocatedHigh={allocatedHigh}
-          resetEpoch={inputResetEpoch}
-          onNoteOn={noteOn}
-          onNoteOff={noteOff}
         />
       </main>
 
