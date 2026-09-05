@@ -66,7 +66,7 @@ export function SequenceTransport({
           selectInteractionModality.current = "keyboard";
         }}
       >
-        <option value="">{sequenceNames.length > 0 ? "No sequence loaded" : "No saved sequences"}</option>
+        <option value="">{sequenceNames.length > 0 ? "None loaded" : "No sequences"}</option>
         {sequenceNames.map((name) => <option key={name} value={name}>{name}</option>)}
       </select>
       <button

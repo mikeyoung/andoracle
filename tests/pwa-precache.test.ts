@@ -22,7 +22,6 @@ describe("PWA precache manifest", () => {
   it("partitions root install artwork away from Workbox's generated-asset glob", () => {
     expect(PWA_WORKBOX_GLOB_PATTERNS).toEqual([
       "**/*.{js,css,html,woff2}",
-      "assets/**/*.{png,jpg,jpeg}",
     ]);
 
     const publicImages = readdirSync(resolve("public"))

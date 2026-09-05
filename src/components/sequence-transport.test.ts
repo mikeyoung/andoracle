@@ -36,7 +36,7 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('aria-label="Pause sequence" aria-pressed="false" disabled=""');
     expect(markup).toContain('aria-label="Stop sequence and return to beginning" disabled=""');
     expect(markup).toContain('aria-label="Delete active recording" aria-haspopup="dialog" disabled=""');
-    expect(markup).toContain("No saved sequences");
+    expect(markup).toContain("No sequences");
   });
 
   it("renders saved names without colliding with the empty sentinel", () => {
@@ -44,7 +44,7 @@ describe("SequenceTransport", () => {
       sequenceNames: ["No saved sequences", "  visual spaces  "],
       activeName: "No saved sequences",
     });
-    expect(markup).toContain('<option value="">No sequence loaded</option>');
+    expect(markup).toContain('<option value="">None loaded</option>');
     expect(markup).toContain('<option value="No saved sequences" selected="">No saved sequences</option>');
     expect(markup).toContain('<option value="  visual spaces  ">  visual spaces  </option>');
   });

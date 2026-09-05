@@ -25,6 +25,10 @@ type WorkletMessage =
   | { type: "request-meter" }
   | { type: "performance"; performance: Partial<PerformanceState> };
 
+// About 21.5 visual updates per second at 44.1 kHz/128 frames keeps the meter
+// fluid without spending main-thread time on display telemetry near 30 Hz.
+const METER_BLOCK_INTERVAL = 16;
+
 class AndoracleProcessor extends AudioWorkletProcessor {
   private readonly dsp = new OdysseyDSP(sampleRate);
   private externalInputBuffer = new Float32Array(0);
@@ -100,7 +104,7 @@ class AndoracleProcessor extends AudioWorkletProcessor {
         this.port.postMessage({ type: "meter", meter: this.dsp.getMeter() });
         this.meterRequested = false;
       }
-      this.blocksUntilMeter = 12;
+      this.blocksUntilMeter = METER_BLOCK_INTERVAL;
     }
     return true;
   }

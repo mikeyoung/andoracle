@@ -9,7 +9,7 @@ describe("synth control styling", () => {
     const toggleEnd = styles.indexOf(".route-control {", toggleStart);
     const toggleRules = styles.slice(toggleStart, toggleEnd);
 
-    expect(toggleRules).toContain("--toggle-accent: #8a805f;");
+    expect(toggleRules).toContain("--toggle-accent: #808080;");
     expect(toggleRules).toContain("var(--toggle-accent)");
     expect(toggleRules).not.toContain("var(--accent)");
     expect(styles).toMatch(

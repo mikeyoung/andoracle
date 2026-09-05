@@ -17,7 +17,6 @@ export const PWA_INCLUDE_ASSETS = [
 
 export const PWA_WORKBOX_GLOB_PATTERNS = [
   "**/*.{js,css,html,woff2}",
-  "assets/**/*.{png,jpg,jpeg}",
 ] as const;
 
 export const PWA_MANIFEST_ICONS = [
@@ -57,8 +56,8 @@ export default defineConfig({
         id: "./",
         lang: "en",
         dir: "ltr",
-        theme_color: "#50564f",
-        background_color: "#24150e",
+        theme_color: "#a3a3a3",
+        background_color: "#292929",
         display: "standalone",
         orientation: "any",
         start_url: "./",
@@ -68,8 +67,8 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: "index.html",
-        // Build-generated artwork lives under assets/. Root PWA artwork is
-        // already contributed through includeAssets and manifest.icons.
+        // Root PWA artwork is contributed through includeAssets and
+        // manifest.icons; code and fonts are discovered from the build.
         globPatterns: [...PWA_WORKBOX_GLOB_PATTERNS],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,

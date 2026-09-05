@@ -63,12 +63,12 @@ describe("AndoracleProcessor", () => {
       processor.port.onmessage?.({ data: { type: "request-meter" } } as MessageEvent);
     };
 
-    for (let block = 0; block < 13; block += 1) processBlock();
+    for (let block = 0; block < 17; block += 1) processBlock();
     expect(processor.port.postMessage).not.toHaveBeenCalled();
 
     requestMeter();
     requestMeter();
-    for (let block = 0; block < 11; block += 1) processBlock();
+    for (let block = 0; block < 15; block += 1) processBlock();
     expect(processor.port.postMessage).not.toHaveBeenCalled();
     processBlock();
     expect(processor.port.postMessage).toHaveBeenCalledTimes(1);
@@ -77,10 +77,10 @@ describe("AndoracleProcessor", () => {
       meter: expect.objectContaining({ sampleRate: 44100 }),
     });
 
-    for (let block = 0; block < 24; block += 1) processBlock();
+    for (let block = 0; block < 32; block += 1) processBlock();
     expect(processor.port.postMessage).toHaveBeenCalledTimes(1);
     requestMeter();
-    for (let block = 0; block < 12; block += 1) processBlock();
+    for (let block = 0; block < 16; block += 1) processBlock();
     expect(processor.port.postMessage).toHaveBeenCalledTimes(2);
   });
 
@@ -176,7 +176,7 @@ describe("AndoracleProcessor", () => {
     expect(externalEnergy).toBeGreaterThan(1);
 
     send({ type: "request-meter" });
-    for (let block = 0; block < 12; block += 1) {
+    for (let block = 0; block < 16; block += 1) {
       processor.process([], [[new Float32Array(128), new Float32Array(128)]], {});
     }
     expect(processor.port.postMessage).toHaveBeenCalledTimes(1);
