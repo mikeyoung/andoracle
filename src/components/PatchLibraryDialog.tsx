@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import { createOperationCancellation } from "../cancellable-operation";
+import { USER_PATCH_NAME_MAX_LENGTH } from "../synth/user-patches";
+import { truncateUserLibraryName } from "../user-library-name";
 
 export type PatchLibraryMode = "save" | "load";
 
@@ -116,17 +118,18 @@ export function PatchLibraryDialog({
               className="patch-name-field"
               type="text"
               autoComplete="off"
+              maxLength={USER_PATCH_NAME_MAX_LENGTH}
               value={draftName}
               readOnly={busy}
               aria-invalid={Boolean(error)}
               aria-describedby="patch-library-help patch-library-error"
               onChange={(event) => {
-                setDraftName(event.target.value);
+                setDraftName(truncateUserLibraryName(event.target.value));
                 setError("");
               }}
             />
             <p id="patch-library-help" className="valid-range">
-              Leading and trailing whitespace is removed. Names must be unique, regardless of capitalization.
+              Up to {USER_PATCH_NAME_MAX_LENGTH} characters. Leading and trailing whitespace is removed. Names must be unique, regardless of capitalization.
             </p>
           </>
         ) : patchNames.length > 0 ? (

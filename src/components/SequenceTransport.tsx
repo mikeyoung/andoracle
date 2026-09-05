@@ -13,6 +13,7 @@ interface SequenceTransportProps {
   onPlay: () => void;
   onPause: () => void;
   onStop: () => void;
+  onDelete: (origin: HTMLButtonElement) => void;
 }
 
 /** Persistent, touch-sized access to the local note-sequence transport. */
@@ -27,6 +28,7 @@ export function SequenceTransport({
   onPlay,
   onPause,
   onStop,
+  onDelete,
 }: SequenceTransportProps) {
   const playing = playbackState === "playing";
   const paused = playbackState === "paused";
@@ -103,6 +105,16 @@ export function SequenceTransport({
       >
         <i aria-hidden="true" />
         Stop
+      </button>
+      <button
+        type="button"
+        className="button button--danger sequence-delete-button"
+        aria-label="Delete active recording"
+        aria-haspopup="dialog"
+        disabled={!activeName || recording}
+        onClick={(event) => onDelete(event.currentTarget)}
+      >
+        Delete
       </button>
     </div>
   );

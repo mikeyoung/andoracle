@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  USER_SEQUENCE_NAME_MAX_LENGTH,
   USER_SEQUENCES_STORAGE_KEY,
+  deleteUserSequence,
+  deleteUserSequenceSafely,
   decodeNoteSequence,
   decodeUserSequence,
   encodeNoteSequence,
@@ -11,8 +14,11 @@ import {
   readUserSequences,
   saveUserSequence,
   saveUserSequenceSafely,
+  userSequenceNameKey,
   type NoteSequenceEvent,
+  type SafeDeleteUserSequenceResult,
   type SafeSaveUserSequenceResult,
+  type UserNoteSequence,
   type UserSequenceLockManager,
   type UserSequenceStorage,
 } from "./user-sequences";
@@ -21,6 +27,20 @@ const SIMPLE_EVENTS: readonly NoteSequenceEvent[] = [
   { deltaMs: 0, note: 60, on: true },
   { deltaMs: 500, note: 60, on: false },
 ];
+
+const sequenceSnapshot = (name: string): UserNoteSequence => ({
+  name,
+  data: encodeNoteSequence(SIMPLE_EVENTS) as string,
+  durationMs: 500,
+  noteCount: 1,
+  eventCount: 2,
+});
+
+const storedSequence = (storage: UserSequenceStorage, name: string): UserNoteSequence => {
+  const sequence = findUserSequence(name, storage);
+  if (!sequence) throw new Error(`Expected saved sequence ${name}.`);
+  return sequence;
+};
 
 class MemoryStorage implements UserSequenceStorage {
   private readonly values = new Map<string, string>();
@@ -275,6 +295,23 @@ describe("user sequence storage", () => {
     expect(storage.raw()).toBeNull();
   });
 
+  it("accepts exactly 33 trimmed characters and rejects a longer name without writing", () => {
+    const storage = new MemoryStorage();
+    const boundaryName = "S".repeat(USER_SEQUENCE_NAME_MAX_LENGTH);
+
+    expect(saveUserSequence(`  ${boundaryName}  `, SIMPLE_EVENTS, storage))
+      .toMatchObject({ status: "saved", sequence: { name: boundaryName } });
+    const beforeRejectedSave = storage.raw();
+
+    expect(saveUserSequence(`${boundaryName}X`, SIMPLE_EVENTS, storage)).toMatchObject({
+      status: "name-too-long",
+      maxLength: 33,
+      sequences: [{ name: boundaryName }],
+    });
+    expect(storage.writes).toBe(1);
+    expect(storage.raw()).toBe(beforeRejectedSave);
+  });
+
   it("rejects duplicate names case-insensitively without overwriting", () => {
     const storage = new MemoryStorage();
     expect(saveUserSequence("Verse", SIMPLE_EVENTS, storage).status).toBe("saved");
@@ -444,6 +481,73 @@ describe("user sequence storage", () => {
     expect(storage.raw()).toBe(original);
   });
 
+  it("migrates every distinct legacy long name without surrendering later valid identities", () => {
+    const validData = encodeNoteSequence(SIMPLE_EVENTS);
+    const fullWidthName = "Z".repeat(USER_SEQUENCE_NAME_MAX_LENGTH);
+    const suffixTwoName = `${"Z".repeat(USER_SEQUENCE_NAME_MAX_LENGTH - 4)} (2)`;
+    const longFirst = "Z".repeat(USER_SEQUENCE_NAME_MAX_LENGTH + 7);
+    const longSecond = `${"Z".repeat(USER_SEQUENCE_NAME_MAX_LENGTH + 6)}Y`;
+    const storage = new MemoryStorage(JSON.stringify({
+      version: 1,
+      sequences: [
+        { name: longFirst, data: validData },
+        { name: longSecond, data: validData },
+        { name: longFirst.toLowerCase(), data: validData },
+        // Exact, already-valid names keep priority even though they are later.
+        { name: fullWidthName, data: validData },
+        { name: suffixTwoName, data: validData },
+      ],
+    }));
+    const originalValue = storage.raw();
+
+    const firstRead = readUserSequences(storage);
+    const secondRead = readUserSequences(storage);
+
+    expect(firstRead).toEqual(secondRead);
+    expect(firstRead.status).toBe("recovered");
+    expect(firstRead.sequences.map((sequence) => sequence.name)).toEqual([
+      `${"Z".repeat(USER_SEQUENCE_NAME_MAX_LENGTH - 4)} (3)`,
+      `${"Z".repeat(USER_SEQUENCE_NAME_MAX_LENGTH - 4)} (4)`,
+      fullWidthName,
+      suffixTwoName,
+    ]);
+    expect(firstRead.sequences).toHaveLength(4);
+    expect(new Set(firstRead.sequences.map((sequence) => userSequenceNameKey(sequence.name))).size)
+      .toBe(4);
+    for (const sequence of firstRead.sequences) {
+      expect(sequence.name.length).toBeLessThanOrEqual(USER_SEQUENCE_NAME_MAX_LENGTH);
+      expect(decodeUserSequence(sequence)?.events).toEqual(SIMPLE_EVENTS);
+    }
+    expect(storage.writes).toBe(0);
+    expect(storage.raw()).toBe(originalValue);
+
+    expect(saveUserSequence("Fresh", SIMPLE_EVENTS, storage).status).toBe("saved");
+    expect(readUserSequences(storage)).toMatchObject({
+      status: "ok",
+      sequences: [...firstRead.sequences, { name: "Fresh" }],
+    });
+  });
+
+  it("keeps first-record-wins Unicode duplicate recovery while shortening its display name", () => {
+    const data = encodeNoteSequence(SIMPLE_EVENTS);
+    const composed = `${"Q".repeat(29)}Café extension`;
+    const decomposedEquivalent = `${"q".repeat(29)}CAFE\u0301 EXTENSION`;
+    const storage = new MemoryStorage(JSON.stringify({
+      version: 1,
+      sequences: [
+        { name: composed, data },
+        { name: decomposedEquivalent, data },
+      ],
+    }));
+
+    const result = readUserSequences(storage);
+
+    expect(result.status).toBe("recovered");
+    expect(result.sequences).toHaveLength(1);
+    expect(result.sequences[0].name).toBe(`${"Q".repeat(29)}Café`);
+    expect(result.sequences[0].name.length).toBe(USER_SEQUENCE_NAME_MAX_LENGTH);
+  });
+
   it("returns an empty recovered collection for malformed serialized data", () => {
     const storage = new MemoryStorage("{ not json");
 
@@ -474,6 +578,10 @@ describe("user sequence storage", () => {
       status: "unsupported-version",
       sequences: [],
     });
+    expect(deleteUserSequence(sequenceSnapshot("Do not delete"), storage)).toEqual({
+      status: "unsupported-version",
+      sequences: [],
+    });
     expect(storage.writes).toBe(0);
     expect(storage.raw()).toBe(before);
   });
@@ -489,6 +597,302 @@ describe("user sequence storage", () => {
     expect(findUserSequence("   ", storage)).toBeNull();
     expect(hasUserSequenceNamed(sequences, " CAFE\u0301 ")).toBe(true);
     expect(hasUserSequenceNamed(sequences, "missing")).toBe(false);
+  });
+
+  it("deletes exactly one canonically named sequence and preserves library order", () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("First", SIMPLE_EVENTS, storage);
+    saveUserSequence("Caf\u00e9", SIMPLE_EVENTS, storage);
+    saveUserSequence("Last", SIMPLE_EVENTS, storage);
+
+    const expected = { ...storedSequence(storage, "Caf\u00e9"), name: "  CAFE\u0301  " };
+    const result = deleteUserSequence(expected, storage);
+
+    expect(result).toMatchObject({
+      status: "deleted",
+      deletedName: "Caf\u00e9",
+    });
+    expect(result.sequences.map((sequence) => sequence.name)).toEqual(["First", "Last"]);
+    expect(loadUserSequences(storage).map((sequence) => sequence.name)).toEqual(["First", "Last"]);
+    expect(storage.writes).toBe(4);
+  });
+
+  it("rejects every stale snapshot field without writing", () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Guarded", SIMPLE_EVENTS, storage);
+    const expected = storedSequence(storage, "Guarded");
+    const changedSnapshots: readonly UserNoteSequence[] = [
+      { ...expected, data: `${expected.data}A` },
+      { ...expected, durationMs: expected.durationMs + 1 },
+      { ...expected, noteCount: expected.noteCount + 1 },
+      { ...expected, eventCount: expected.eventCount + 1 },
+    ];
+
+    for (const changed of changedSnapshots) {
+      expect(deleteUserSequence(changed, storage)).toMatchObject({
+        status: "stale-target",
+        sequences: [{ name: "Guarded" }],
+      });
+    }
+    expect(storage.writes).toBe(1);
+    expect(findUserSequence("Guarded", storage)).toEqual(expected);
+  });
+
+  it("detects a same-name delete and replacement inside the write lock", async () => {
+    const replacementEvents: readonly NoteSequenceEvent[] = [
+      { deltaMs: 0, note: 72, on: true },
+      { deltaMs: 900, note: 72, on: false },
+    ];
+    const storage = new MemoryStorage();
+    saveUserSequence("Replace me", SIMPLE_EVENTS, storage);
+    const expected = storedSequence(storage, "Replace me");
+    const locks = new IfAvailableLockManager();
+
+    const pending = deleteUserSequenceSafely(expected, storage, locks);
+    expect(deleteUserSequence(expected, storage).status).toBe("deleted");
+    expect(saveUserSequence("replace me", replacementEvents, storage).status).toBe("saved");
+
+    await expect(pending).resolves.toMatchObject({
+      status: "stale-target",
+      sequences: [{ name: "replace me", durationMs: 900 }],
+    });
+    expect(storage.writes).toBe(3);
+    expect(decodeUserSequence(storedSequence(storage, "Replace me"))?.events)
+      .toEqual(replacementEvents);
+  });
+
+  it("snapshots the confirmed target before waiting for the host lock", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Immutable authority", SIMPLE_EVENTS, storage);
+    const mutableExpected = { ...storedSequence(storage, "Immutable authority") };
+    const locks = new IfAvailableLockManager();
+
+    const pending = deleteUserSequenceSafely(mutableExpected, storage, locks);
+    mutableExpected.data = "changed-after-confirmation";
+    mutableExpected.durationMs = 999;
+    mutableExpected.noteCount = 999;
+    mutableExpected.eventCount = 999;
+
+    await expect(pending).resolves.toMatchObject({
+      status: "deleted",
+      deletedName: "Immutable authority",
+      sequences: [],
+    });
+  });
+
+  it("revokes deletion authority before a delayed lock callback can run", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Cancelled authority", SIMPLE_EVENTS, storage);
+    const expected = storedSequence(storage, "Cancelled authority");
+    const locks = new IfAvailableLockManager();
+    const controller = new AbortController();
+
+    const pending = deleteUserSequenceSafely(expected, storage, locks, controller.signal);
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      status: "busy",
+      sequences: [{ name: "Cancelled authority" }],
+    });
+    expect(findUserSequence("Cancelled authority", storage)).toEqual(expected);
+    expect(storage.writes).toBe(1);
+  });
+
+  it("never falls back to deleting after an aborted lock request rejects", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Cancelled rejection", SIMPLE_EVENTS, storage);
+    const expected = storedSequence(storage, "Cancelled rejection");
+    let rejectRequest!: (error: Error) => void;
+    const request = new Promise<SafeDeleteUserSequenceResult>((_resolve, reject) => {
+      rejectRequest = reject;
+    });
+    const locks: UserSequenceLockManager = {
+      request: vi.fn(() => request),
+    } as UserSequenceLockManager;
+    const controller = new AbortController();
+
+    const pending = deleteUserSequenceSafely(expected, storage, locks, controller.signal);
+    controller.abort();
+    rejectRequest(new Error("late host failure"));
+
+    await expect(pending).resolves.toMatchObject({
+      status: "busy",
+      sequences: [{ name: "Cancelled rejection" }],
+    });
+    expect(findUserSequence("Cancelled rejection", storage)).toEqual(expected);
+    expect(storage.writes).toBe(1);
+  });
+
+  it("quarantines an unresponsive aborted lock without bypassing it, then rehabilitates it", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      saveUserSequence("Keep after timeout", SIMPLE_EVENTS, storage);
+      const expected = storedSequence(storage, "Keep after timeout");
+      let releaseRequest!: () => void;
+      let requestCount = 0;
+      const locks: UserSequenceLockManager = {
+        request<T>(
+          _name: string,
+          _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+          callback: (lock: unknown | null) => T | PromiseLike<T>,
+        ): Promise<T> {
+          requestCount += 1;
+          if (requestCount > 1) return Promise.resolve(callback({}));
+          return new Promise<T>((resolve) => {
+            releaseRequest = () => { void Promise.resolve(callback({})).then(resolve); };
+          });
+        },
+      };
+      const controller = new AbortController();
+
+      const abandoned = deleteUserSequenceSafely(expected, storage, locks, controller.signal);
+      controller.abort(new DOMException("timed out", "TimeoutError"));
+      await vi.advanceTimersByTimeAsync(10_001);
+
+      await expect(saveUserSequenceSafely("Unsafe bypass", SIMPLE_EVENTS, storage, locks))
+        .resolves.toMatchObject({ status: "busy", sequences: [{ name: "Keep after timeout" }] });
+      expect(requestCount).toBe(1);
+      expect(storage.writes).toBe(1);
+      releaseRequest();
+      await expect(abandoned).resolves.toMatchObject({ status: "busy" });
+      expect(vi.getTimerCount()).toBe(0);
+
+      await expect(saveUserSequenceSafely("Recovered write", SIMPLE_EVENTS, storage, locks))
+        .resolves.toMatchObject({ status: "saved", sequence: { name: "Recovered write" } });
+      expect(requestCount).toBe(2);
+      expect(loadUserSequences(storage).map((sequence) => sequence.name))
+        .toEqual(["Keep after timeout", "Recovered write"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a slow lock serialized and usable when it settles before quarantine", async () => {
+    vi.useFakeTimers();
+    try {
+      const storage = new MemoryStorage();
+      saveUserSequence("Slow target", SIMPLE_EVENTS, storage);
+      const expected = storedSequence(storage, "Slow target");
+      let releaseRequest!: () => void;
+      let requestCount = 0;
+      const locks: UserSequenceLockManager = {
+        request<T>(
+          _name: string,
+          _options: { readonly mode: "exclusive"; readonly ifAvailable: true },
+          callback: (lock: unknown | null) => T | PromiseLike<T>,
+        ): Promise<T> {
+          requestCount += 1;
+          if (requestCount > 1) return Promise.resolve(callback({}));
+          return new Promise<T>((resolve) => {
+            releaseRequest = () => { void Promise.resolve(callback({})).then(resolve); };
+          });
+        },
+      };
+      const controller = new AbortController();
+
+      const abandoned = deleteUserSequenceSafely(expected, storage, locks, controller.signal);
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(5_000);
+      releaseRequest();
+      await expect(abandoned).resolves.toMatchObject({ status: "busy" });
+      expect(vi.getTimerCount()).toBe(0);
+
+      await expect(saveUserSequenceSafely("Healthy next write", SIMPLE_EVENTS, storage, locks))
+        .resolves.toMatchObject({ status: "saved", sequence: { name: "Healthy next write" } });
+      expect(requestCount).toBe(2);
+      expect(loadUserSequences(storage).map((sequence) => sequence.name))
+        .toEqual(["Slow target", "Healthy next write"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports a target deleted before lock acquisition without writing again", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Gone", SIMPLE_EVENTS, storage);
+    const expected = storedSequence(storage, "Gone");
+    const locks = new IfAvailableLockManager();
+
+    const pending = deleteUserSequenceSafely(expected, storage, locks);
+    expect(deleteUserSequence(expected, storage).status).toBe("deleted");
+
+    await expect(pending).resolves.toEqual({ status: "not-found", sequences: [] });
+    expect(storage.writes).toBe(2);
+  });
+
+  it("persists an empty versioned collection after deleting the final sequence", () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Only take", SIMPLE_EVENTS, storage);
+
+    const expected = { ...storedSequence(storage, "Only take"), name: "only take" };
+    expect(deleteUserSequence(expected, storage)).toMatchObject({
+      status: "deleted",
+      deletedName: "Only take",
+      sequences: [],
+    });
+    expect(JSON.parse(storage.raw() as string)).toEqual({ version: 1, sequences: [] });
+  });
+
+  it("does not accumulate ghost entries through repeated save/delete churn", () => {
+    const storage = new MemoryStorage();
+
+    for (let iteration = 0; iteration < 1_000; iteration += 1) {
+      const saved = saveUserSequence("Reusable take", SIMPLE_EVENTS, storage);
+      if (saved.status !== "saved") throw new Error(`Save churn failed at ${iteration}.`);
+      const deleted = deleteUserSequence(saved.sequence, storage);
+      if (deleted.status !== "deleted") throw new Error(`Delete churn failed at ${iteration}.`);
+    }
+
+    expect(readUserSequences(storage)).toEqual({ status: "ok", sequences: [] });
+    expect(JSON.parse(storage.raw() as string)).toEqual({ version: 1, sequences: [] });
+    expect(storage.writes).toBe(2_000);
+  });
+
+  it("does not write for an empty or missing deletion target", () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Keep", SIMPLE_EVENTS, storage);
+    const before = storage.raw();
+
+    const keep = storedSequence(storage, "Keep");
+    expect(deleteUserSequence({ ...keep, name: " \n\t " }, storage)).toMatchObject({
+      status: "empty-name",
+      sequences: [{ name: "Keep" }],
+    });
+    expect(deleteUserSequence({ ...keep, name: "Missing" }, storage)).toMatchObject({
+      status: "not-found",
+      sequences: [{ name: "Keep" }],
+    });
+    expect(storage.writes).toBe(1);
+    expect(storage.raw()).toBe(before);
+  });
+
+  it("repairs recovered survivors as part of a successful deletion write", () => {
+    const validData = encodeNoteSequence(SIMPLE_EVENTS);
+    const storage = new MemoryStorage(JSON.stringify({
+      version: 1,
+      sequences: [
+        { name: "  Remove me  ", data: validData, durationMs: 999 },
+        { name: "  Survivor  ", data: validData, noteCount: 999 },
+        { name: "Broken", data: "not-valid!" },
+      ],
+    }));
+
+    const expected = storedSequence(storage, "Remove me");
+    expect(deleteUserSequence(expected, storage)).toMatchObject({
+      status: "deleted",
+      deletedName: "Remove me",
+      sequences: [{
+        name: "Survivor",
+        durationMs: 500,
+        noteCount: 1,
+        eventCount: 2,
+      }],
+    });
+    expect(readUserSequences(storage)).toMatchObject({
+      status: "ok",
+      sequences: [{ name: "Survivor" }],
+    });
   });
 
   it("distinguishes read and write storage failures", () => {
@@ -510,6 +914,22 @@ describe("user sequence storage", () => {
       status: "storage-error",
       sequences: [],
     });
+    expect(deleteUserSequence(sequenceSnapshot("Take"), readFailure)).toEqual({
+      status: "storage-error",
+      sequences: [],
+    });
+
+    const deleteWriteFailure = new MemoryStorage();
+    saveUserSequence("Take", SIMPLE_EVENTS, deleteWriteFailure);
+    const failingDeleteStorage: UserSequenceStorage = {
+      getItem: (key) => deleteWriteFailure.getItem(key),
+      setItem: () => { throw new Error("quota"); },
+    };
+    expect(deleteUserSequence(storedSequence(deleteWriteFailure, "Take"), failingDeleteStorage)).toMatchObject({
+      status: "storage-error",
+      sequences: [{ name: "Take" }],
+    });
+    expect(findUserSequence("Take", deleteWriteFailure)).not.toBeNull();
   });
 
   it("allows only one simultaneous same-name save into the write transaction", async () => {
@@ -541,6 +961,44 @@ describe("user sequence storage", () => {
     expect(loadUserSequences(storage).map((sequence) => sequence.name)).toEqual(["One", "Two"]);
   });
 
+  it("serializes delete with save so neither operation can lose the other's update", async () => {
+    const deleteFirstStorage = new MemoryStorage();
+    saveUserSequence("Existing", SIMPLE_EVENTS, deleteFirstStorage);
+    const deleteFirstLocks = new IfAvailableLockManager();
+    const deleteFirstTarget = storedSequence(deleteFirstStorage, "Existing");
+
+    const [deleted, blockedSave] = await Promise.all([
+      deleteUserSequenceSafely(deleteFirstTarget, deleteFirstStorage, deleteFirstLocks),
+      saveUserSequenceSafely("New", SIMPLE_EVENTS, deleteFirstStorage, deleteFirstLocks),
+    ]);
+    expect(deleted.status).toBe("deleted");
+    expect(blockedSave.status).toBe("busy");
+    expect((await saveUserSequenceSafely(
+      "New",
+      SIMPLE_EVENTS,
+      deleteFirstStorage,
+      deleteFirstLocks,
+    )).status).toBe("saved");
+    expect(loadUserSequences(deleteFirstStorage).map((sequence) => sequence.name)).toEqual(["New"]);
+
+    const saveFirstStorage = new MemoryStorage();
+    saveUserSequence("Existing", SIMPLE_EVENTS, saveFirstStorage);
+    const saveFirstLocks = new IfAvailableLockManager();
+    const saveFirstTarget = storedSequence(saveFirstStorage, "Existing");
+    const [saved, blockedDelete] = await Promise.all([
+      saveUserSequenceSafely("New", SIMPLE_EVENTS, saveFirstStorage, saveFirstLocks),
+      deleteUserSequenceSafely(saveFirstTarget, saveFirstStorage, saveFirstLocks),
+    ]);
+    expect(saved.status).toBe("saved");
+    expect(blockedDelete.status).toBe("busy");
+    expect((await deleteUserSequenceSafely(
+      saveFirstTarget,
+      saveFirstStorage,
+      saveFirstLocks,
+    )).status).toBe("deleted");
+    expect(loadUserSequences(saveFirstStorage).map((sequence) => sequence.name)).toEqual(["New"]);
+  });
+
   it("returns busy without writing when another tab owns the lock", async () => {
     const storage = new MemoryStorage();
     const locks: UserSequenceLockManager = {
@@ -551,7 +1009,58 @@ describe("user sequence storage", () => {
       status: "busy",
       sequences: [],
     });
+    await expect(deleteUserSequenceSafely(sequenceSnapshot("Wait"), storage, locks)).resolves.toEqual({
+      status: "busy",
+      sequences: [],
+    });
     expect(storage.writes).toBe(0);
+  });
+
+  it("bounds save and delete retries behind one never-settling write request", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Keep", SIMPLE_EVENTS, storage);
+    const neverSettles = new Promise<SafeDeleteUserSequenceResult>(() => undefined);
+    const request = vi.fn(() => neverSettles);
+    const locks: UserSequenceLockManager = { request } as UserSequenceLockManager;
+    const keep = storedSequence(storage, "Keep");
+
+    void deleteUserSequenceSafely(keep, storage, locks);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await expect(deleteUserSequenceSafely(keep, storage, locks))
+        .resolves.toMatchObject({ status: "busy", sequences: [{ name: "Keep" }] });
+      await expect(saveUserSequenceSafely(`Retry ${attempt}`, SIMPLE_EVENTS, storage, locks))
+        .resolves.toMatchObject({ status: "busy", sequences: [{ name: "Keep" }] });
+    }
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(storage.writes).toBe(1);
+  });
+
+  it("allows a fresh delete after its raw lock request settles", async () => {
+    const storage = new MemoryStorage();
+    saveUserSequence("Take", SIMPLE_EVENTS, storage);
+    let resolveFirst!: (result: SafeDeleteUserSequenceResult) => void;
+    const first = new Promise<SafeDeleteUserSequenceResult>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const request = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockImplementationOnce((_name, _options, callback) => Promise.resolve(callback({})));
+    const locks: UserSequenceLockManager = { request } as UserSequenceLockManager;
+    const take = storedSequence(storage, "Take");
+
+    const pending = deleteUserSequenceSafely(take, storage, locks);
+    await expect(deleteUserSequenceSafely(take, storage, locks))
+      .resolves.toMatchObject({ status: "busy" });
+    resolveFirst({ status: "busy", sequences: loadUserSequences(storage) });
+    await expect(pending).resolves.toMatchObject({ status: "busy" });
+
+    await expect(deleteUserSequenceSafely(take, storage, locks)).resolves.toMatchObject({
+      status: "deleted",
+      deletedName: "Take",
+      sequences: [],
+    });
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("bounds repeated saves behind one never-settling host lock request", async () => {
@@ -612,5 +1121,29 @@ describe("user sequence storage", () => {
       new MemoryStorage(),
       rejected,
     )).resolves.toMatchObject({ status: "saved" });
+  });
+
+  it("falls back to single-tab deletion when a lock manager throws or rejects", async () => {
+    const thrown: UserSequenceLockManager = {
+      request: () => { throw new Error("unavailable"); },
+    };
+    const rejected: UserSequenceLockManager = {
+      request: () => Promise.reject(new Error("unavailable")),
+    };
+    const thrownStorage = new MemoryStorage();
+    const rejectedStorage = new MemoryStorage();
+    saveUserSequence("Thrown", SIMPLE_EVENTS, thrownStorage);
+    saveUserSequence("Rejected", SIMPLE_EVENTS, rejectedStorage);
+
+    await expect(deleteUserSequenceSafely(
+      storedSequence(thrownStorage, "Thrown"),
+      thrownStorage,
+      thrown,
+    )).resolves.toMatchObject({ status: "deleted", sequences: [] });
+    await expect(deleteUserSequenceSafely(
+      storedSequence(rejectedStorage, "Rejected"),
+      rejectedStorage,
+      rejected,
+    )).resolves.toMatchObject({ status: "deleted", sequences: [] });
   });
 });

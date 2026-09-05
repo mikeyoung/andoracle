@@ -6,13 +6,13 @@ export interface FactoryPreset {
   readonly params: SynthParams;
 }
 
-const patch = (overrides: Partial<SynthParams>): SynthParams => normalizePatch({
+const patch = (overrides: Partial<SynthParams>): SynthParams => Object.freeze(normalizePatch({
   ...DEFAULT_PARAMS,
   ...overrides,
-  autoRun: 0,
-});
+  autoRun: overrides.autoRun ?? 0,
+}));
 
-export const FACTORY_PRESETS: readonly FactoryPreset[] = [
+const factoryPresets: FactoryPreset[] = [
   {
     name: "Init Andoracle",
     description: "A clear two-saw starting patch.",
@@ -111,8 +111,7 @@ export const FACTORY_PRESETS: readonly FactoryPreset[] = [
   {
     name: "Auto Drone",
     description: "Hands-free evolving filter and stereo delay.",
-    params: normalizePatch({
-      ...DEFAULT_PARAMS,
+    params: patch({
       autoRun: 1,
       autoNote: 43,
       vco1Coarse: 32.7,
@@ -139,6 +138,14 @@ export const FACTORY_PRESETS: readonly FactoryPreset[] = [
     }),
   },
 ];
+
+/**
+ * Built-in patches are immutable data, not writable library records. Future
+ * additions inherit the same runtime protection by being placed in this list.
+ */
+export const FACTORY_PRESETS: readonly FactoryPreset[] = Object.freeze(
+  factoryPresets.map((preset) => Object.freeze(preset)),
+);
 
 export const getFactoryPreset = (name: string): FactoryPreset | undefined =>
   FACTORY_PRESETS.find((preset) => preset.name === name);

@@ -9,6 +9,7 @@ import {
   PARAM_SPECS,
   describeValidValues,
   formatParamValue,
+  normalizeParamValue,
   normalizedToParam,
   paramToNormalized,
   type ParamKey,
@@ -180,6 +181,38 @@ const useDirectEntry = (
 
 export const shouldEmitRangeChange = (current: number, next: number): boolean => !Object.is(current, next);
 
+/**
+ * Gives controlled normalized faders predictable keyboard semantics. Native
+ * one-unit movement in the 0–1000 presentation range can round straight back
+ * to the current synth value (notably for integer and coarse-step controls),
+ * leaving an Arrow key unable to move the fader at all.
+ */
+export const keyboardAdjustedRangeValue = (
+  param: ParamKey,
+  value: number,
+  key: string,
+): number | undefined => {
+  const spec = PARAM_SPECS[param];
+  switch (key) {
+    case "ArrowUp":
+    case "ArrowRight":
+      return normalizeParamValue(param, value + spec.step);
+    case "ArrowDown":
+    case "ArrowLeft":
+      return normalizeParamValue(param, value - spec.step);
+    case "Home":
+      return spec.min;
+    case "End":
+      return spec.max;
+    case "PageUp":
+      return normalizedToParam(param, paramToNormalized(param, value) + 0.1);
+    case "PageDown":
+      return normalizedToParam(param, paramToNormalized(param, value) - 0.1);
+    default:
+      return undefined;
+  }
+};
+
 export const nextChoiceValue = (param: ParamKey, value: number): number | undefined => {
   const options = PARAM_SPECS[param].options ?? [];
   if (options.length === 0) return undefined;
@@ -229,6 +262,12 @@ export function RangeControl({
           aria-orientation="vertical"
           aria-valuetext={formatParamValue(param, displayedValue)}
           aria-describedby={`param-${param}-range`}
+          onKeyDown={(event) => {
+            const next = keyboardAdjustedRangeValue(param, value, event.key);
+            if (next === undefined) return;
+            event.preventDefault();
+            if (shouldEmitRangeChange(value, next)) onChange(param, next);
+          }}
           onChange={(event) => {
             const next = normalizedToParam(param, Number(event.target.value) / 1000);
             if (shouldEmitRangeChange(value, next)) onChange(param, next);

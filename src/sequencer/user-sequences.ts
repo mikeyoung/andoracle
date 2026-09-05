@@ -1,7 +1,15 @@
+import {
+  USER_LIBRARY_NAME_MAX_LENGTH,
+  allocateUserLibraryName,
+  isUserLibraryNameWithinLimit,
+} from "../user-library-name";
+
 /** Storage key for the versioned collection of note-only performances. */
 export const USER_SEQUENCES_STORAGE_KEY = "andoracle:user-sequences:v1";
 
 const USER_SEQUENCES_STORAGE_VERSION = 1;
+/** User sequence names are bounded so they remain readable throughout the UI. */
+export const USER_SEQUENCE_NAME_MAX_LENGTH = USER_LIBRARY_NAME_MAX_LENGTH;
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /** A note transition measured from the preceding transition. */
@@ -65,6 +73,11 @@ export type SaveUserSequenceResult =
       readonly sequences: readonly UserNoteSequence[];
     }
   | {
+      readonly status: "name-too-long";
+      readonly maxLength: typeof USER_SEQUENCE_NAME_MAX_LENGTH;
+      readonly sequences: readonly UserNoteSequence[];
+    }
+  | {
       readonly status: "duplicate-name";
       readonly existingName: string;
       readonly sequences: readonly UserNoteSequence[];
@@ -72,6 +85,24 @@ export type SaveUserSequenceResult =
 
 export type SafeSaveUserSequenceResult = SaveUserSequenceResult | {
   /** Another tab currently owns the short sequence-library write lock. */
+  readonly status: "busy";
+  readonly sequences: readonly UserNoteSequence[];
+};
+
+export type DeleteUserSequenceResult =
+  | {
+      readonly status: "deleted";
+      /** The normalized, persisted spelling of the sequence that was removed. */
+      readonly deletedName: string;
+      readonly sequences: readonly UserNoteSequence[];
+    }
+  | {
+      readonly status: "empty-name" | "not-found" | "stale-target" | "storage-error" | "unsupported-version";
+      readonly sequences: readonly UserNoteSequence[];
+    };
+
+export type SafeDeleteUserSequenceResult = DeleteUserSequenceResult | {
+  /** Another tab or operation currently owns the short library write lock. */
   readonly status: "busy";
   readonly sequences: readonly UserNoteSequence[];
 };
@@ -96,14 +127,31 @@ interface ParsedCollection {
   readonly unsupportedVersion: boolean;
 }
 
+interface ValidStoredSequence {
+  readonly name: string;
+  readonly nameKey: string;
+  readonly data: string;
+  readonly inspected: InspectedNoteSequence;
+  readonly requiresLengthMigration: boolean;
+}
+
 type SequenceInput = CapturedNoteSequence | readonly NoteSequenceEvent[];
 
-// A host-owned Web Locks request cannot be force-settled by the page. Bound a
-// broken implementation to one retained request (and one sequence snapshot).
-const pendingLockSaves = new WeakMap<
-  UserSequenceLockManager,
-  Promise<SafeSaveUserSequenceResult>
->();
+// Gate saves and deletes by lock-manager identity. An aborted delete drops its
+// captured write closure immediately. A host that still does not settle is
+// quarantined so it cannot retain more targets; writes remain busy rather than
+// bypassing cross-tab serialization and risking a lost update.
+const pendingLockWrites = new WeakMap<UserSequenceLockManager, Promise<unknown>>();
+const retiredLockManagers = new WeakSet<UserSequenceLockManager>();
+const ABORTED_LOCK_REQUEST_MAX_AGE_MS = 10_000;
+
+// Keep the fresh busy reader in a lexical environment that never contains a
+// sequence snapshot. A broken host may retain one retired callback, but not
+// the potentially large note-data string whose write authority was revoked.
+const createUserSequenceBusyReader = (storage: UserSequenceStorage | null) => () => ({
+  status: "busy" as const,
+  sequences: readUserSequences(storage).sequences,
+});
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -448,8 +496,7 @@ const parseCollection = (raw: string): ParsedCollection => {
     return { sequences: [], recovered: true, unsupportedVersion: false };
   }
 
-  const sequences: UserNoteSequence[] = [];
-  const seenNames = new Set<string>();
+  const validStoredSequences: ValidStoredSequence[] = [];
   let recovered = false;
 
   for (const storedSequence of parsed.sequences) {
@@ -465,27 +512,64 @@ const parseCollection = (raw: string): ParsedCollection => {
     const name = normalizeUserSequenceName(storedSequence.name);
     const nameKey = userSequenceNameKey(name);
     const inspected = inspectNoteSequence(storedSequence.data, false);
-    if (!name || seenNames.has(nameKey) || !inspected) {
+    if (!name || !inspected) {
       recovered = true;
       continue;
     }
 
-    sequences.push({
+    const requiresLengthMigration = !isUserLibraryNameWithinLimit(name);
+    validStoredSequences.push({
       name,
       data: storedSequence.data,
-      durationMs: inspected.durationMs,
-      noteCount: inspected.noteCount,
-      eventCount: inspected.eventCount,
+      nameKey,
+      inspected,
+      requiresLengthMigration,
     });
-    seenNames.add(nameKey);
     if (
       name !== storedSequence.name
+      || requiresLengthMigration
       || storedSequence.durationMs !== inspected.durationMs
       || storedSequence.noteCount !== inspected.noteCount
       || storedSequence.eventCount !== inspected.eventCount
     ) {
       recovered = true;
     }
+  }
+
+  // Protect every already-valid short identity before allocating names for
+  // historical long entries, regardless of their position in storage.
+  const allocatedNameKeys = new Set(
+    validStoredSequences
+      .filter((sequence) => !sequence.requiresLengthMigration)
+      .map((sequence) => sequence.nameKey),
+  );
+  const seenStoredNameKeys = new Set<string>();
+  const sequences: UserNoteSequence[] = [];
+
+  for (const storedSequence of validStoredSequences) {
+    // Canonically equivalent source names retain the library's established
+    // first-record-wins recovery rule; only truncation collisions get suffixes.
+    if (seenStoredNameKeys.has(storedSequence.nameKey)) {
+      recovered = true;
+      continue;
+    }
+    seenStoredNameKeys.add(storedSequence.nameKey);
+
+    const name = storedSequence.requiresLengthMigration
+      ? allocateUserLibraryName(
+        storedSequence.name,
+        allocatedNameKeys,
+        userSequenceNameKey,
+      )
+      : storedSequence.name;
+    allocatedNameKeys.add(userSequenceNameKey(name));
+    sequences.push({
+      name,
+      data: storedSequence.data,
+      durationMs: storedSequence.inspected.durationMs,
+      noteCount: storedSequence.inspected.noteCount,
+      eventCount: storedSequence.inspected.eventCount,
+    });
   }
 
   return { sequences, recovered, unsupportedVersion: false };
@@ -528,6 +612,19 @@ export const findUserSequence = (
     .find((sequence) => userSequenceNameKey(sequence.name) === nameKey) ?? null;
 };
 
+const serializeUserSequences = (
+  sequences: readonly UserNoteSequence[],
+): string => JSON.stringify({
+  version: USER_SEQUENCES_STORAGE_VERSION,
+  sequences: sequences.map((sequence): StoredUserSequence => ({
+    name: sequence.name,
+    data: sequence.data,
+    durationMs: sequence.durationMs,
+    noteCount: sequence.noteCount,
+    eventCount: sequence.eventCount,
+  })),
+} satisfies StoredUserSequenceCollection);
+
 /** Adds a new named sequence without ever overwriting an existing name. */
 export const saveUserSequence = (
   name: string,
@@ -545,6 +642,13 @@ export const saveUserSequence = (
 
   const normalizedName = normalizeUserSequenceName(name);
   if (!normalizedName) return { status: "empty-name", sequences };
+  if (!isUserLibraryNameWithinLimit(normalizedName)) {
+    return {
+      status: "name-too-long",
+      maxLength: USER_SEQUENCE_NAME_MAX_LENGTH,
+      sequences,
+    };
+  }
   const nameKey = userSequenceNameKey(normalizedName);
   const duplicate = sequences.find(
     (sequence) => userSequenceNameKey(sequence.name) === nameKey,
@@ -569,24 +673,148 @@ export const saveUserSequence = (
     eventCount: captured.events.length,
   };
   const nextSequences = [...sequences, sequence];
-  const storedSequences: StoredUserSequence[] = nextSequences.map((item) => ({
-    name: item.name,
-    data: item.data,
-    durationMs: item.durationMs,
-    noteCount: item.noteCount,
-    eventCount: item.eventCount,
-  }));
-  const collection: StoredUserSequenceCollection = {
-    version: USER_SEQUENCES_STORAGE_VERSION,
-    sequences: storedSequences,
-  };
 
   try {
-    storage.setItem(USER_SEQUENCES_STORAGE_KEY, JSON.stringify(collection));
+    storage.setItem(USER_SEQUENCES_STORAGE_KEY, serializeUserSequences(nextSequences));
     return { status: "saved", sequence, sequences: nextSequences };
   } catch {
     return { status: "storage-error", sequences };
   }
+};
+
+const snapshotUserSequence = (sequence: UserNoteSequence): UserNoteSequence => ({
+  name: sequence.name,
+  data: sequence.data,
+  durationMs: sequence.durationMs,
+  noteCount: sequence.noteCount,
+  eventCount: sequence.eventCount,
+});
+
+const matchesUserSequenceSnapshot = (
+  stored: UserNoteSequence,
+  expected: UserNoteSequence,
+): boolean => userSequenceNameKey(stored.name) === userSequenceNameKey(expected.name)
+  && stored.data === expected.data
+  && stored.durationMs === expected.durationMs
+  && stored.noteCount === expected.noteCount
+  && stored.eventCount === expected.eventCount;
+
+/**
+ * Removes one saved take only when it still exactly matches the snapshot shown
+ * to the user for confirmation. This prevents a same-name delete/recreate in
+ * another tab from turning an old confirmation into authority over a new take.
+ */
+export const deleteUserSequence = (
+  expected: UserNoteSequence,
+  storage: UserSequenceStorage | null = defaultStorage(),
+): DeleteUserSequenceResult => {
+  const readResult = readUserSequences(storage);
+  const sequences = readResult.sequences;
+  if (readResult.status === "storage-error" || !storage) {
+    return { status: "storage-error", sequences };
+  }
+  if (readResult.status === "unsupported-version") {
+    return { status: "unsupported-version", sequences };
+  }
+
+  const nameKey = userSequenceNameKey(expected.name);
+  if (!nameKey) return { status: "empty-name", sequences };
+  const deletedIndex = sequences.findIndex(
+    (sequence) => userSequenceNameKey(sequence.name) === nameKey,
+  );
+  if (deletedIndex < 0) return { status: "not-found", sequences };
+  if (!matchesUserSequenceSnapshot(sequences[deletedIndex], expected)) {
+    return { status: "stale-target", sequences };
+  }
+
+  const deletedName = sequences[deletedIndex].name;
+  const nextSequences = [
+    ...sequences.slice(0, deletedIndex),
+    ...sequences.slice(deletedIndex + 1),
+  ];
+  try {
+    storage.setItem(USER_SEQUENCES_STORAGE_KEY, serializeUserSequences(nextSequences));
+    return { status: "deleted", deletedName, sequences: nextSequences };
+  } catch {
+    return { status: "storage-error", sequences };
+  }
+};
+
+const runUserSequenceWriteSafely = <Result>(
+  write: () => Result,
+  busy: () => Result,
+  lockManager: UserSequenceLockManager | null,
+  signal?: AbortSignal,
+): Promise<Result> => {
+  if (signal?.aborted) return Promise.resolve(busy());
+  if (!lockManager) return Promise.resolve(write());
+  if (retiredLockManagers.has(lockManager)) return Promise.resolve(busy());
+  if (pendingLockWrites.has(lockManager)) return Promise.resolve(busy());
+
+  const authority: {
+    write: (() => Result) | null;
+    signal: AbortSignal | null;
+  } = { write, signal: signal ?? null };
+  let abortSignal: AbortSignal | null = signal ?? null;
+  let retireTimer: ReturnType<typeof setTimeout> | null = null;
+  let tracked: Promise<Result>;
+  const requestStartedAt = Date.now();
+  const guardedWrite = (): Result => {
+    if (authority.signal?.aborted) {
+      authority.write = null;
+      authority.signal = null;
+    }
+    return authority.write ? authority.write() : busy();
+  };
+  const revokeAuthority = (): void => {
+    authority.write = null;
+    authority.signal = null;
+    const currentSignal = abortSignal;
+    abortSignal = null;
+    currentSignal?.removeEventListener("abort", revokeAuthority);
+    if (retireTimer !== null) return;
+    const requestAge = Math.max(0, Date.now() - requestStartedAt);
+    retireTimer = setTimeout(() => {
+      retireTimer = null;
+      if (pendingLockWrites.get(lockManager) !== tracked) return;
+      pendingLockWrites.delete(lockManager);
+      retiredLockManagers.add(lockManager);
+    }, Math.max(0, ABORTED_LOCK_REQUEST_MAX_AGE_MS - requestAge));
+  };
+
+  let request: Promise<Result>;
+  try {
+    request = Promise.resolve(lockManager.request(
+      `${USER_SEQUENCES_STORAGE_KEY}:write`,
+      // Web Locks disallows signal together with ifAvailable. The revocable
+      // authority holder below prevents any late callback from mutating data.
+      { mode: "exclusive", ifAvailable: true },
+      (lock): Result => lock ? guardedWrite() : busy(),
+    ));
+  } catch {
+    authority.write = null;
+    authority.signal = null;
+    // Some privacy modes expose navigator.locks but reject requests. Preserve
+    // normal single-tab storage behavior there.
+    return Promise.resolve(signal?.aborted ? busy() : write());
+  }
+
+  tracked = request
+    .catch(() => guardedWrite())
+    .finally(() => {
+      authority.write = null;
+      authority.signal = null;
+      abortSignal?.removeEventListener("abort", revokeAuthority);
+      abortSignal = null;
+      if (retireTimer !== null) clearTimeout(retireTimer);
+      retireTimer = null;
+      if (pendingLockWrites.get(lockManager) === tracked) pendingLockWrites.delete(lockManager);
+      retiredLockManagers.delete(lockManager);
+    });
+  pendingLockWrites.set(lockManager, tracked);
+  if (abortSignal?.aborted) revokeAuthority();
+  else abortSignal?.addEventListener("abort", revokeAuthority, { once: true });
+  return tracked;
 };
 
 /**
@@ -599,33 +827,28 @@ export const saveUserSequenceSafely = (
   input: SequenceInput,
   storage: UserSequenceStorage | null = defaultStorage(),
   lockManager: UserSequenceLockManager | null = defaultLockManager(),
-): Promise<SafeSaveUserSequenceResult> => {
-  if (!lockManager) return Promise.resolve(saveUserSequence(name, input, storage));
-  if (pendingLockSaves.has(lockManager)) {
-    return Promise.resolve({ status: "busy", sequences: readUserSequences(storage).sequences });
-  }
+): Promise<SafeSaveUserSequenceResult> => runUserSequenceWriteSafely<SafeSaveUserSequenceResult>(
+  () => saveUserSequence(name, input, storage),
+  createUserSequenceBusyReader(storage),
+  lockManager,
+);
 
-  let request: Promise<SafeSaveUserSequenceResult>;
-  try {
-    request = Promise.resolve(lockManager.request(
-      `${USER_SEQUENCES_STORAGE_KEY}:write`,
-      { mode: "exclusive", ifAvailable: true },
-      (lock): SafeSaveUserSequenceResult => lock
-        ? saveUserSequence(name, input, storage)
-        : { status: "busy", sequences: readUserSequences(storage).sequences },
-    ));
-  } catch {
-    // Some privacy modes expose navigator.locks but reject requests. Preserve
-    // normal single-tab storage behavior there.
-    return Promise.resolve(saveUserSequence(name, input, storage));
-  }
-
-  let tracked: Promise<SafeSaveUserSequenceResult>;
-  tracked = request
-    .catch(() => saveUserSequence(name, input, storage))
-    .finally(() => {
-      if (pendingLockSaves.get(lockManager) === tracked) pendingLockSaves.delete(lockManager);
-    });
-  pendingLockSaves.set(lockManager, tracked);
-  return tracked;
+/**
+ * Serializes delete with every other sequence-library write. A contended or
+ * already-pending write reports busy so callers can retry without losing a
+ * concurrent save or deleting a newly replaced collection.
+ */
+export const deleteUserSequenceSafely = (
+  expected: UserNoteSequence,
+  storage: UserSequenceStorage | null = defaultStorage(),
+  lockManager: UserSequenceLockManager | null = defaultLockManager(),
+  signal?: AbortSignal,
+): Promise<SafeDeleteUserSequenceResult> => {
+  const expectedSnapshot = snapshotUserSequence(expected);
+  return runUserSequenceWriteSafely<SafeDeleteUserSequenceResult>(
+    () => deleteUserSequence(expectedSnapshot, storage),
+    createUserSequenceBusyReader(storage),
+    lockManager,
+    signal,
+  );
 };

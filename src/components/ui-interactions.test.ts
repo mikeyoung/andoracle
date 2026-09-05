@@ -14,13 +14,20 @@ import {
 import { OutputMeter, outputPeakPercent } from "./OutputMeter";
 import {
   DirectEntryInterruptionRegistry,
+  keyboardAdjustedRangeValue,
   shouldConsumeLongPressClick,
   shouldEmitRangeChange,
 } from "./ParameterControls";
+import {
+  deleteConfirmationTimeoutMessage,
+  DeleteConfirmationDialog,
+  raceDeleteConfirmationWithAbort,
+} from "./DeleteConfirmationDialog";
 import { ExternalInputControl } from "./ExternalInputControl";
 import { HelpDialog } from "./HelpDialog";
 import { MidiInputControl } from "./MidiInputControl";
 import { PatchLibraryDialog } from "./PatchLibraryDialog";
+import { PARAM_KEYS, PARAM_SPECS, normalizedToParam } from "../synth/params";
 import {
   clearPpcOwnership,
   isPadActivationKey,
@@ -243,6 +250,52 @@ describe("range control change filtering", () => {
     expect(shouldEmitRangeChange(0.5, 0.5)).toBe(false);
     expect(shouldEmitRangeChange(0.5, 0.51)).toBe(true);
   });
+
+  it("moves stepped controls by one declared value on every Arrow key", () => {
+    expect(keyboardAdjustedRangeValue("masterTune", 0, "ArrowRight")).toBe(1);
+    expect(keyboardAdjustedRangeValue("masterTune", 0, "ArrowUp")).toBe(1);
+    expect(keyboardAdjustedRangeValue("masterTune", 0, "ArrowLeft")).toBe(-1);
+    expect(keyboardAdjustedRangeValue("autoNote", 48, "ArrowRight")).toBe(49);
+    expect(keyboardAdjustedRangeValue("ppcBendRange", 8, "ArrowDown")).toBe(7);
+  });
+
+  it("clamps Arrow keys, reaches endpoints, and keeps page motion normalized", () => {
+    expect(keyboardAdjustedRangeValue("masterTune", 100, "ArrowRight")).toBe(100);
+    expect(keyboardAdjustedRangeValue("masterTune", -100, "ArrowLeft")).toBe(-100);
+    expect(keyboardAdjustedRangeValue("filterCutoff", 4_200, "Home")).toBe(16);
+    expect(keyboardAdjustedRangeValue("filterCutoff", 4_200, "End")).toBe(16_000);
+    expect(keyboardAdjustedRangeValue("filterCutoff", 4_200, "PageUp"))
+      .toBeGreaterThan(4_200);
+    expect(keyboardAdjustedRangeValue("filterCutoff", 4_200, "PageDown"))
+      .toBeLessThan(4_200);
+    expect(keyboardAdjustedRangeValue("masterTune", 0, "Escape")).toBeUndefined();
+  });
+
+  it("provides exact Arrow and endpoint behavior for every range parameter", () => {
+    const rangeParams = PARAM_KEYS.filter((param) => PARAM_SPECS[param].control === "range");
+    expect(rangeParams.length).toBeGreaterThan(0);
+
+    for (const param of rangeParams) {
+      const spec = PARAM_SPECS[param];
+      const middle = normalizedToParam(param, 0.5);
+      expect(
+        keyboardAdjustedRangeValue(param, middle, "ArrowUp"),
+        `${param} ArrowUp`,
+      ).toBeGreaterThan(middle);
+      expect(
+        keyboardAdjustedRangeValue(param, middle, "ArrowDown"),
+        `${param} ArrowDown`,
+      ).toBeLessThan(middle);
+      expect(keyboardAdjustedRangeValue(param, spec.min, "ArrowDown"), `${param} lower clamp`)
+        .toBe(spec.min);
+      expect(keyboardAdjustedRangeValue(param, spec.max, "ArrowUp"), `${param} upper clamp`)
+        .toBe(spec.max);
+      expect(keyboardAdjustedRangeValue(param, middle, "Home"), `${param} Home`)
+        .toBe(spec.min);
+      expect(keyboardAdjustedRangeValue(param, middle, "End"), `${param} End`)
+        .toBe(spec.max);
+    }
+  });
 });
 
 describe("direct-entry interruption listener registry", () => {
@@ -393,6 +446,72 @@ describe("user patch library dialogs", () => {
 
     expect(markup).toContain("No user patches have been saved");
     expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Load selected<\/button>/);
+  });
+});
+
+describe("local-library deletion confirmation", () => {
+  it.each([
+    ["patch", "Acid <Lead>", "Delete patch?", "Delete patch"],
+    ["recording", "First & Last", "Delete recording?", "Delete recording"],
+  ] as const)("renders an accessible, non-implicit %s deletion", (kind, name, title, action) => {
+    const onConfirm = vi.fn();
+    const markup = renderToStaticMarkup(createElement(DeleteConfirmationDialog, {
+      kind,
+      name,
+      origin: null,
+      onConfirm,
+      onClose: vi.fn(),
+    }));
+
+    expect(markup).toContain('aria-labelledby="delete-confirmation-title"');
+    expect(markup).toContain('aria-describedby="delete-confirmation-description delete-confirmation-error"');
+    expect(markup).toContain(title);
+    expect(markup).toContain(action);
+    expect(markup).toContain("This cannot be undone");
+    expect(markup).not.toContain(name);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("settles promptly when cancellation revokes a pending confirmation", async () => {
+    let settleOperation!: (value: string) => void;
+    const operation = new Promise<string>((resolve) => {
+      settleOperation = resolve;
+    });
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+    const result = raceDeleteConfirmationWithAbort(operation, controller.signal);
+
+    controller.abort(new DOMException("Closed by the user.", "AbortError"));
+    await expect(result).rejects.toMatchObject({
+      name: "AbortError",
+      message: "Closed by the user.",
+    });
+    expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+
+    // A consumer that ignores its signal may still settle later, but it cannot
+    // revive the already-cancelled dialog continuation.
+    settleOperation("late result");
+    await Promise.resolve();
+  });
+
+  it("removes its abort listener after normal settlement", async () => {
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, "removeEventListener");
+
+    await expect(raceDeleteConfirmationWithAbort("deleted", controller.signal))
+      .resolves.toBe("deleted");
+    expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function));
+  });
+
+  it("rejects an already-aborted confirmation and provides a useful timeout message", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(raceDeleteConfirmationWithAbort(null, controller.signal))
+      .rejects.toMatchObject({ name: "AbortError" });
+    expect(deleteConfirmationTimeoutMessage("patch")).toBe(
+      "Deleting this patch took longer than 10 seconds and was cancelled. Check the library before retrying.",
+    );
   });
 });
 

@@ -131,7 +131,8 @@ describe("1960s instrument finish", () => {
     expect(styles).toContain("--sage: #5b6158");
     expect(styles).toContain("--walnut: #3b2215");
     expect(styles).toContain("--teal: #47746e");
-    expect(styles).toMatch(/\.module\s*\{[\s\S]*?radial-gradient\(circle at 8px 8px,[\s\S]*?var\(--ivory-panel\)/);
+    expect(styles).toMatch(/\.module\s*\{[\s\S]*?isolation:\s*isolate;[\s\S]*?var\(--ivory-panel\)/);
+    expect(styles).toMatch(/\.panel-screw\s*\{[\s\S]*?border-radius:\s*50%;[\s\S]*?radial-gradient\(circle at 34% 28%,/);
     expect(styles).toMatch(/\.fader-shell input\[type="range"\]::\-webkit-slider-thumb\s*\{[\s\S]*?width:\s*34px;[\s\S]*?transform:\s*translateX\(\-14px\);/);
     expect(styles).toMatch(/\.piano-key--black\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?height:\s*139px;/);
     expect(styles).toContain("@media (forced-colors: active)");

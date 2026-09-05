@@ -161,19 +161,23 @@ input:focus-visible,
   letter-spacing: 0.17em;
   line-height: 0.95;
   text-shadow: 0 1px #262823;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .brand-model {
-  overflow: hidden;
   color: #efe0af;
   font-family: "Courier New", Courier, monospace;
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.11em;
-  text-overflow: ellipsis;
+  line-height: 1.15;
   text-transform: uppercase;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .library-deck {
@@ -200,7 +204,9 @@ input:focus-visible,
 .patch-strip .button,
 .sequence-strip .button {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
   touch-action: manipulation;
 }
 
@@ -230,8 +236,6 @@ input:focus-visible,
 .sequence-strip select {
   min-width: 0;
   flex: 1 1 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .sequence-record-button,
@@ -317,6 +321,7 @@ input:focus-visible,
 
 .button,
 .power-button {
+  height: auto;
   min-height: 44px;
   border: 1px solid #1f211d;
   border-radius: 2px;
@@ -324,11 +329,16 @@ input:focus-visible,
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.1em;
+  line-height: 1.2;
   text-transform: uppercase;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .button {
-  padding: 0 13px;
+  padding: 8px 13px;
   color: #eee7d2;
   background:
     repeating-linear-gradient(90deg, transparent 0 5px, rgba(255, 255, 255, 0.025) 5px 6px),
@@ -368,12 +378,11 @@ input:focus-visible,
   align-items: center;
   justify-content: center;
   gap: 9px;
-  padding: 0 16px;
+  padding: 8px 16px;
   border-color: #1f211d;
   color: #e7dfca;
   background: linear-gradient(180deg, #363732, #1e1f1c);
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.13), 0 3px 0 #1c1e1a;
-  overflow-wrap: anywhere;
 }
 
 .power-button i {
@@ -434,14 +443,17 @@ input:focus-visible,
 
 .status-deck strong {
   display: block;
-  overflow: hidden;
+  min-width: 0;
   margin-top: 3px;
   color: #f0e4c1;
   font-family: "Courier New", Courier, monospace;
   font-size: 11px;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .sample-rate.has-warning strong {
@@ -505,7 +517,14 @@ input:focus-visible,
 
 .system-banner span {
   min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.system-banner--warning span {
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .system-banner--warning {
@@ -552,7 +571,14 @@ main {
 
 .usage-note span {
   min-width: 0;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.usage-note [role="status"] {
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .signal-flow {
@@ -589,16 +615,13 @@ main {
 
 .module {
   position: relative;
+  isolation: isolate;
   min-width: 0;
   overflow: hidden;
   border: 3px solid #34362f;
   border-top: 7px solid var(--module-accent);
   border-radius: 2px;
   background:
-    radial-gradient(circle at 8px 8px, #64645a 0 2px, #252720 2.5px 3px, transparent 3.5px),
-    radial-gradient(circle at calc(100% - 8px) 8px, #64645a 0 2px, #252720 2.5px 3px, transparent 3.5px),
-    radial-gradient(circle at 8px calc(100% - 8px), #64645a 0 2px, #252720 2.5px 3px, transparent 3.5px),
-    radial-gradient(circle at calc(100% - 8px) calc(100% - 8px), #64645a 0 2px, #252720 2.5px 3px, transparent 3.5px),
     repeating-linear-gradient(90deg, transparent 0 8px, rgba(48, 47, 39, 0.018) 8px 9px),
     linear-gradient(180deg, var(--ivory-raised), var(--ivory-panel));
   box-shadow:
@@ -618,9 +641,62 @@ main {
   pointer-events: none;
 }
 
-.module > * {
+.module > :not(.panel-screws) {
   position: relative;
   z-index: 1;
+}
+
+.panel-screws {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: block;
+  pointer-events: none;
+}
+
+.panel-screw {
+  --screw-angle: 0deg;
+  position: absolute;
+  display: block;
+  width: 9px;
+  height: 9px;
+  border: 1px solid #282a24;
+  border-radius: 50%;
+  background:
+    linear-gradient(
+      var(--screw-angle),
+      transparent 42%,
+      #292b25 43% 57%,
+      transparent 58%
+    ),
+    radial-gradient(circle at 34% 28%, #e0ded1 0 8%, #96978d 34%, #5a5b53 70%, #30312b 100%);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.45),
+    0 1px 1px rgba(17, 17, 14, 0.62);
+}
+
+.panel-screw--top-left {
+  --screw-angle: -18deg;
+  top: 5px;
+  left: 5px;
+}
+
+.panel-screw--top-right {
+  --screw-angle: 71deg;
+  top: 5px;
+  right: 5px;
+}
+
+.panel-screw--bottom-left {
+  --screw-angle: 24deg;
+  bottom: 5px;
+  left: 5px;
+}
+
+.panel-screw--bottom-right {
+  --screw-angle: -63deg;
+  right: 5px;
+  bottom: 5px;
 }
 
 .module--controllers { grid-column: span 4; }
@@ -639,7 +715,7 @@ main {
   align-items: end;
   justify-content: space-between;
   gap: 12px;
-  padding: 9px 13px 8px;
+  padding: 9px 16px 8px;
   border-bottom: 3px double #747466;
   background:
     linear-gradient(90deg, color-mix(in srgb, var(--module-accent), #2d2e29 72%) 0 5px, transparent 5px),
@@ -649,7 +725,9 @@ main {
 
 .module-header > * {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .module-header h2,
@@ -680,7 +758,7 @@ main {
   align-content: stretch;
   flex-wrap: wrap;
   gap: 2px;
-  padding: 13px 9px 11px;
+  padding: 13px 16px 17px;
 }
 
 .parameter {
@@ -713,7 +791,9 @@ main {
   letter-spacing: 0.09em;
   line-height: 1.2;
   text-transform: uppercase;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .parameter output {
@@ -721,15 +801,17 @@ main {
   width: 100%;
   min-height: 27px;
   margin-top: auto;
-  overflow: hidden;
+  overflow: visible;
   padding-top: 6px;
   color: color-mix(in srgb, var(--accent), #171813 58%);
   font-family: "Courier New", Courier, monospace;
   font-size: 10px;
   font-weight: 700;
   line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .fader-shell {
@@ -833,17 +915,19 @@ main {
 .parameter--choice select,
 .choice-button {
   width: 100%;
-  min-height: 46px;
+  height: auto;
+  min-height: 64px;
   margin-top: 20px;
-  padding: 5px 24px 5px 7px;
+  padding: 7px 24px 7px 8px;
   border: 2px solid #57584e;
   border-radius: 1px;
   color: #272821;
   background:
     repeating-linear-gradient(90deg, transparent 0 8px, rgba(0, 0, 0, 0.035) 8px 9px),
     linear-gradient(180deg, #f0ead8, #bbb7a5);
-  font-size: 9px;
+  font-size: 13.5px;
   font-weight: 700;
+  line-height: 1.2;
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.65), 0 3px 0 #4c4d44;
 }
 
@@ -852,6 +936,8 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
+  padding-right: 8px;
+  padding-left: 8px;
   cursor: pointer;
   text-align: left;
   touch-action: manipulation;
@@ -859,9 +945,12 @@ main {
 
 .choice-button span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1 1 auto;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .choice-button i {
@@ -968,9 +1057,10 @@ main {
 
 .route-control .parameter--choice select,
 .route-control .choice-button {
-  min-height: 44px;
+  min-height: 56px;
   margin-top: 0;
-  font-size: 8px;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .route-control .parameter--range label {
@@ -1022,7 +1112,9 @@ main {
   letter-spacing: 0.07em;
   line-height: 1.2;
   text-transform: uppercase;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .external-input-button {
@@ -1099,7 +1191,9 @@ main {
   font-weight: 850;
   letter-spacing: 0.1em;
   text-align: center;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .ppc-pad {
@@ -1143,13 +1237,15 @@ main {
 }
 
 .midi-strip {
+  position: relative;
+  isolation: isolate;
   display: flex;
   min-height: 76px;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
   margin-top: 10px;
-  padding: 11px 14px;
+  padding: 16px 18px;
   border: 2px solid #34362f;
   border-left: 7px solid var(--teal);
   border-radius: 1px;
@@ -1176,11 +1272,10 @@ main {
 }
 
 .midi-strip-copy small {
-  overflow: hidden;
+  overflow: visible;
   color: #30332e;
   font-size: 12px;
   line-height: 1.35;
-  text-overflow: ellipsis;
   overflow-wrap: anywhere;
 }
 
@@ -1195,7 +1290,9 @@ main {
 .midi-strip-actions .button {
   min-height: 44px;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .button--midi-on {
@@ -1209,6 +1306,8 @@ main {
 }
 
 .keyboard-module {
+  position: relative;
+  isolation: isolate;
   margin-top: 10px;
   overflow: hidden;
   border: 3px solid #302017;
@@ -1226,7 +1325,7 @@ main {
   align-items: center;
   justify-content: space-between;
   gap: 22px;
-  padding: 10px 14px;
+  padding: 16px 18px 10px;
   border-bottom: 3px double #7d7d71;
   background:
     repeating-linear-gradient(90deg, transparent 0 8px, rgba(255, 255, 255, 0.018) 8px 9px),
@@ -1243,7 +1342,9 @@ main {
   color: #cbc4ae;
   font-size: 10px;
   text-align: right;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 kbd {
@@ -1319,12 +1420,27 @@ kbd {
 .piano-key--white span {
   position: absolute;
   bottom: 10px;
-  left: 0;
-  width: 100%;
-  overflow: hidden;
+  left: 50%;
+  width: max-content;
+  max-width: none;
+  overflow: visible;
   font-size: 8px;
   font-weight: 750;
   white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.piano-key--white[data-note="36"] span {
+  right: auto;
+  left: 2px;
+  transform: none;
+}
+
+.piano-key--white[data-note="72"] span {
+  right: 2px;
+  left: auto;
+  transform: none;
 }
 
 .piano-key--black {
@@ -1365,7 +1481,7 @@ kbd {
   justify-content: flex-end;
   gap: 17px;
   min-height: 31px;
-  padding: 7px 13px;
+  padding: 7px 18px 16px;
   color: #d0c8b0;
   border-top: 1px solid #55574f;
   background:
@@ -1408,7 +1524,9 @@ footer {
 
 footer span {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .direct-entry {
@@ -1426,7 +1544,9 @@ footer span {
   color: #292a24;
   background:
     radial-gradient(circle at 9px 9px, #616259 0 2px, #252720 2.5px 3px, transparent 3.5px),
-    radial-gradient(circle at calc(100% - 9px) 9px, #616259 0 2px, #252720 2.5px 3px, transparent 3.5px),
+    radial-gradient(circle at calc(100% - 22px) 9px, #616259 0 2px, #252720 2.5px 3px, transparent 3.5px),
+    radial-gradient(circle at 9px calc(100% - 9px), #616259 0 2px, #252720 2.5px 3px, transparent 3.5px),
+    radial-gradient(circle at calc(100% - 22px) calc(100% - 9px), #616259 0 2px, #252720 2.5px 3px, transparent 3.5px),
     repeating-linear-gradient(90deg, transparent 0 8px, rgba(45, 45, 38, 0.018) 8px 9px),
     linear-gradient(180deg, #e7e0cb, #cbc5ae);
   box-shadow: inset 0 0 0 1px #918e7e, 0 24px 80px rgba(17, 9, 5, 0.72);
@@ -1456,7 +1576,9 @@ footer span {
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .modal-current,
@@ -1560,21 +1682,25 @@ footer span {
   text-align: center;
 }
 
-.patch-library-dialog .button:disabled {
+.patch-strip .button:disabled,
+.patch-library-dialog .button:disabled,
+.sequence-strip .button:disabled,
+.sequence-commit-dialog .button:disabled,
+.delete-confirmation-dialog .button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
   filter: saturate(0.35);
 }
 
-.sequence-strip .button:disabled,
-.sequence-commit-dialog .button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-  filter: saturate(0.35);
+.delete-target-name {
+  overflow-wrap: anywhere;
+  line-height: 1.55;
 }
 
 .sequence-take-summary {
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
   font-family: "Courier New", Courier, monospace;
   font-weight: 700;
 }
@@ -1626,7 +1752,9 @@ footer span {
   font-family: "Courier New", Courier, monospace;
   font-size: 11px;
   font-weight: 800;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
   white-space: normal;
 }
 
@@ -1702,7 +1830,9 @@ footer span {
 
 .modal-actions .button {
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 @media (max-width: 1180px) {
@@ -1728,10 +1858,6 @@ footer span {
 
   .status-deck {
     grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
-  }
-
-  .network-status {
-    display: none !important;
   }
 
   .panel-grid {
@@ -1772,10 +1898,6 @@ footer span {
     width: auto;
     min-width: 170px;
     flex: 1;
-  }
-
-  .patch-strip label {
-    display: none;
   }
 
   .power-strip {
@@ -1845,16 +1967,8 @@ footer span {
     flex: 1;
   }
 
-  .patch-strip label {
-    display: none;
-  }
-
   .power-strip {
     flex: 0 1 auto;
-  }
-
-  .power-strip .button:not(.install-button) {
-    display: none;
   }
 
   .install-button {
@@ -2008,8 +2122,8 @@ footer span {
     min-height: 54px;
     flex-wrap: wrap;
     gap: 5px 8px;
-    padding-right: 10px;
-    padding-left: 10px;
+    padding-right: 16px;
+    padding-left: 16px;
   }
 
   .module-header h2,
@@ -2025,28 +2139,27 @@ footer span {
   }
 
   .control-bank {
-    padding-right: 6px;
-    padding-left: 6px;
+    padding-right: 16px;
+    padding-left: 16px;
   }
 
-  .route-control .parameter--choice label,
-  .route-control .parameter--choice select,
-  .route-control .choice-button {
+  .route-control .parameter--choice label {
     font-size: 9px;
   }
 
+  .route-control .parameter--choice select,
+  .route-control .choice-button {
+    font-size: 13.5px;
+  }
+
   .keyboard-header {
-    padding-right: 10px;
-    padding-left: 10px;
+    padding-right: 18px;
+    padding-left: 18px;
   }
 
   .piano-key:focus::after {
     inset: 4px 1px;
     border-width: 2px;
-  }
-
-  .piano-key--white span {
-    display: none;
   }
 
   .direct-entry form {
@@ -2114,10 +2227,6 @@ footer span {
 
   .power-strip > * {
     flex: 1 1 100%;
-  }
-
-  .patch-strip {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .ppc {
@@ -2202,10 +2311,22 @@ footer span {
   }
 }
 
+/* This must follow the shared <=700px library grid so the narrowest layout
+   wins the cascade and gives every full word a complete row. */
 @media (max-width: 260px) {
   .patch-strip,
   .sequence-strip {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .direct-entry form {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .direct-entry h2 {
+    font-size: 17px;
+    letter-spacing: 0.01em;
   }
 }
 

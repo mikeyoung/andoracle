@@ -48,7 +48,9 @@ describe("complete persistent patch state", () => {
         const decoded = decodePatch(encodePatch(patch));
         expect(decoded?.[key], `URL codec lost ${key}=${value}`).toBe(value);
 
-        const name = `Route ${caseNumber}: ${key}=${value}`;
+        // Library names have a user-facing 33-character ceiling; the assertion
+        // message below retains the verbose route details for diagnostics.
+        const name = `Route ${caseNumber}`;
         const storage = new MemoryStorage();
         const saved = saveUserPatch(name, patch, storage);
         expect(saved.status, `named save failed for ${key}=${value}`).toBe("saved");
@@ -64,5 +66,13 @@ describe("complete persistent patch state", () => {
     const initialization = FACTORY_PRESETS.find((preset) => preset.name === "Init Andoracle");
     expect(initialization).toBeDefined();
     expect(initialization?.params).toEqual(DEFAULT_PARAMS);
+  });
+
+  it("runtime-freezes every present and future factory patch entry", () => {
+    expect(Object.isFrozen(FACTORY_PRESETS)).toBe(true);
+    for (const preset of FACTORY_PRESETS) {
+      expect(Object.isFrozen(preset), preset.name).toBe(true);
+      expect(Object.isFrozen(preset.params), preset.name).toBe(true);
+    }
   });
 });

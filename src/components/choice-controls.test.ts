@@ -6,9 +6,13 @@ import { ChoiceControl, nextChoiceValue } from "./ParameterControls";
 
 const CHOICE_PARAMS = PARAM_KEYS.filter((param) => PARAM_SPECS[param].control === "choice");
 
-const renderChoice = (param: ParamKey, compact = false): string => renderToStaticMarkup(createElement(ChoiceControl, {
+const renderChoice = (
+  param: ParamKey,
+  compact = false,
+  value = DEFAULT_PARAMS[param],
+): string => renderToStaticMarkup(createElement(ChoiceControl, {
   param,
-  value: DEFAULT_PARAMS[param],
+  value,
   accent: "#e86b24",
   compact,
   onChange: vi.fn(),
@@ -41,6 +45,20 @@ describe("compact selector controls", () => {
         expect(nextChoiceValue(param, option.value)).toBe(options[(index + 1) % options.length]?.value);
       }
     }
+  });
+
+  it("renders every selectable label in full inside the multiline text span", () => {
+    let renderedOptions = 0;
+    for (const param of CHOICE_PARAMS) {
+      for (const option of PARAM_SPECS[param].options ?? []) {
+        const markup = renderChoice(param, false, option.value);
+        expect(markup).toContain(`<span>${option.label}</span>`);
+        expect(markup).toContain(`aria-label="${PARAM_SPECS[param].label}: ${option.label}"`);
+        renderedOptions += 1;
+      }
+    }
+
+    expect(renderedOptions).toBe(52);
   });
 
   it("keeps routed selectors compact and omits the duplicate output", () => {

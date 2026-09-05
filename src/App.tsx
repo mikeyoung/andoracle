@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OdysseyAudioEngine, type AudioEngineStatus } from "./audio/engine";
 import type { OdysseyMeter, PerformanceState } from "./audio/dsp-core";
 import { DirectEntryModal } from "./components/DirectEntryModal";
+import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog";
 import { ExternalInputControl } from "./components/ExternalInputControl";
 import { HelpDialog } from "./components/HelpDialog";
 import { Keyboard } from "./components/Keyboard";
 import { MidiInputControl } from "./components/MidiInputControl";
 import { OutputMeter } from "./components/OutputMeter";
+import { PanelScrews } from "./components/PanelScrews";
 import { PatchLibraryDialog, type PatchLibraryMode } from "./components/PatchLibraryDialog";
 import { SequenceCommitDialog } from "./components/SequenceCommitDialog";
 import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
@@ -40,7 +42,7 @@ import { readPatchFromUrl, urlWithPatch } from "./synth/patch-url";
 import { FACTORY_PRESETS } from "./synth/presets";
 import {
   USER_PATCHES_STORAGE_KEY,
-  hasUserPatchNamed,
+  deleteUserPatchSafely,
   normalizeUserPatchName,
   readUserPatches,
   saveUserPatchSafely,
@@ -50,6 +52,7 @@ import {
 import {
   USER_SEQUENCES_STORAGE_KEY,
   decodeUserSequence,
+  deleteUserSequenceSafely,
   readUserSequences,
   saveUserSequenceSafely,
   userSequenceNameKey,
@@ -180,6 +183,23 @@ const replacePatchUrl = (params: SynthParams): void => {
   }
 };
 
+type DeleteConfirmationTarget =
+  | {
+      readonly kind: "patch";
+      readonly patch: UserPatch;
+      readonly origin: HTMLButtonElement;
+    }
+  | {
+      readonly kind: "recording";
+      readonly sequence: UserNoteSequence;
+      readonly origin: HTMLButtonElement;
+    };
+
+interface ActiveDeleteOperation {
+  readonly kind: DeleteConfirmationTarget["kind"];
+  readonly controller: AbortController;
+}
+
 function App() {
   const initialPatchRef = useRef<InitialPatchState | null>(null);
   const initialPatch = initialPatchRef.current ?? loadInitialPatch();
@@ -219,6 +239,7 @@ function App() {
   const activeSequenceTakeRef = useRef<CapturedNoteSequence | null>(null);
   const activeSequenceDataRef = useRef<string | null>(null);
   const recordButtonRef = useRef<HTMLButtonElement | null>(null);
+  const performanceFocusRef = useRef<HTMLElement | null>(null);
   const midiSessionRef = useRef<WebMidiSession | null>(null);
   const mountedRef = useRef(true);
   const powerOperationRef = useRef(0);
@@ -227,6 +248,7 @@ function App() {
   const midiOperationRef = useRef(0);
   const shareBusyRef = useRef(false);
   const updateBusyRef = useRef(false);
+  const activeDeleteOperationRef = useRef<ActiveDeleteOperation | null>(null);
   const browserOperationsRef = useRef<OperationCancellationRegistry | null>(null);
   if (!browserOperationsRef.current) browserOperationsRef.current = new OperationCancellationRegistry();
   const browserOperations = browserOperationsRef.current;
@@ -259,6 +281,7 @@ function App() {
     mode: PatchLibraryMode;
     origin: HTMLElement | null;
   } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState<DeleteConfirmationTarget | null>(null);
   const [helpDialogOrigin, setHelpDialogOrigin] = useState<HTMLElement | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
@@ -266,6 +289,21 @@ function App() {
   const [online, setOnline] = useState(navigator.onLine);
   const offlineCapable = useServiceWorkerCapability();
   const [notice, setNotice] = useState(initialPatch.notice);
+  const revokeActiveLibraryDeletion = useCallback((
+    message: string,
+    kind?: DeleteConfirmationTarget["kind"],
+  ): void => {
+    const active = activeDeleteOperationRef.current;
+    if (!kind || active?.kind === kind) {
+      activeDeleteOperationRef.current = null;
+      if (active && !active.controller.signal.aborted) {
+        active.controller.abort(new DOMException(message, "AbortError"));
+      }
+    }
+    setDeleteConfirmation((current) => (
+      !kind || current?.kind === kind ? null : current
+    ));
+  }, []);
   const showSafariInstallHint = useMemo(() => {
     const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
     if (standaloneNavigator.standalone || window.matchMedia("(display-mode: standalone)").matches) return false;
@@ -378,10 +416,29 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeUserPatchName || hasUserPatchNamed(userPatches, activeUserPatchName)) return;
+    if (!activeUserPatchName) return;
+    const matchingPatch = userPatches.find(
+      (patch) => userPatchNameKey(patch.name) === userPatchNameKey(activeUserPatchName),
+    );
+    if (!matchingPatch) {
+      revokeActiveLibraryDeletion(
+        "The active patch was removed while deletion was pending.",
+        "patch",
+      );
+      setActiveUserPatchName(null);
+      setPresetName(matchingPresetName(paramsRef.current));
+      return;
+    }
+    if (matchingPatch.name !== activeUserPatchName) setActiveUserPatchName(matchingPatch.name);
+    if (PARAM_KEYS.every((key) => Object.is(matchingPatch.params[key], paramsRef.current[key]))) return;
+    revokeActiveLibraryDeletion(
+      "The active patch changed while deletion was pending.",
+      "patch",
+    );
     setActiveUserPatchName(null);
     setPresetName(matchingPresetName(paramsRef.current));
-  }, [activeUserPatchName, userPatches]);
+    setNotice("The loaded user patch changed in another tab. Your current controls were kept as an unsaved patch.");
+  }, [activeUserPatchName, revokeActiveLibraryDeletion, userPatches]);
 
   useEffect(() => {
     if (!activeSequenceName) return;
@@ -390,13 +447,19 @@ function App() {
     );
     if (matchingSequence) {
       if (activeSequenceDataRef.current !== matchingSequence.data) {
+        revokeActiveLibraryDeletion(
+          "The active recording changed while deletion was pending.",
+          "recording",
+        );
+        // Replacing a same-name recording invalidates both active playback and
+        // a Play request that may still be waiting for AudioContext startup.
+        sequenceOperationRef.current += 1;
+        sequencePlayerRef.current?.stop(false);
+        setSequencePlaybackState("stopped");
         const decoded = decodeUserSequence(matchingSequence);
         if (!decoded) {
-          sequenceOperationRef.current += 1;
-          sequencePlayerRef.current?.stop(false);
           activeSequenceTakeRef.current = null;
           activeSequenceDataRef.current = null;
-          setSequencePlaybackState("stopped");
           setActiveSequenceName(null);
           setNotice("The loaded sequence is damaged and was unloaded.");
           return;
@@ -407,6 +470,10 @@ function App() {
       if (matchingSequence.name !== activeSequenceName) setActiveSequenceName(matchingSequence.name);
       return;
     }
+    revokeActiveLibraryDeletion(
+      "The active recording was removed while deletion was pending.",
+      "recording",
+    );
     sequenceOperationRef.current += 1;
     sequencePlayerRef.current?.stop(false);
     activeSequenceTakeRef.current = null;
@@ -414,7 +481,7 @@ function App() {
     setSequencePlaybackState("stopped");
     setActiveSequenceName(null);
     setNotice("The loaded sequence was removed in another tab.");
-  }, [activeSequenceName, userSequences]);
+  }, [activeSequenceName, revokeActiveLibraryDeletion, userSequences]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -450,6 +517,11 @@ function App() {
       externalInputEnabledRef.current = false;
       shareBusyRef.current = false;
       updateBusyRef.current = false;
+      const deleteOperation = activeDeleteOperationRef.current;
+      activeDeleteOperationRef.current = null;
+      deleteOperation?.controller.abort(
+        new DOMException("Andoracle closed during deletion.", "AbortError"),
+      );
       browserOperations.cancelAll();
       engine.disableExternalInput();
       engine.allNotesOff();
@@ -508,6 +580,12 @@ function App() {
       const href = window.location.href;
       if (lastHandledPatchHrefRef.current === href) return;
       lastHandledPatchHrefRef.current = href;
+      // Back/Forward may run while a native modal is open. A confirmation
+      // captured for the former active patch must not survive navigation.
+      revokeActiveLibraryDeletion(
+        "Patch navigation changed the active deletion target.",
+        "patch",
+      );
 
       if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
       urlSyncTimerRef.current = null;
@@ -550,7 +628,7 @@ function App() {
       window.removeEventListener("popstate", loadPatchFromNavigation);
       window.removeEventListener("hashchange", loadPatchFromNavigation);
     };
-  }, [engine, syncPerformance]);
+  }, [engine, revokeActiveLibraryDeletion, syncPerformance]);
 
   const noteOn = useCallback((source: string, note: number): void => {
     if (!Number.isFinite(note)) return;
@@ -657,12 +735,13 @@ function App() {
     setSequenceRecording(false);
     setDirectEditor(null);
     setPatchLibraryDialog(null);
+    revokeActiveLibraryDeletion("Recording review replaced the deletion dialog.");
     setHelpDialogOrigin(null);
     setSequenceTake({ take, origin: recordButtonRef.current });
     setNotice(reason === "idle"
       ? "Recording stopped after one minute without a played note. Save or discard the take."
       : "Recording stopped. Save or discard the take.");
-  }, []);
+  }, [revokeActiveLibraryDeletion]);
   finishRecordingRef.current = finishSequenceRecording;
 
   useEffect(() => {
@@ -721,6 +800,7 @@ function App() {
     setSequenceTake(null);
     setDirectEditor(null);
     setPatchLibraryDialog(null);
+    revokeActiveLibraryDeletion("Recording started while deletion was pending.");
     setHelpDialogOrigin(null);
     recorder.start(
       [...noteSources.current].filter(([source]) => !source.startsWith(SEQUENCE_SOURCE_PREFIX)),
@@ -783,6 +863,9 @@ function App() {
         case "empty-name":
           setUserSequences(result.sequences);
           return "Enter a sequence name. A name cannot contain only whitespace.";
+        case "name-too-long":
+          setUserSequences(result.sequences);
+          return `Sequence names can contain no more than ${result.maxLength} characters.`;
         case "duplicate-name":
           setUserSequences(result.sequences);
           return `A saved sequence named “${result.existingName}” already exists. Choose a different name.`;
@@ -843,6 +926,7 @@ function App() {
       setNotice("Some invalid saved-patch data was ignored; the valid patches remain available.");
     }
     setDirectEditor(null);
+    revokeActiveLibraryDeletion("The patch library replaced the deletion dialog.");
     setPatchLibraryDialog({ mode, origin });
   };
 
@@ -868,9 +952,15 @@ function App() {
         case "empty-name":
           setUserPatches(result.patches);
           return "Enter a patch name. A name cannot contain only whitespace.";
+        case "name-too-long":
+          setUserPatches(result.patches);
+          return `Patch names can contain no more than ${result.maxLength} characters.`;
         case "duplicate-name":
           setUserPatches(result.patches);
           return `A saved patch named “${result.existingName}” already exists. Choose a different name.`;
+        case "immutable-name":
+          setUserPatches(result.patches);
+          return `“${result.immutableName}” is a built-in patch name and can never be modified. Choose a different name.`;
         case "storage-error":
           return "This patch could not be saved. Local storage may be blocked or full.";
         case "unsupported-version":
@@ -899,6 +989,216 @@ function App() {
     syncPerformance(next);
     setNotice(`Loaded user patch “${patch.name}”. Audio power and connected devices were left unchanged.`);
     return null;
+  };
+
+  const openActivePatchDeletion = (origin: HTMLButtonElement): void => {
+    if (sequenceRecording || sequenceRecorderRef.current?.isRecording) {
+      setNotice("Stop and save or discard the current recording before deleting a patch.");
+      return;
+    }
+    const patch = activeUserPatchName
+      ? userPatches.find(
+        (candidate) => userPatchNameKey(candidate.name) === userPatchNameKey(activeUserPatchName),
+      )
+      : null;
+    if (!patch) {
+      setNotice("Load a user-created patch before deleting it. Built-in and unsaved patches are immutable library sources.");
+      return;
+    }
+    setDirectEditor(null);
+    setPatchLibraryDialog(null);
+    setHelpDialogOrigin(null);
+    setDeleteConfirmation({ kind: "patch", patch, origin });
+  };
+
+  const openActiveRecordingDeletion = (origin: HTMLButtonElement): void => {
+    const sequence = activeSequenceName
+      ? userSequences.find(
+        (candidate) => userSequenceNameKey(candidate.name) === userSequenceNameKey(activeSequenceName),
+      )
+      : null;
+    if (!sequence || sequenceRecording) {
+      setNotice("Load a saved recording before deleting it.");
+      return;
+    }
+    setDirectEditor(null);
+    setPatchLibraryDialog(null);
+    setHelpDialogOrigin(null);
+    setDeleteConfirmation({ kind: "recording", sequence, origin });
+  };
+
+  const beginDeleteOperationAuthority = (
+    kind: DeleteConfirmationTarget["kind"],
+    dialogSignal: AbortSignal,
+  ): {
+    readonly signal: AbortSignal;
+    readonly release: () => void;
+  } => {
+    const previous = activeDeleteOperationRef.current;
+    if (previous && !previous.controller.signal.aborted) {
+      previous.controller.abort(
+        new DOMException("A newer deletion replaced this operation.", "AbortError"),
+      );
+    }
+
+    const controller = new AbortController();
+    const operation: ActiveDeleteOperation = { kind, controller };
+    activeDeleteOperationRef.current = operation;
+    const abortFromDialog = (): void => {
+      if (!controller.signal.aborted) {
+        controller.abort(dialogSignal.reason ?? new DOMException("Deletion was cancelled.", "AbortError"));
+      }
+    };
+    dialogSignal.addEventListener("abort", abortFromDialog, { once: true });
+    if (dialogSignal.aborted) abortFromDialog();
+
+    return {
+      signal: controller.signal,
+      release: () => {
+        dialogSignal.removeEventListener("abort", abortFromDialog);
+        if (activeDeleteOperationRef.current === operation) {
+          activeDeleteOperationRef.current = null;
+        }
+      },
+    };
+  };
+
+  const confirmLibraryDeletion = async (
+    target: DeleteConfirmationTarget,
+    signal: AbortSignal,
+  ): Promise<string | null> => {
+    if (target.kind === "patch") {
+      const currentTarget = activeUserPatchName
+        ? userPatches.find(
+          (patch) => userPatchNameKey(patch.name) === userPatchNameKey(activeUserPatchName),
+        )
+        : null;
+      if (
+        !currentTarget
+        || userPatchNameKey(currentTarget.name) !== userPatchNameKey(target.patch.name)
+        || !PARAM_KEYS.every((key) => Object.is(currentTarget.params[key], target.patch.params[key]))
+      ) {
+        return "The active patch changed after confirmation opened. Nothing was deleted.";
+      }
+      const authority = beginDeleteOperationAuthority("patch", signal);
+      const cancellation = browserOperations.begin(
+        "patch-delete",
+        "Patch deletion was cancelled before it completed.",
+      );
+      const cancelWhenAborted = (): void => cancellation.cancel();
+      authority.signal.addEventListener("abort", cancelWhenAborted, { once: true });
+      if (authority.signal.aborted) cancellation.cancel();
+      try {
+        const result = await cancellation.race(
+          deleteUserPatchSafely(target.patch, undefined, undefined, authority.signal),
+        );
+        switch (result.status) {
+          case "deleted":
+            setUserPatches(result.patches);
+            setActiveUserPatchName(null);
+            setPresetName(matchingPresetName(paramsRef.current));
+            setNotice(`Deleted user patch “${result.deletedName}”. The current controls and share URL were kept.`);
+            return null;
+          case "not-found":
+            setUserPatches(result.patches);
+            setActiveUserPatchName(null);
+            setPresetName(matchingPresetName(paramsRef.current));
+            setNotice("That user patch was already removed. The current controls were kept.");
+            return null;
+          case "stale-target":
+            setUserPatches(result.patches);
+            setActiveUserPatchName(null);
+            setPresetName(matchingPresetName(paramsRef.current));
+            setNotice("That patch changed after confirmation opened, so the replacement was not deleted. Your current controls were kept.");
+            return null;
+          case "empty-name":
+            return "No user patch is selected for deletion.";
+          case "immutable-name":
+            setUserPatches(result.patches);
+            return `“${result.immutableName}” is built in and can never be deleted or modified.`;
+          case "storage-error":
+            return "This patch could not be deleted. Local storage may be blocked or unavailable.";
+          case "unsupported-version":
+            return "This patch library was created by a newer Andoracle version and cannot be changed safely.";
+          case "busy":
+            setUserPatches(result.patches);
+            return "Another Andoracle tab is changing the patch library right now. Try again.";
+        }
+      } finally {
+        authority.signal.removeEventListener("abort", cancelWhenAborted);
+        authority.release();
+        browserOperations.finish("patch-delete", cancellation);
+      }
+    }
+
+    if (target.kind !== "recording") return "No saved recording is selected for deletion.";
+    const currentTarget = activeSequenceName
+      ? userSequences.find(
+        (sequence) => userSequenceNameKey(sequence.name) === userSequenceNameKey(activeSequenceName),
+      )
+      : null;
+    if (
+      !currentTarget
+      || userSequenceNameKey(currentTarget.name) !== userSequenceNameKey(target.sequence.name)
+      || currentTarget.data !== target.sequence.data
+      || currentTarget.durationMs !== target.sequence.durationMs
+      || currentTarget.noteCount !== target.sequence.noteCount
+      || currentTarget.eventCount !== target.sequence.eventCount
+    ) {
+      return "The active recording changed after confirmation opened. Nothing was deleted.";
+    }
+    const authority = beginDeleteOperationAuthority("recording", signal);
+    const cancellation = browserOperations.begin(
+      "sequence-delete",
+      "Recording deletion was cancelled before it completed.",
+    );
+    const cancelWhenAborted = (): void => cancellation.cancel();
+    authority.signal.addEventListener("abort", cancelWhenAborted, { once: true });
+    if (authority.signal.aborted) cancellation.cancel();
+    try {
+      const result = await cancellation.race(
+        deleteUserSequenceSafely(target.sequence, undefined, undefined, authority.signal),
+      );
+      switch (result.status) {
+        case "deleted":
+          sequenceOperationRef.current += 1;
+          sequencePlayerRef.current?.stop(false);
+          activeSequenceTakeRef.current = null;
+          activeSequenceDataRef.current = null;
+          setSequencePlaybackState("stopped");
+          setActiveSequenceName(null);
+          setUserSequences(result.sequences);
+          setNotice(`Deleted recording “${result.deletedName}”. Playback was stopped and returned to the beginning.`);
+          return null;
+        case "not-found":
+          sequenceOperationRef.current += 1;
+          sequencePlayerRef.current?.stop(false);
+          activeSequenceTakeRef.current = null;
+          activeSequenceDataRef.current = null;
+          setSequencePlaybackState("stopped");
+          setActiveSequenceName(null);
+          setUserSequences(result.sequences);
+          setNotice("That recording was already removed. It has been unloaded.");
+          return null;
+        case "stale-target":
+          setUserSequences(result.sequences);
+          setNotice("That recording changed after confirmation opened, so the replacement was not deleted. Review it and try again.");
+          return null;
+        case "empty-name":
+          return "No saved recording is selected for deletion.";
+        case "storage-error":
+          return "This recording could not be deleted. Local storage may be blocked or unavailable.";
+        case "unsupported-version":
+          return "This recording library was created by a newer Andoracle version and cannot be changed safely.";
+        case "busy":
+          setUserSequences(result.sequences);
+          return "Another Andoracle tab is changing the recording library right now. Try again.";
+      }
+    } finally {
+      authority.signal.removeEventListener("abort", cancelWhenAborted);
+      authority.release();
+      browserOperations.finish("sequence-delete", cancellation);
+    }
   };
 
   const togglePower = async (): Promise<void> => {
@@ -1001,14 +1301,14 @@ function App() {
       setPowerBusy(true);
       try {
         await engine.powerOn(paramsRef.current);
-        if (
-          !mountedRef.current
-          || powerOperation !== powerOperationRef.current
-          || sequenceOperation !== sequenceOperationRef.current
-        ) return;
+        if (!mountedRef.current || powerOperation !== powerOperationRef.current) return;
         for (const note of new Set(noteSources.current.values())) engine.noteOn(note);
         syncPerformance();
         setPowered(true);
+        // Selection, stop, or deletion may cancel only the requested playback
+        // while AudioContext startup is pending. Keep UI power synchronized
+        // with the now-running engine, but never start the obsolete sequence.
+        if (sequenceOperation !== sequenceOperationRef.current) return;
       } catch (error) {
         if (!mountedRef.current || powerOperation !== powerOperationRef.current) return;
         setPowered(false);
@@ -1479,6 +1779,21 @@ function App() {
             >
               Load
             </button>
+            <button
+              type="button"
+              className="button button--danger"
+              aria-label="Delete active user patch"
+              aria-haspopup="dialog"
+              disabled={!activeUserPatchName || sequenceRecording}
+              title={activeUserPatchName
+                ? sequenceRecording
+                  ? "Stop and save or discard the current recording before deleting a patch"
+                  : `Delete saved patch ${activeUserPatchName}`
+                : "Built-in and unsaved patches cannot be deleted or modified"}
+              onClick={(event) => openActivePatchDeletion(event.currentTarget)}
+            >
+              Delete
+            </button>
             <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
             <button type="button" className="button button--danger" onClick={panic}>All notes off</button>
             <button
@@ -1488,6 +1803,7 @@ function App() {
               onClick={(event) => {
                 setDirectEditor(null);
                 setPatchLibraryDialog(null);
+                revokeActiveLibraryDeletion("Help replaced the deletion dialog.");
                 setHelpDialogOrigin(event.currentTarget);
               }}
             >
@@ -1513,6 +1829,7 @@ function App() {
             onPlay={() => void playSequence()}
             onPause={pauseSequencePlayback}
             onStop={stopSequencePlayback}
+            onDelete={openActiveRecordingDeletion}
           />
         </div>
         <div className="power-strip">
@@ -1574,7 +1891,7 @@ function App() {
         </aside>
       )}
 
-      <main>
+      <main ref={performanceFocusRef} tabIndex={-1}>
         <h1 className="visually-hidden">Andoracle — ARP Odyssey-Inspired Duophonic Synthesizer</h1>
         <div className="usage-note">
           <span role="status" aria-live="polite" aria-atomic="true">{notice}</span>
@@ -1586,6 +1903,7 @@ function App() {
         <div className="panel-grid">
           {PANEL_SECTIONS.map((section) => (
             <section key={section.id} className={`module module--${section.id}`} style={{ "--module-accent": section.accent } as React.CSSProperties}>
+              <PanelScrews />
               <header className="module-header">
                 <span className="module-eyebrow">{section.eyebrow}</span>
                 <h2>{section.title}</h2>
@@ -1642,6 +1960,18 @@ function App() {
           onSave={saveNamedPatch}
           onLoad={loadNamedPatch}
           onClose={() => setPatchLibraryDialog(null)}
+        />
+      )}
+      {deleteConfirmation && (
+        <DeleteConfirmationDialog
+          kind={deleteConfirmation.kind}
+          name={deleteConfirmation.kind === "patch"
+            ? deleteConfirmation.patch.name
+            : deleteConfirmation.sequence.name}
+          origin={deleteConfirmation.origin}
+          fallbackOrigin={performanceFocusRef.current}
+          onConfirm={(signal) => confirmLibraryDeletion(deleteConfirmation, signal)}
+          onClose={() => revokeActiveLibraryDeletion("Delete confirmation closed.")}
         />
       )}
       {sequenceTake && (

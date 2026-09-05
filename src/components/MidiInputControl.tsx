@@ -1,4 +1,5 @@
 import type { MidiInputSummary } from "../midi/web-midi";
+import { PanelScrews } from "./PanelScrews";
 
 interface MidiInputControlProps {
   supported: boolean;
@@ -34,6 +35,7 @@ export function MidiInputControl({
 
   return (
     <section className="midi-strip" aria-label="MIDI keyboard connection">
+      <PanelScrews />
       <div className="midi-strip-copy">
         <span className="module-eyebrow">Later-model interface · retrofit</span>
         <strong>MIDI keyboard control</strong>

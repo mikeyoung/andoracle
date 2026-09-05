@@ -11,20 +11,39 @@ describe("synth control styling", () => {
     );
   });
 
-  it("keeps dropdown-style selectors compact while retaining touch targets", () => {
+  it("makes dropdown-style selector text 50% larger and safely multiline", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
 
     expect(styles).toMatch(
       /\.parameter--choice\s*\{[\s\S]*?min-width:\s*min\(118px, 100%\);[\s\S]*?flex:\s*1 1 118px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?min-height:\s*46px;[\s\S]*?\}/,
+      /\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*64px;[\s\S]*?font-size:\s*13\.5px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.route-control\s*\{[\s\S]*?min-width:\s*min\(116px, 100%\);[\s\S]*?flex:\s*1 1 116px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?\}/,
+      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*56px;[\s\S]*?font-size:\s*12px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /\.choice-button span\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?overflow:\s*visible;[\s\S]*?white-space:\s*normal;[\s\S]*?overflow-wrap:\s*normal;[\s\S]*?word-break:\s*normal;[\s\S]*?hyphens:\s*none;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*480px\)[\s\S]*?\.route-control \.parameter--choice label\s*\{[\s\S]*?font-size:\s*9px;[\s\S]*?\}[\s\S]*?\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?font-size:\s*13\.5px;[\s\S]*?\}/,
+    );
+    const choiceButtonStart = styles.indexOf(".choice-button {");
+    const choiceSpanStart = styles.indexOf(".choice-button span {", choiceButtonStart);
+    const choiceButton = styles.slice(choiceButtonStart, choiceSpanStart);
+    const choiceSpan = styles.slice(choiceSpanStart, styles.indexOf("\n}", choiceSpanStart) + 2);
+    const mobileStart = styles.indexOf("@media (max-width: 480px)");
+    const mobileEnd = styles.indexOf("@media (max-height: 480px)", mobileStart);
+    const mobile = styles.slice(mobileStart, mobileEnd);
+
+    expect(choiceButton).not.toMatch(/max-height|line-clamp|overflow:\s*(?:hidden|clip)/);
+    expect(choiceSpan).not.toMatch(/max-height|line-clamp|overflow:\s*(?:hidden|clip)/);
+    expect(mobile).toMatch(
+      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[^}]*font-size:\s*13\.5px;/,
     );
     expect(styles).not.toContain(".choice-switch-bank");
   });

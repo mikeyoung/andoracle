@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
+import { PanelScrews } from "./PanelScrews";
 import { midiNoteName } from "../synth/params";
 
 interface KeyboardProps {
@@ -279,6 +280,7 @@ export function Keyboard({
 
   return (
     <section className="keyboard-module" aria-label="37-key keyboard">
+      <PanelScrews />
       <div className="keyboard-header">
         <div>
           <span className="module-eyebrow">C2–C5 · low/high priority</span>

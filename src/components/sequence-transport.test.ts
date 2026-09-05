@@ -15,6 +15,7 @@ const renderTransport = (overrides: Partial<Parameters<typeof SequenceTransport>
     onPlay: vi.fn(),
     onPause: vi.fn(),
     onStop: vi.fn(),
+    onDelete: vi.fn(),
     ...overrides,
   }))
 );
@@ -25,7 +26,7 @@ const buttonTag = (markup: string, label: string): string => {
 };
 
 describe("SequenceTransport", () => {
-  it("always renders labelled Record, Play, Pause, and Stop controls", () => {
+  it("always renders labelled Record, Play, Pause, Stop, and Delete controls", () => {
     const markup = renderTransport();
     expect(markup).toContain('role="group" aria-label="Sequence transport"');
     expect(markup).toContain('<label for="sequence-select">Sequence</label>');
@@ -34,6 +35,7 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('aria-label="Play loaded sequence" aria-pressed="false" disabled=""');
     expect(markup).toContain('aria-label="Pause sequence" aria-pressed="false" disabled=""');
     expect(markup).toContain('aria-label="Stop sequence and return to beginning" disabled=""');
+    expect(markup).toContain('aria-label="Delete active recording" aria-haspopup="dialog" disabled=""');
     expect(markup).toContain("No saved sequences");
   });
 
@@ -60,6 +62,7 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('aria-label="Play loaded sequence" aria-pressed="false" disabled=""');
     expect(markup).toContain('aria-label="Pause sequence" aria-pressed="false" disabled=""');
     expect(markup).toContain('aria-label="Stop sequence and return to beginning" disabled=""');
+    expect(buttonTag(markup, "Delete active recording")).toContain("disabled");
   });
 
   it("enables only Play when a sequence is loaded but stopped", () => {
@@ -70,6 +73,7 @@ describe("SequenceTransport", () => {
     expect(buttonTag(markup, "Play loaded sequence")).not.toContain("disabled");
     expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
     expect(buttonTag(markup, "Stop sequence and return to beginning")).toContain("disabled");
+    expect(buttonTag(markup, "Delete active recording")).not.toContain("disabled");
   });
 
   it("keeps separate Pause and Stop actions during playback", () => {
@@ -82,6 +86,7 @@ describe("SequenceTransport", () => {
     expect(buttonTag(markup, "Play loaded sequence")).toContain("disabled");
     expect(buttonTag(markup, "Pause sequence")).not.toContain("disabled");
     expect(buttonTag(markup, "Stop sequence and return to beginning")).not.toContain("disabled");
+    expect(buttonTag(markup, "Delete active recording")).not.toContain("disabled");
     expect(markup).not.toContain('aria-label="Stop sequence"');
   });
 
@@ -96,5 +101,6 @@ describe("SequenceTransport", () => {
     expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
     expect(markup).toContain('aria-label="Pause sequence" aria-pressed="true" disabled=""');
     expect(buttonTag(markup, "Stop sequence and return to beginning")).not.toContain("disabled");
+    expect(buttonTag(markup, "Delete active recording")).not.toContain("disabled");
   });
 });
