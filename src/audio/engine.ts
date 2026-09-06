@@ -508,7 +508,10 @@ export class OdysseyAudioEngine {
   async powerOn(params: SynthParams): Promise<void> {
     if (this.disposed) throw new Error("The audio engine is no longer available.");
     this.shouldRun = true;
-    this.params = params;
+    // The UI owns its immutable React state object. Keep one engine-owned
+    // snapshot so rapid partial fader updates can mutate this cache without
+    // cloning the complete parameter map for every pointer event.
+    this.params = { ...params };
     const cancelPrevious = this.cancelPowerOperation;
     const sequence = ++this.powerSequence;
     let cancelCurrent: (() => void) | null = null;
@@ -850,7 +853,7 @@ export class OdysseyAudioEngine {
   }
 
   setParams(params: Partial<SynthParams>): void {
-    if (this.params) this.params = { ...this.params, ...params };
+    if (this.params) Object.assign(this.params, params);
     if (this.context?.state === "running") this.node?.port.postMessage({ type: "params", params });
   }
 
@@ -875,7 +878,10 @@ export class OdysseyAudioEngine {
   }
 
   setPerformance(performance: Partial<PerformanceState>): void {
-    this.performance = { ...this.performance, ...performance };
+    // PPC and MIDI wheels can emit at pointer/device-report frequency. This
+    // object is engine-owned, so update it in place instead of allocating an
+    // otherwise identical two-field snapshot for every report.
+    Object.assign(this.performance, performance);
     if (this.context?.state === "running") {
       this.node?.port.postMessage({ type: "performance", performance });
     }

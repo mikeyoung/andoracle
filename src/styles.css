@@ -191,10 +191,18 @@ input:focus-visible,
 .patch-strip,
 .sequence-strip {
   display: grid;
-  grid-template-columns: minmax(190px, 0.55fr) minmax(0, 1.45fr);
   min-width: 0;
   align-items: center;
   gap: 8px;
+}
+
+.utility-strip,
+.patch-strip {
+  grid-template-columns: minmax(190px, 0.55fr) minmax(0, 1.45fr);
+}
+
+.sequence-strip {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .utility-strip {
@@ -2496,7 +2504,7 @@ footer span {
   }
 
   .sequence-actions {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(44px, 1fr));
   }
 
   .sequence-icon-button {
@@ -2510,6 +2518,15 @@ footer span {
 
   .sequence-review-actions .button {
     width: 100%;
+  }
+}
+
+/* Five 44px transport targets plus four 8px gaps need 252px. Accounting for
+   the compact shell borders and its 40px scroll lanes, stack before any
+   target can shrink or wrap into an orphaned final row. */
+@media (max-width: 300px) {
+  .sequence-actions {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

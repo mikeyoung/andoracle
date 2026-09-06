@@ -40,8 +40,10 @@ const SAMPLE_HOLD_SATURATION = Math.tanh(0.8);
 // suspended. Keep enough chronology for many complete 37-key gestures without
 // allowing an inactive worklet to accumulate an unbounded backlog.
 const MAX_ARTICULATION_EVENTS = 512;
-// At the requested 44.1 kHz output rate the longest (15 ms) keyboard-trigger
-// delay spans 1,323 internal samples. This cap also leaves headroom at 96 kHz.
+const MAX_KEYBOARD_TRIGGER_DELAY_SECONDS = 0.015;
+// Bound simultaneous delayed triggers independently from the circular
+// schedule's sample span. A suspended input flood can fill the articulation
+// queue, but it must not turn each resumed audio sample into an O(n) scan.
 const MAX_PENDING_KEYBOARD_TRIGGERS = 4096;
 // Paired interpolation/decimation filters reject the alias bands that can fold
 // through both this 4x stage and the existing 2x output decimator.
@@ -687,7 +689,10 @@ export class OdysseyDSP {
   private readonly articulationQueue: Array<KeyboardArticulationEvent | undefined> = new Array(MAX_ARTICULATION_EVENTS);
   private articulationHead = 0;
   private articulationCount = 0;
-  private readonly keyboardTriggerDelays: number[] = [];
+  private readonly keyboardTriggerSchedule: Uint16Array;
+  private keyboardTriggerScheduleCursor = 0;
+  private keyboardTriggerTailIndex = -1;
+  private pendingKeyboardTriggerCount = 0;
   private keyboardTriggerCount = 0;
   private phase1 = 0;
   private phase2 = 0;
@@ -762,6 +767,11 @@ export class OdysseyDSP {
     this.internalSampleRate = sampleRate * this.oversample;
     this.pinkNoise = new PinkNoise(this.internalSampleRate);
     this.delay = new StereoDelay(this.internalSampleRate);
+    // One slot beyond the maximum future deadline disambiguates the current
+    // sample after wrap; colliding pulses share a bucket count.
+    this.keyboardTriggerSchedule = new Uint16Array(
+      Math.ceil(MAX_KEYBOARD_TRIGGER_DELAY_SECONDS * this.internalSampleRate) + 2,
+    );
     this.filterCutoffSmoothing = 1 - Math.exp(-1 / (0.004 * this.internalSampleRate));
     this.masterLevelSmoothing = 1 - Math.exp(-1 / (0.018 * this.internalSampleRate));
     this.lastMeter = {
@@ -831,14 +841,14 @@ export class OdysseyDSP {
   allNotesOff(): void {
     this.keys.clear();
     this.clearArticulationQueue();
-    this.keyboardTriggerDelays.length = 0;
+    this.clearKeyboardTriggerSchedule();
     this.refreshAllocation(false, true, true);
   }
 
   allSoundOff(): void {
     this.keys.clear();
     this.clearArticulationQueue();
-    this.keyboardTriggerDelays.length = 0;
+    this.clearKeyboardTriggerSchedule();
     this.keyboardGate = false;
     this.requestedKeyboardGate = false;
     this.highNote = this.lowNote;
@@ -926,7 +936,7 @@ export class OdysseyDSP {
       pulseWidth2: this.pulseWidth2,
       adsrStage: this.adsr.stage,
       pendingArticulations: this.articulationCount,
-      pendingKeyboardTriggers: this.keyboardTriggerDelays.length,
+      pendingKeyboardTriggers: this.pendingKeyboardTriggerCount,
     };
   }
 
@@ -992,6 +1002,13 @@ export class OdysseyDSP {
     this.articulationCount = 0;
   }
 
+  private clearKeyboardTriggerSchedule(): void {
+    this.keyboardTriggerSchedule.fill(0);
+    this.keyboardTriggerScheduleCursor = 0;
+    this.keyboardTriggerTailIndex = -1;
+    this.pendingKeyboardTriggerCount = 0;
+  }
+
   private random(): number {
     let value = this.randomState;
     value ^= value << 13;
@@ -1002,31 +1019,45 @@ export class OdysseyDSP {
   }
 
   private updateKeyboardTrigger(shouldSchedule: boolean): boolean {
-    let triggerCount = 0;
-    let writeIndex = 0;
-    for (let index = 0; index < this.keyboardTriggerDelays.length; index += 1) {
-      const remaining = this.keyboardTriggerDelays[index] - 1;
-      if (remaining <= 0) {
-        triggerCount += 1;
-      } else {
-        this.keyboardTriggerDelays[writeIndex] = remaining;
-        writeIndex += 1;
+    this.keyboardTriggerScheduleCursor += 1;
+    if (this.keyboardTriggerScheduleCursor === this.keyboardTriggerSchedule.length) {
+      this.keyboardTriggerScheduleCursor = 0;
+    }
+    const triggerCount = this.keyboardTriggerSchedule[this.keyboardTriggerScheduleCursor];
+    if (triggerCount > 0) {
+      this.keyboardTriggerSchedule[this.keyboardTriggerScheduleCursor] = 0;
+      this.pendingKeyboardTriggerCount -= triggerCount;
+      if (this.keyboardTriggerTailIndex === this.keyboardTriggerScheduleCursor) {
+        this.keyboardTriggerTailIndex = -1;
       }
     }
-    this.keyboardTriggerDelays.length = writeIndex;
     if (shouldSchedule) {
-      const delaySeconds = this.params.portamentoMode > 0.5 ? 0.015 : 0.01;
+      const delaySeconds = this.params.portamentoMode > 0.5
+        ? MAX_KEYBOARD_TRIGGER_DELAY_SECONDS
+        : 0.01;
       const delay = Math.max(1, Math.round(delaySeconds * this.internalSampleRate));
-      if (this.keyboardTriggerDelays.length < MAX_PENDING_KEYBOARD_TRIGGERS) {
-        this.keyboardTriggerDelays.push(delay);
+      const dueIndex = (
+        this.keyboardTriggerScheduleCursor + delay
+      ) % this.keyboardTriggerSchedule.length;
+      if (this.pendingKeyboardTriggerCount < MAX_PENDING_KEYBOARD_TRIGGERS) {
+        this.keyboardTriggerSchedule[dueIndex] += 1;
+        this.pendingKeyboardTriggerCount += 1;
+        this.keyboardTriggerTailIndex = dueIndex;
       } else {
         // Pending triggers are equivalent pulses once their identical delay has
-        // elapsed. Under a pathological flood, retain the earliest tail pulse.
-        const tailIndex = MAX_PENDING_KEYBOARD_TRIGGERS - 1;
-        this.keyboardTriggerDelays[tailIndex] = Math.min(
-          this.keyboardTriggerDelays[tailIndex],
-          delay,
-        );
+        // elapsed. Under a pathological flood, retain the earlier deadline of
+        // the newest retained pulse, matching the former compacting queue.
+        const tailIndex = this.keyboardTriggerTailIndex;
+        if (tailIndex >= 0) {
+          const tailRemaining = (
+            tailIndex - this.keyboardTriggerScheduleCursor + this.keyboardTriggerSchedule.length
+          ) % this.keyboardTriggerSchedule.length;
+          if (delay < tailRemaining) {
+            this.keyboardTriggerSchedule[tailIndex] -= 1;
+            this.keyboardTriggerSchedule[dueIndex] += 1;
+            this.keyboardTriggerTailIndex = dueIndex;
+          }
+        }
       }
     }
     this.keyboardTriggerCount += triggerCount;

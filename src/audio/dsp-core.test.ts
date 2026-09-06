@@ -951,6 +951,52 @@ describe("OdysseyDSP", () => {
     expect(earlyKeyboard.getDiagnostics()).toMatchObject({ triggerCount: 1, adsrStage: "attack" });
   });
 
+  it("keeps consecutive delayed closures on their individual sample deadlines", () => {
+    const dsp = new OdysseyDSP(44100);
+    dsp.noteOn(48);
+    dsp.noteOn(60);
+    dsp.noteOn(55);
+
+    render(dsp, 441);
+    expect(dsp.getDiagnostics()).toMatchObject({
+      pendingKeyboardTriggers: 3,
+      triggerCount: 0,
+    });
+    render(dsp, 1);
+    expect(dsp.getDiagnostics()).toMatchObject({
+      pendingKeyboardTriggers: 1,
+      triggerCount: 2,
+    });
+    render(dsp, 1);
+    expect(dsp.getDiagnostics()).toMatchObject({
+      pendingKeyboardTriggers: 0,
+      triggerCount: 3,
+    });
+  });
+
+  it("preserves mixed revision delays and same-sample trigger collisions", () => {
+    const dsp = new OdysseyDSP(44100);
+    dsp.setParams({ portamentoMode: 1 });
+    dsp.noteOn(48);
+    dsp.noteOn(60);
+    render(dsp, 221);
+
+    // The later 10 ms closure is due on the same internal sample as the
+    // second earlier-revision 15 ms closure.
+    dsp.setParams({ portamentoMode: 0 });
+    dsp.keyboardTrigger();
+    render(dsp, 441);
+    expect(dsp.getDiagnostics()).toMatchObject({
+      pendingKeyboardTriggers: 2,
+      triggerCount: 1,
+    });
+    render(dsp, 1);
+    expect(dsp.getDiagnostics()).toMatchObject({
+      pendingKeyboardTriggers: 0,
+      triggerCount: 3,
+    });
+  });
+
   it("cancels delayed keyboard triggers on panic", () => {
     const dsp = new OdysseyDSP(44100);
     dsp.noteOn(48);
@@ -980,6 +1026,45 @@ describe("OdysseyDSP", () => {
       triggerCount: 512,
     });
     expect(dsp.getHeldNotes()).toEqual([48]);
+  });
+
+  it("caps the delayed-trigger schedule and preserves its earlier-tail overflow policy", () => {
+    // A deliberately high diagnostic rate makes the 15 ms delay long enough
+    // to saturate the independent 4,096-trigger cap before any pulse is due.
+    const dsp = new OdysseyDSP(200_000);
+    dsp.setParams({ portamentoMode: 1 });
+    dsp.noteOn(48);
+    for (let index = 0; index < 511; index += 1) dsp.keyboardTrigger();
+    render(dsp, 256);
+    for (let batch = 1; batch < 8; batch += 1) {
+      for (let index = 0; index < 512; index += 1) dsp.keyboardTrigger();
+      render(dsp, 256);
+    }
+    expect(dsp.getDiagnostics()).toMatchObject({
+      pendingKeyboardTriggers: 4_096,
+      triggerCount: 0,
+    });
+
+    // The former compacting queue kept the newest retained pulse but moved
+    // its deadline earlier when a shorter revision-specific delay overflowed
+    // the cap. The circular schedule retains exactly that behavior.
+    dsp.setParams({ portamentoMode: 0 });
+    dsp.keyboardTrigger();
+    render(dsp, 1);
+    expect(dsp.getDiagnostics().pendingKeyboardTriggers).toBe(4_096);
+    render(dsp, 951);
+    expect(dsp.getDiagnostics().triggerCount).toBe(0);
+    render(dsp, 1);
+    expect(dsp.getDiagnostics().triggerCount).toBe(2);
+    render(dsp, 1_047);
+    expect(dsp.getDiagnostics().triggerCount).toBe(2_096);
+    render(dsp, 1);
+    // One normal pulse and the shortened retained tail share sample 8,097;
+    // the following internal sample contributes one more normal pulse.
+    expect(dsp.getDiagnostics().triggerCount).toBe(2_099);
+
+    dsp.allSoundOff();
+    expect(dsp.getDiagnostics().pendingKeyboardTriggers).toBe(0);
   });
 
   it("preserves bounded articulation order after the circular queue wraps", () => {

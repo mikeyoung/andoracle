@@ -898,6 +898,40 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
+  it("keeps parameter and performance caches isolated while merging startup updates", async () => {
+    const moduleLoad = deferred<void>();
+    installAudioFakes({ addModule: () => moduleLoad.promise });
+    const engine = new OdysseyAudioEngine();
+    const callerParams = { ...DEFAULT_PARAMS };
+    const callerPerformance = { bendSemitones: 3 };
+    const starting = engine.powerOn(callerParams);
+
+    engine.setParams({ vco1Fine: 0.25 });
+    engine.setParams({ delayMix: 0.8 });
+    engine.setPerformance(callerPerformance);
+    engine.setPerformance({ vibratoSemitones: 2 });
+
+    // Mutating either engine-owned cache must never mutate a caller's object.
+    expect(callerParams).toEqual(DEFAULT_PARAMS);
+    expect(callerPerformance).toEqual({ bendSemitones: 3 });
+
+    moduleLoad.resolve();
+    await starting;
+    const messages = workletNodes[0].port.postMessage.mock.calls.map(([message]) => message);
+    expect(messages).toContainEqual({
+      type: "params",
+      params: expect.objectContaining({
+        vco1Fine: 0.25,
+        delayMix: 0.8,
+      }),
+    });
+    expect(messages).toContainEqual({
+      type: "performance",
+      performance: { bendSemitones: 3, vibratoSemitones: 2 },
+    });
+    await engine.dispose();
+  });
+
   it("clears superseded power-down ramp timers across repeated power cycles", async () => {
     vi.useFakeTimers();
     const engine = new OdysseyAudioEngine();

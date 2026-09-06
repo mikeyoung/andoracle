@@ -20,6 +20,7 @@ import {
 import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
 import { SynthPanel } from "./components/SynthPanel";
 import { OperationCancellationRegistry } from "./cancellable-operation";
+import { ExclusiveOperationGuard } from "./exclusive-operation-guard";
 import {
   HOST_OPERATION_UI_TIMEOUT_MS,
   KeyedHostOperationGate,
@@ -268,7 +269,13 @@ function App() {
   const powerOperationRef = useRef(0);
   const externalInputOperationRef = useRef(0);
   const externalInputStartedPowerRef = useRef(false);
+  const externalInputCancellationGuardRef = useRef<ExclusiveOperationGuard | null>(null);
+  externalInputCancellationGuardRef.current ??= new ExclusiveOperationGuard();
+  const externalInputCancellationGuard = externalInputCancellationGuardRef.current;
   const midiOperationRef = useRef(0);
+  const midiCancellationGuardRef = useRef<ExclusiveOperationGuard | null>(null);
+  midiCancellationGuardRef.current ??= new ExclusiveOperationGuard();
+  const midiCancellationGuard = midiCancellationGuardRef.current;
   const shareBusyRef = useRef(false);
   const clipboardToastTimerRef = useRef<number | null>(null);
   const updateBusyRef = useRef(false);
@@ -544,7 +551,9 @@ function App() {
       powerOperationRef.current += 1;
       externalInputOperationRef.current += 1;
       externalInputStartedPowerRef.current = false;
+      externalInputCancellationGuard.invalidate();
       midiOperationRef.current += 1;
+      midiCancellationGuard.invalidate();
       externalInputEnabledRef.current = false;
       shareBusyRef.current = false;
       if (clipboardToastTimerRef.current !== null) {
@@ -573,7 +582,7 @@ function App() {
         void midiSessionRef.current?.dispose().catch(() => undefined);
       });
     };
-  }, [engine]);
+  }, [engine, externalInputCancellationGuard, midiCancellationGuard]);
 
   useEffect(() => {
     const beforeInstall = (event: Event): void => {
@@ -1598,27 +1607,35 @@ function App() {
   const toggleExternalInput = useCallback(async (): Promise<void> => {
     if (powerBusy) return;
     if (externalInputBusy) {
+      // The first busy-state tap cancels. Keep later taps from publishing an
+      // idle UI while that cancellation is still suspending its audio graph.
+      const cancellationLease = externalInputCancellationGuard.acquire();
+      if (cancellationLease === null) return;
       const operation = ++externalInputOperationRef.current;
       const shouldPowerOff = externalInputStartedPowerRef.current;
       externalInputStartedPowerRef.current = false;
-      engine.disableExternalInput();
-      externalInputEnabledRef.current = false;
-      if (shouldPowerOff) {
-        try {
-          await engine.powerOff();
-        } catch (error) {
-          if (!(error instanceof Error) || error.name !== "AbortError") {
-            if (mountedRef.current && operation === externalInputOperationRef.current) {
-              setNotice(error instanceof Error ? error.message : "Live input cancellation failed.");
+      try {
+        engine.disableExternalInput();
+        externalInputEnabledRef.current = false;
+        if (shouldPowerOff) {
+          try {
+            await engine.powerOff();
+          } catch (error) {
+            if (!(error instanceof Error) || error.name !== "AbortError") {
+              if (mountedRef.current && operation === externalInputOperationRef.current) {
+                setNotice(error instanceof Error ? error.message : "Live input cancellation failed.");
+              }
             }
           }
         }
+        if (!mountedRef.current || operation !== externalInputOperationRef.current) return;
+        setExternalInputEnabled(false);
+        setExternalInputBusy(false);
+        setExternalInputError(null);
+        setNotice("External audio connection cancelled.");
+      } finally {
+        externalInputCancellationGuard.release(cancellationLease);
       }
-      if (!mountedRef.current || operation !== externalInputOperationRef.current) return;
-      setExternalInputEnabled(false);
-      setExternalInputBusy(false);
-      setExternalInputError(null);
-      setNotice("External audio connection cancelled.");
       return;
     }
     if (externalInputEnabled) {
@@ -1685,6 +1702,7 @@ function App() {
   }, [
     engine,
     externalInputBusy,
+    externalInputCancellationGuard,
     externalInputEnabled,
     powerBusy,
     powered,
@@ -1837,6 +1855,10 @@ function App() {
   const toggleMidi = useCallback(async (): Promise<void> => {
     if (!midiAvailability.supported) return;
     if (midiBusy) {
+      // Closing a native MIDI port can take seconds. Do not allow another
+      // cancel tap to finish early and expose Connect over that pending close.
+      const cancellationLease = midiCancellationGuard.acquire();
+      if (cancellationLease === null) return;
       const operation = ++midiOperationRef.current;
       setNotice("Cancelling MIDI operation…");
       try {
@@ -1849,6 +1871,7 @@ function App() {
         if (!mountedRef.current || operation !== midiOperationRef.current) return;
         setMidiError(error instanceof Error ? error.message : "MIDI operation could not be cancelled.");
       } finally {
+        midiCancellationGuard.release(cancellationLease);
         if (mountedRef.current && operation === midiOperationRef.current) setMidiBusy(false);
       }
       return;
@@ -1884,7 +1907,7 @@ function App() {
     } finally {
       if (mountedRef.current && operation === midiOperationRef.current) setMidiBusy(false);
     }
-  }, [midiAvailability.supported, midiBusy, midiEnabled]);
+  }, [midiAvailability.supported, midiBusy, midiCancellationGuard, midiEnabled]);
 
   const refreshMidi = useCallback(async (): Promise<void> => {
     if (midiBusy) return;

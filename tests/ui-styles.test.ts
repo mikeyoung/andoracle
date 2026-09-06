@@ -112,7 +112,13 @@ describe("synth control styling", () => {
 
     expect(styles).toMatch(/\.library-deck\s*\{[\s\S]*?display:\s*grid;[\s\S]*?min-width:\s*0;[\s\S]*?\}/);
     expect(styles).toMatch(
-      /\.utility-strip,\s*\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*minmax\(190px, 0\.55fr\) minmax\(0, 1\.45fr\);[\s\S]*?\}/,
+      /\.utility-strip,\s*\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?display:\s*grid;[\s\S]*?min-width:\s*0;[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /\.utility-strip,\s*\.patch-strip\s*\{[\s\S]*?grid-template-columns:\s*minmax\(190px, 0\.55fr\) minmax\(0, 1\.45fr\);[\s\S]*?\}/,
+    );
+    expect(styles).toMatch(
+      /\.sequence-strip\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.sequence-record-button,\s*\.sequence-play-button,\s*\.sequence-pause-button,\s*\.sequence-stop-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?\}/,
@@ -131,7 +137,14 @@ describe("synth control styling", () => {
       /\.patch-actions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /@media \(max-width:\s*440px\)[\s\S]*?\.utility-actions\s*\{[\s\S]*?repeat\(3, minmax\(0, 1fr\)\);[\s\S]*?\.patch-actions\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\.sequence-actions\s*\{[\s\S]*?repeat\(5, minmax\(0, 1fr\)\);/,
+      /@media \(max-width:\s*440px\)[\s\S]*?\.utility-actions\s*\{[\s\S]*?repeat\(3, minmax\(0, 1fr\)\);[\s\S]*?\.patch-actions\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\.sequence-actions\s*\{[\s\S]*?repeat\(5, minmax\(44px, 1fr\)\);/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*300px\)\s*\{[\s\S]*?\.sequence-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
+    );
+    expect(styles).not.toMatch(/\.sequence-actions\s*\{[^}]*repeat\((?:auto-fit|auto-fill),/);
+    expect(styles.indexOf("@media (max-width: 300px)")).toBeGreaterThan(
+      styles.indexOf("@media (max-width: 440px)"),
     );
     expect(styles).toMatch(
       /@media \(max-width:\s*260px\)[\s\S]*?\.utility-actions,\s*\.patch-actions,\s*\.sequence-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,

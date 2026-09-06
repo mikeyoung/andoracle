@@ -264,13 +264,18 @@ export class WebMidiSession {
     value: number,
     emit: (normalized: number) => void,
   ): void {
-    this.controllerOrder += 1;
-    values.set(this.controllerLane(inputId, channel), {
-      inputId,
-      channel,
-      value,
-      order: this.controllerOrder,
-    });
+    const lane = this.controllerLane(inputId, channel);
+    const order = ++this.controllerOrder;
+    const current = values.get(lane);
+    if (current) {
+      // Wheel reports can arrive hundreds of times per second. Each lane owns
+      // its record, so reuse it while still advancing recency for unplug
+      // fallback semantics.
+      current.value = value;
+      current.order = order;
+    } else {
+      values.set(lane, { inputId, channel, value, order });
+    }
     emit(value);
   }
 

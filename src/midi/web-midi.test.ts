@@ -766,4 +766,31 @@ describe("Web MIDI decoding", () => {
     expect(handlers.modulation).toHaveBeenLastCalledWith(32 / 127);
     await session.disconnect();
   });
+
+  it("refreshes controller-lane recency even when a wheel repeats its value", async () => {
+    const first = new FakeMidiInput("first-repeat", "First Repeat Keys");
+    const second = new FakeMidiInput("second-repeat", "Second Repeat Keys");
+    const access = new FakeMidiAccess();
+    access.inputs.set(first.id, first as unknown as MIDIInput);
+    access.inputs.set(second.id, second as unknown as MIDIInput);
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", {
+      requestMIDIAccess: vi.fn(async () => access as unknown as MIDIAccess),
+    });
+    const handlers = makeHandlers();
+    const session = new WebMidiSession(handlers);
+    await session.connect();
+
+    first.emit([0xe0, 0x00, 0x20]);
+    second.emit([0xe0, 0x00, 0x60]);
+    // Repeating the first lane's unchanged value still makes it the active
+    // fallback when the other input is removed.
+    first.emit([0xe0, 0x00, 0x20]);
+    second.state = "disconnected";
+    access.dispatchEvent(new Event("statechange"));
+    await Promise.resolve();
+
+    expect(handlers.pitchBend).toHaveBeenLastCalledWith(-0.5);
+    await session.disconnect();
+  });
 });
