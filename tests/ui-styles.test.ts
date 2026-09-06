@@ -96,13 +96,14 @@ describe("synth control styling", () => {
     expect(styles).not.toMatch(/overflow-x:\s*auto/);
     expect(styles).toMatch(/\.signal-flow\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?\}/);
     expect(styles).toMatch(/\.control-bank\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?\}/);
-    expect(styles.match(/\.keyboard-banks\s*\{/g)).toHaveLength(2);
+    expect(styles.match(/\.keyboard-banks\s*\{/g)).toHaveLength(3);
     expect(styles).toMatch(/\.keyboard-banks\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*?grid-template-rows:\s*224px;[\s\S]*?overflow:\s*hidden;[\s\S]*?\}/);
     expect(styles).toMatch(/\.keyboard-surface\s*\{[\s\S]*?display:\s*contents;[\s\S]*?\}/);
     expect(styles).toMatch(/\.piano-key--white\s*\{[\s\S]*?height:\s*218px;[\s\S]*?\}/);
     expect(styles).toMatch(/\.piano-key--black\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?height:\s*139px;[\s\S]*?\}/);
-    expect(styles).toMatch(/@media \(max-width:\s*960px\)\s*\{[\s\S]*?\.keyboard-banks\s*\{[\s\S]*?grid-template-rows:\s*repeat\(3, 144px\);[\s\S]*?\.keyboard-surface\s*\{[\s\S]*?display:\s*block;[\s\S]*?grid-area:\s*auto;[\s\S]*?height:\s*144px;/);
-    expect(styles).toMatch(/\.piano-key\s*\{[\s\S]*?left:\s*var\(--mobile-key-left\);[\s\S]*?width:\s*var\(--mobile-key-width\);/);
+    expect(styles).toMatch(/@media \(max-width:\s*599\.98px\)\s*\{[\s\S]*?\.keyboard-banks\s*\{[\s\S]*?grid-template-rows:\s*repeat\(2, 144px\);[\s\S]*?\.keyboard-surface\s*\{[\s\S]*?display:\s*block;[\s\S]*?grid-area:\s*auto;[\s\S]*?height:\s*144px;/);
+    expect(styles).toMatch(/\.piano-key\s*\{[\s\S]*?left:\s*var\(--two-row-key-left\);[\s\S]*?width:\s*var\(--two-row-key-width\);/);
+    expect(styles).toMatch(/@media \(max-width:\s*480px\)\s*\{[\s\S]*?\.keyboard-banks\s*\{[\s\S]*?grid-template-rows:\s*repeat\(3, 144px\);[\s\S]*?\.piano-key\s*\{[\s\S]*?left:\s*var\(--three-row-key-left\);[\s\S]*?width:\s*var\(--three-row-key-width\);/);
     expect(styles).toMatch(/\.status-deck\s*\{[\s\S]*?repeat\(auto-fit, minmax\(min\(112px, 100%\), 1fr\)\);[\s\S]*?\}/);
   });
 
@@ -111,22 +112,29 @@ describe("synth control styling", () => {
 
     expect(styles).toMatch(/\.library-deck\s*\{[\s\S]*?display:\s*grid;[\s\S]*?min-width:\s*0;[\s\S]*?\}/);
     expect(styles).toMatch(
-      /\.patch-strip,\s*\.sequence-strip,\s*\.power-strip\s*\{[\s\S]*?flex-wrap:\s*wrap;[\s\S]*?\}/,
+      /\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*minmax\(190px, 0\.55fr\) minmax\(0, 1\.45fr\);[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.sequence-record-button,\s*\.sequence-play-button,\s*\.sequence-pause-button,\s*\.sequence-stop-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?\}/,
     );
+    expect(styles).toMatch(/\.sequence-actions\s*\{[\s\S]*?minmax\(92px, 1fr\) repeat\(4, 44px\);[\s\S]*?\}/);
+    expect(styles).toMatch(/\.sequence-icon-button\s*\{[\s\S]*?width:\s*44px;[\s\S]*?min-width:\s*44px;[\s\S]*?\}/);
+    expect(styles).toMatch(/\.sequence-icon-button i\s*\{[\s\S]*?width:\s*16px;[\s\S]*?height:\s*16px;[\s\S]*?\}/);
+    expect(styles).toMatch(/\.sequence-delete-button svg\s*\{[\s\S]*?width:\s*18px;[\s\S]*?stroke:\s*currentColor;[\s\S]*?\}/);
     expect(styles).toMatch(/\.sequence-pause-button i\s*\{[\s\S]*?linear-gradient/);
     expect(styles).toMatch(/\.sequence-pause-button\.is-active:disabled\s*\{[\s\S]*?opacity:\s*1;[\s\S]*?filter:\s*none;/);
     expect(styles).toMatch(/\.sequence-stop-button i\s*\{[\s\S]*?border-radius/);
     expect(styles).toMatch(
-      /@media \(max-width:\s*700px\)[\s\S]*?\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\}/,
+      /\.patch-actions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\);[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.patch-strip select,\s*\.sequence-strip select\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?\}/,
+      /\.patch-actions > \.button:nth-child\(-n \+ 4\)\s*\{[\s\S]*?grid-column:\s*span 3;[\s\S]*?\}[\s\S]*?\.patch-actions > \.button:nth-child\(n \+ 5\)\s*\{[\s\S]*?grid-column:\s*span 4;/,
     );
     expect(styles).toMatch(
-      /@media \(max-width:\s*260px\)[\s\S]*?\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);[\s\S]*?\}/,
+      /@media \(max-width:\s*440px\)[\s\S]*?\.patch-actions\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\.patch-actions > \.button:last-child\s*\{[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?\.sequence-actions\s*\{[\s\S]*?repeat\(4, minmax\(0, 1fr\)\);/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width:\s*260px\)[\s\S]*?\.patch-actions,\s*\.sequence-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
     );
   });
 

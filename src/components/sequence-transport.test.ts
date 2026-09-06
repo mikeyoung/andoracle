@@ -25,6 +25,11 @@ const buttonTag = (markup: string, label: string): string => {
   return markup.match(new RegExp(`<button[^>]*aria-label="${escaped}"[^>]*>`))?.[0] ?? "";
 };
 
+const buttonMarkup = (markup: string, label: string): string => {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return markup.match(new RegExp(`<button[^>]*aria-label="${escaped}"[^>]*>[\\s\\S]*?</button>`))?.[0] ?? "";
+};
+
 describe("SequenceTransport", () => {
   it("always renders labelled Record, Play, Pause, Stop, and Delete controls", () => {
     const markup = renderTransport();
@@ -32,11 +37,29 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('<label for="sequence-select">Sequence</label>');
     expect(markup).toContain('id="sequence-select"');
     expect(markup).toContain('aria-label="Start recording" aria-pressed="false"');
-    expect(markup).toContain('aria-label="Play loaded sequence" aria-pressed="false" disabled=""');
-    expect(markup).toContain('aria-label="Pause sequence" aria-pressed="false" disabled=""');
-    expect(markup).toContain('aria-label="Stop sequence and return to beginning" disabled=""');
-    expect(markup).toContain('aria-label="Delete active recording" aria-haspopup="dialog" disabled=""');
+    expect(buttonTag(markup, "Play loaded sequence")).toContain('aria-pressed="false"');
+    expect(buttonTag(markup, "Play loaded sequence")).toContain("disabled");
+    expect(buttonTag(markup, "Pause sequence")).toContain('aria-pressed="false"');
+    expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
+    expect(buttonTag(markup, "Stop sequence and return to beginning")).toContain("disabled");
+    expect(buttonTag(markup, "Delete active recording")).toContain('aria-haspopup="dialog"');
+    expect(buttonTag(markup, "Delete active recording")).toContain("disabled");
     expect(markup).toContain("No sequences");
+  });
+
+  it("uses icon-only Play, Pause, Stop, and trash controls with accessible names", () => {
+    const markup = renderTransport();
+    const play = buttonMarkup(markup, "Play loaded sequence");
+    const pause = buttonMarkup(markup, "Pause sequence");
+    const stop = buttonMarkup(markup, "Stop sequence and return to beginning");
+    const remove = buttonMarkup(markup, "Delete active recording");
+
+    expect(play).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
+    expect(pause).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
+    expect(stop).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
+    expect(remove).toContain('<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">');
+    expect(remove).not.toMatch(/>\s*Delete\s*</);
+    expect(markup).toContain("Record</button>");
   });
 
   it("renders saved names without colliding with the empty sentinel", () => {
@@ -59,9 +82,11 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('sequence-record-button is-active');
     expect(markup).toContain('aria-label="Stop recording" aria-pressed="true"');
     expect(markup).toContain("Stop record");
-    expect(markup).toContain('aria-label="Play loaded sequence" aria-pressed="false" disabled=""');
-    expect(markup).toContain('aria-label="Pause sequence" aria-pressed="false" disabled=""');
-    expect(markup).toContain('aria-label="Stop sequence and return to beginning" disabled=""');
+    expect(buttonTag(markup, "Play loaded sequence")).toContain('aria-pressed="false"');
+    expect(buttonTag(markup, "Play loaded sequence")).toContain("disabled");
+    expect(buttonTag(markup, "Pause sequence")).toContain('aria-pressed="false"');
+    expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
+    expect(buttonTag(markup, "Stop sequence and return to beginning")).toContain("disabled");
     expect(buttonTag(markup, "Delete active recording")).toContain("disabled");
   });
 
@@ -99,7 +124,8 @@ describe("SequenceTransport", () => {
     expect(buttonTag(markup, "Resume sequence")).not.toContain("disabled");
     expect(markup).toContain('sequence-pause-button is-active');
     expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
-    expect(markup).toContain('aria-label="Pause sequence" aria-pressed="true" disabled=""');
+    expect(buttonTag(markup, "Pause sequence")).toContain('aria-pressed="true"');
+    expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
     expect(buttonTag(markup, "Stop sequence and return to beginning")).not.toContain("disabled");
     expect(buttonTag(markup, "Delete active recording")).not.toContain("disabled");
   });

@@ -188,7 +188,14 @@ input:focus-visible,
 }
 
 .patch-strip,
-.sequence-strip,
+.sequence-strip {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.55fr) minmax(0, 1.45fr);
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
 .power-strip {
   display: flex;
   min-width: 0;
@@ -197,9 +204,39 @@ input:focus-visible,
   gap: 8px;
 }
 
-.patch-strip,
-.sequence-strip {
+.library-picker {
+  display: flex;
   min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-picker select {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.library-actions {
+  display: grid;
+  min-width: 0;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.patch-actions {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.patch-actions > .button:nth-child(-n + 4) {
+  grid-column: span 3;
+}
+
+.patch-actions > .button:nth-child(n + 5) {
+  grid-column: span 4;
+}
+
+.sequence-actions {
+  grid-template-columns: minmax(92px, 1fr) repeat(4, 44px);
 }
 
 .patch-strip .button,
@@ -249,6 +286,12 @@ input:focus-visible,
   gap: 8px;
 }
 
+.sequence-icon-button {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+}
+
 .sequence-record-button i,
 .sequence-play-button i,
 .sequence-pause-button i,
@@ -259,6 +302,11 @@ input:focus-visible,
   border: 1px solid #171717;
   background: #515151;
   box-shadow: inset 1px 1px rgba(255, 255, 255, 0.13);
+}
+
+.sequence-icon-button i {
+  width: 16px;
+  height: 16px;
 }
 
 .sequence-record-button i {
@@ -276,6 +324,16 @@ input:focus-visible,
 
 .sequence-stop-button i {
   border-radius: 1px;
+}
+
+.sequence-delete-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .sequence-record-button.is-active {
@@ -1580,9 +1638,9 @@ kbd {
 .dot--low { background: #4b4b4b; }
 .dot--high { background: #b3b3b3; }
 
-@media (max-width: 960px) {
+@media (max-width: 599.98px) {
   .keyboard-banks {
-    grid-template-rows: repeat(3, 144px);
+    grid-template-rows: repeat(2, 144px);
     gap: 6px;
     padding: 6px 0;
   }
@@ -1601,9 +1659,19 @@ kbd {
     user-select: none;
   }
 
+  .keyboard-surface:nth-child(-n + 2) {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .keyboard-surface:nth-child(3) {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
   .piano-key {
-    left: var(--mobile-key-left);
-    width: var(--mobile-key-width);
+    left: var(--two-row-key-left);
+    width: var(--two-row-key-width);
   }
 
   .piano-key--white {
@@ -1618,6 +1686,22 @@ kbd {
     right: auto;
     left: 3px;
     transform: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .keyboard-banks {
+    grid-template-rows: repeat(3, 144px);
+  }
+
+  .keyboard-surface:nth-child(n) {
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .piano-key {
+    left: var(--three-row-key-left);
+    width: var(--three-row-key-width);
   }
 }
 
@@ -2398,25 +2482,53 @@ footer span {
   .patch-strip,
   .sequence-strip {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
 
-  .patch-strip select,
-  .sequence-strip select {
-    width: 100%;
-    min-width: 0;
-    grid-column: 1 / -1;
+  .library-picker {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .patch-strip .button,
-  .sequence-strip .button {
+  .library-picker select {
+    width: 100%;
+    min-width: 0;
+    grid-column: auto;
+  }
+
+  .library-actions {
     width: 100%;
     min-width: 0;
   }
 }
 
-@media (max-width: 360px) {
+@media (max-width: 440px) {
+  .patch-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .patch-actions > .button:nth-child(n) {
+    grid-column: auto;
+  }
+
+  .patch-actions > .button:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .sequence-actions {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .sequence-record-button {
+    grid-column: 1 / -1;
+  }
+
+  .sequence-icon-button {
+    width: 100%;
+    min-width: 0;
+  }
+
   .sequence-review-actions {
     flex-direction: column;
   }
@@ -2432,6 +2544,21 @@ footer span {
   .patch-strip,
   .sequence-strip {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .patch-actions,
+  .sequence-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .patch-actions > .button:nth-child(n),
+  .patch-actions > .button:last-child,
+  .sequence-record-button {
+    grid-column: auto;
+  }
+
+  .sequence-icon-button {
+    width: 100%;
   }
 
   .patch-strip select,
@@ -2450,6 +2577,18 @@ footer span {
   .direct-entry h2 {
     font-size: 17px;
     letter-spacing: 0.01em;
+  }
+}
+
+/* Use one deliberate row only where all seven patch actions have enough room.
+   The intermediate desktop range keeps the balanced four-plus-three grid. */
+@media (min-width: 1000px) and (max-width: 1180px), (min-width: 1530px) {
+  .patch-actions {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .patch-actions > .button:nth-child(n) {
+    grid-column: auto;
   }
 }
 

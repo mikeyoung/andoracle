@@ -89,7 +89,7 @@ describe("on-screen keyboard interaction contracts", () => {
     expect(markup).not.toContain("Scrollable on-screen keyboard");
   });
 
-  it("partitions mobile keys into two octaves and one octave plus the final C", () => {
+  it("partitions compact keys into octaves that can form centered two- or three-row layouts", () => {
     const mobileRows = [
       createKeyboardRowGeometry(36, 47),
       createKeyboardRowGeometry(48, 59),
@@ -104,6 +104,26 @@ describe("on-screen keyboard interaction contracts", () => {
     expect(mobileRows.flatMap((row) => row.keys).map((key) => key.note)).toEqual(
       Array.from({ length: 37 }, (_, index) => 36 + index),
     );
+
+    const markup = renderToStaticMarkup(createElement(Keyboard, {
+      activeNotes: new Set<number>(),
+      allocatedLow: null,
+      allocatedHigh: null,
+      resetEpoch: 0,
+      onNoteOn: vi.fn(),
+      onNoteOff: vi.fn(),
+    }));
+    const secondOctaveStart = markup.match(/style="[^"]*--two-row-key-left:([^%;]+)%[^"]*" data-note="48"/);
+    const lowerRowStart = markup.match(/style="[^"]*--two-row-key-left:([^%;]+)%[^"]*" data-note="60"/);
+    const lowerRowEnd = markup.match(/style="[^"]*--two-row-key-left:([^%;]+)%;--two-row-key-width:([^%;]+)%[^"]*" data-note="72"/);
+    const threeRowStarts = [36, 48, 60].map((note) => (
+      markup.match(new RegExp(`style="[^"]*--three-row-key-left:([^%;]+)%[^"]*" data-note="${note}"`))
+    ));
+
+    expect(Number(secondOctaveStart?.[1])).toBeCloseTo(50, 6);
+    expect(Number(lowerRowStart?.[1])).toBeCloseTo((3 / 14) * 100, 6);
+    expect(Number(lowerRowEnd?.[1]) + Number(lowerRowEnd?.[2])).toBeCloseTo((11 / 14) * 100, 6);
+    expect(threeRowStarts.map((match) => Number(match?.[1]))).toEqual([0, 0, 0]);
   });
 
   it("focuses a pointer-struck piano key without scrolling the page", () => {

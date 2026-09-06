@@ -45,90 +45,97 @@ export function SequenceTransport({
 
   return (
     <div className="sequence-strip" role="group" aria-label="Sequence transport">
-      <label htmlFor="sequence-select">Sequence</label>
-      <select
-        id="sequence-select"
-        aria-label="Sequence"
-        value={activeName ?? ""}
-        disabled={recording}
-        onPointerDown={() => {
-          selectInteractionModality.current = "pointer";
-        }}
-        onKeyDown={() => {
-          selectInteractionModality.current = "keyboard";
-        }}
-        onChange={(event) => {
-          onSelect(event.target.value);
-          selectFocusRelease.current?.finish(
-            event.currentTarget,
-            selectInteractionModality.current,
-          );
-          selectInteractionModality.current = "keyboard";
-        }}
-      >
-        <option value="">{sequenceNames.length > 0 ? "None loaded" : "No sequences"}</option>
-        {sequenceNames.map((name) => <option key={name} value={name}>{name}</option>)}
-      </select>
-      <button
-        ref={recordButtonRef}
-        type="button"
-        className={`button sequence-record-button${recording ? " is-active" : ""}`}
-        aria-label={recording ? "Stop recording" : "Start recording"}
-        aria-pressed={recording}
-        onClick={onRecord}
-      >
-        <i aria-hidden="true" />
-        {recording ? "Stop record" : "Record"}
-      </button>
-      <button
-        ref={playButtonRef}
-        type="button"
-        className={`button sequence-play-button${playing ? " is-active" : ""}`}
-        aria-label={paused ? "Resume sequence" : "Play loaded sequence"}
-        aria-pressed={playing}
-        disabled={!activeName || recording || playing}
-        onClick={onPlay}
-      >
-        <i aria-hidden="true" />
-        {paused ? "Resume" : "Play"}
-      </button>
-      <button
-        type="button"
-        className={`button sequence-pause-button${paused ? " is-active" : ""}`}
-        aria-label="Pause sequence"
-        aria-pressed={paused}
-        disabled={!activeName || recording || !playing}
-        onClick={() => {
-          onPause();
-          returnFocusToPlay();
-        }}
-      >
-        <i aria-hidden="true" />
-        Pause
-      </button>
-      <button
-        type="button"
-        className="button sequence-stop-button"
-        aria-label="Stop sequence and return to beginning"
-        disabled={!activeName || recording || !playbackActive}
-        onClick={() => {
-          onStop();
-          returnFocusToPlay();
-        }}
-      >
-        <i aria-hidden="true" />
-        Stop
-      </button>
-      <button
-        type="button"
-        className="button button--danger sequence-delete-button"
-        aria-label="Delete active recording"
-        aria-haspopup="dialog"
-        disabled={!activeName || recording}
-        onClick={(event) => onDelete(event.currentTarget)}
-      >
-        Delete
-      </button>
+      <div className="library-picker sequence-picker">
+        <label htmlFor="sequence-select">Sequence</label>
+        <select
+          id="sequence-select"
+          aria-label="Sequence"
+          value={activeName ?? ""}
+          disabled={recording}
+          onPointerDown={() => {
+            selectInteractionModality.current = "pointer";
+          }}
+          onKeyDown={() => {
+            selectInteractionModality.current = "keyboard";
+          }}
+          onChange={(event) => {
+            onSelect(event.target.value);
+            selectFocusRelease.current?.finish(
+              event.currentTarget,
+              selectInteractionModality.current,
+            );
+            selectInteractionModality.current = "keyboard";
+          }}
+        >
+          <option value="">{sequenceNames.length > 0 ? "None loaded" : "No sequences"}</option>
+          {sequenceNames.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+      </div>
+      <div className="library-actions sequence-actions">
+        <button
+          ref={recordButtonRef}
+          type="button"
+          className={`button sequence-record-button${recording ? " is-active" : ""}`}
+          aria-label={recording ? "Stop recording" : "Start recording"}
+          aria-pressed={recording}
+          onClick={onRecord}
+        >
+          <i aria-hidden="true" />
+          {recording ? "Stop record" : "Record"}
+        </button>
+        <button
+          ref={playButtonRef}
+          type="button"
+          className={`button sequence-icon-button sequence-play-button${playing ? " is-active" : ""}`}
+          aria-label={paused ? "Resume sequence" : "Play loaded sequence"}
+          title={paused ? "Resume sequence" : "Play loaded sequence"}
+          aria-pressed={playing}
+          disabled={!activeName || recording || playing}
+          onClick={onPlay}
+        >
+          <i aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className={`button sequence-icon-button sequence-pause-button${paused ? " is-active" : ""}`}
+          aria-label="Pause sequence"
+          title="Pause sequence"
+          aria-pressed={paused}
+          disabled={!activeName || recording || !playing}
+          onClick={() => {
+            onPause();
+            returnFocusToPlay();
+          }}
+        >
+          <i aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="button sequence-icon-button sequence-stop-button"
+          aria-label="Stop sequence and return to beginning"
+          title="Stop sequence and return to beginning"
+          disabled={!activeName || recording || !playbackActive}
+          onClick={() => {
+            onStop();
+            returnFocusToPlay();
+          }}
+        >
+          <i aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="button button--danger sequence-icon-button sequence-delete-button"
+          aria-label="Delete active recording"
+          title="Delete active recording"
+          aria-haspopup="dialog"
+          disabled={!activeName || recording}
+          onClick={(event) => onDelete(event.currentTarget)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

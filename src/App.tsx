@@ -2043,71 +2043,75 @@ function App() {
         </div>
         <div className="library-deck">
           <div className="patch-strip">
-            <label htmlFor="preset">Patch</label>
-            <PatchSelector
-              userPatches={userPatches}
-              activeUserPatchName={activeUserPatchName}
-              selectedFactoryName={presetName}
-              onSelectUserPatch={(name) => {
-                const error = loadNamedPatch(name);
-                if (error) setNotice(error);
-              }}
-              onSelectFactoryPatch={applyPatch}
-            />
-            <button
-              type="button"
-              className="button button--quiet"
-              aria-haspopup="dialog"
-              onClick={(event) => openPatchLibrary("save", event.currentTarget)}
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              className="button button--quiet"
-              aria-haspopup="dialog"
-              onClick={(event) => openPatchLibrary("load", event.currentTarget)}
-            >
-              Load
-            </button>
-            <button
-              type="button"
-              className="button button--danger"
-              aria-label="Delete active user patch"
-              aria-haspopup="dialog"
-              disabled={!activeUserPatchName || sequenceRecording}
-              title={activeUserPatchName
-                ? sequenceRecording
-                  ? "Stop and save or discard the current recording before deleting a patch"
-                  : `Delete saved patch ${activeUserPatchName}`
-                : "Built-in and unsaved patches cannot be deleted or modified"}
-              onClick={(event) => openActivePatchDeletion(event.currentTarget)}
-            >
-              Delete
-            </button>
-            <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
-            <button type="button" className="button button--danger" onClick={panic}>All notes off</button>
-            <button
-              type="button"
-              className="button button--quiet help-button"
-              aria-haspopup="dialog"
-              onClick={(event) => {
-                setDirectEditor(null);
-                setPatchLibraryDialog(null);
-                revokeActiveLibraryDeletion("Help replaced the deletion dialog.");
-                setHelpDialogOrigin(event.currentTarget);
-              }}
-            >
-              Help
-            </button>
-            <button
-              type="button"
-              className="button button--quiet share-button"
-              disabled={shareBusy}
-              onClick={() => void sharePatch()}
-            >
-              {shareBusy ? "Sharing…" : "Share Patch"}
-            </button>
+            <div className="library-picker patch-picker">
+              <label htmlFor="preset">Patch</label>
+              <PatchSelector
+                userPatches={userPatches}
+                activeUserPatchName={activeUserPatchName}
+                selectedFactoryName={presetName}
+                onSelectUserPatch={(name) => {
+                  const error = loadNamedPatch(name);
+                  if (error) setNotice(error);
+                }}
+                onSelectFactoryPatch={applyPatch}
+              />
+            </div>
+            <div className="library-actions patch-actions">
+              <button
+                type="button"
+                className="button button--quiet"
+                aria-haspopup="dialog"
+                onClick={(event) => openPatchLibrary("save", event.currentTarget)}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="button button--quiet"
+                aria-haspopup="dialog"
+                onClick={(event) => openPatchLibrary("load", event.currentTarget)}
+              >
+                Load
+              </button>
+              <button
+                type="button"
+                className="button button--danger"
+                aria-label="Delete active user patch"
+                aria-haspopup="dialog"
+                disabled={!activeUserPatchName || sequenceRecording}
+                title={activeUserPatchName
+                  ? sequenceRecording
+                    ? "Stop and save or discard the current recording before deleting a patch"
+                    : `Delete saved patch ${activeUserPatchName}`
+                  : "Built-in and unsaved patches cannot be deleted or modified"}
+                onClick={(event) => openActivePatchDeletion(event.currentTarget)}
+              >
+                Delete
+              </button>
+              <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
+              <button type="button" className="button button--danger" onClick={panic}>All notes off</button>
+              <button
+                type="button"
+                className="button button--quiet help-button"
+                aria-haspopup="dialog"
+                onClick={(event) => {
+                  setDirectEditor(null);
+                  setPatchLibraryDialog(null);
+                  revokeActiveLibraryDeletion("Help replaced the deletion dialog.");
+                  setHelpDialogOrigin(event.currentTarget);
+                }}
+              >
+                Help
+              </button>
+              <button
+                type="button"
+                className="button button--quiet share-button"
+                disabled={shareBusy}
+                onClick={() => void sharePatch()}
+              >
+                {shareBusy ? "Sharing…" : "Share Patch"}
+              </button>
+            </div>
           </div>
           <SequenceTransport
             sequenceNames={userSequences.map((sequence) => sequence.name)}

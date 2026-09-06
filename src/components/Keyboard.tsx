@@ -99,7 +99,8 @@ export const createKeyboardRowGeometry = (startNote: number, endNote: number): K
 
 const KEYBOARD_GEOMETRY = createKeyboardRowGeometry(START_NOTE, END_NOTE);
 const KEYBOARD_GLOBAL_KEYS = new Map(KEYBOARD_GEOMETRY.keys.map((key) => [key.note, key]));
-const MOBILE_KEYBOARD_WHITE_COLUMNS = 8;
+const TWO_ROW_KEYBOARD_WHITE_COLUMNS = 14;
+const THREE_ROW_KEYBOARD_WHITE_COLUMNS = 8;
 const MOBILE_BLACK_KEY_WIDTH = 0.8;
 const MOBILE_KEYBOARD_ROWS = [
   createKeyboardRowGeometry(36, 47),
@@ -329,15 +330,18 @@ function KeyboardComponent({
               const high = allocatedHigh === key.note;
               const width = key.white ? 1 : BLACK_KEY_WIDTH;
               const mobileWidth = key.white ? 1 : MOBILE_BLACK_KEY_WIDTH;
-              const mobileLeft = key.white
+              const localMobileLeft = key.white
                 ? key.left
                 : key.left + (BLACK_KEY_WIDTH - MOBILE_BLACK_KEY_WIDTH) / 2;
+              const twoRowOffset = rowIndex === 0 ? 0 : rowIndex === 1 ? 7 : 3;
               const desktopKey = KEYBOARD_GLOBAL_KEYS.get(key.note)!;
               const style = {
                 "--desktop-key-left": `${(desktopKey.left / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
                 "--desktop-key-width": `${(width / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
-                "--mobile-key-left": `${(mobileLeft / MOBILE_KEYBOARD_WHITE_COLUMNS) * 100}%`,
-                "--mobile-key-width": `${(mobileWidth / MOBILE_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+                "--two-row-key-left": `${((twoRowOffset + localMobileLeft) / TWO_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+                "--two-row-key-width": `${(mobileWidth / TWO_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+                "--three-row-key-left": `${(localMobileLeft / THREE_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+                "--three-row-key-width": `${(mobileWidth / THREE_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
               } as CSSProperties;
               return (
                 <button
