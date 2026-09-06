@@ -117,7 +117,7 @@ describe("synth control styling", () => {
     expect(styles).toMatch(
       /\.sequence-record-button,\s*\.sequence-play-button,\s*\.sequence-pause-button,\s*\.sequence-stop-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?\}/,
     );
-    expect(styles).toMatch(/\.sequence-actions\s*\{[\s\S]*?minmax\(92px, 1fr\) repeat\(4, 44px\);[\s\S]*?\}/);
+    expect(styles).toMatch(/\.sequence-actions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(5, 44px\);[\s\S]*?justify-content:\s*end;[\s\S]*?\}/);
     expect(styles).toMatch(/\.sequence-icon-button\s*\{[\s\S]*?width:\s*44px;[\s\S]*?min-width:\s*44px;[\s\S]*?\}/);
     expect(styles).toMatch(/\.sequence-icon-button i\s*\{[\s\S]*?width:\s*16px;[\s\S]*?height:\s*16px;[\s\S]*?\}/);
     expect(styles).toMatch(/\.sequence-delete-button svg\s*\{[\s\S]*?width:\s*18px;[\s\S]*?stroke:\s*currentColor;[\s\S]*?\}/);
@@ -131,7 +131,7 @@ describe("synth control styling", () => {
       /\.patch-actions > \.button:nth-child\(-n \+ 4\)\s*\{[\s\S]*?grid-column:\s*span 3;[\s\S]*?\}[\s\S]*?\.patch-actions > \.button:nth-child\(n \+ 5\)\s*\{[\s\S]*?grid-column:\s*span 4;/,
     );
     expect(styles).toMatch(
-      /@media \(max-width:\s*440px\)[\s\S]*?\.patch-actions\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\.patch-actions > \.button:last-child\s*\{[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?\.sequence-actions\s*\{[\s\S]*?repeat\(4, minmax\(0, 1fr\)\);/,
+      /@media \(max-width:\s*440px\)[\s\S]*?\.patch-actions\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\.patch-actions > \.button:last-child\s*\{[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?\.sequence-actions\s*\{[\s\S]*?repeat\(5, minmax\(0, 1fr\)\);/,
     );
     expect(styles).toMatch(
       /@media \(max-width:\s*260px\)[\s\S]*?\.patch-actions,\s*\.sequence-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,

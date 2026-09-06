@@ -75,13 +75,13 @@ export function SequenceTransport({
         <button
           ref={recordButtonRef}
           type="button"
-          className={`button sequence-record-button${recording ? " is-active" : ""}`}
+          className={`button sequence-icon-button sequence-record-button${recording ? " is-active" : ""}`}
           aria-label={recording ? "Stop recording" : "Start recording"}
+          title={recording ? "Stop recording" : "Start recording"}
           aria-pressed={recording}
           onClick={onRecord}
         >
           <i aria-hidden="true" />
-          {recording ? "Stop record" : "Record"}
         </button>
         <button
           ref={playButtonRef}

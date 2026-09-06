@@ -45,6 +45,7 @@ describe("panel screw coverage", () => {
     expect(overlay).toMatch(/inset:\s*0/);
     expect(overlay).toMatch(/z-index:\s*4/);
     expect(overlay).toMatch(/pointer-events:\s*none/);
+    expect(overlay).toMatch(/--panel-screw-offset:\s*5px/);
     expect(styles).toContain(".module > :not(.panel-screws)");
     const moduleStart = styles.indexOf(".module {");
     const moduleEnd = styles.indexOf("\n}", moduleStart);
@@ -55,9 +56,26 @@ describe("panel screw coverage", () => {
       const end = styles.indexOf("}", start);
       const rule = styles.slice(start, end);
       expect(start).toBeGreaterThanOrEqual(0);
-      expect(rule).toMatch(corner.startsWith("top") ? /top:\s*5px/ : /bottom:\s*5px/);
-      expect(rule).toMatch(corner.endsWith("left") ? /left:\s*5px/ : /right:\s*5px/);
+      expect(rule).toMatch(corner.startsWith("top")
+        ? /top:\s*var\(--panel-screw-offset\)/
+        : /bottom:\s*var\(--panel-screw-offset\)/);
+      expect(rule).toMatch(corner.endsWith("left")
+        ? /left:\s*var\(--panel-screw-offset\)/
+        : /right:\s*var\(--panel-screw-offset\)/);
     }
+    expect(moduleRule).toMatch(/border:\s*3px solid #383838/);
+    expect(moduleRule).not.toMatch(/border-top|border-left/);
+    const midiStart = styles.indexOf(".midi-strip {");
+    const midiRule = styles.slice(midiStart, styles.indexOf("\n}", midiStart));
+    const keyboardStart = styles.indexOf(".keyboard-module {");
+    const keyboardRule = styles.slice(keyboardStart, styles.indexOf("\n}", keyboardStart));
+    expect(midiRule).toMatch(/border:\s*3px solid #353535/);
+    expect(midiRule).not.toMatch(/border-top|border-left/);
+    expect(keyboardRule).toMatch(/border:\s*3px solid #282828/);
+    expect(keyboardRule).not.toMatch(/border-top|border-left/);
+    const headerStart = styles.indexOf(".module-header {");
+    const headerRule = styles.slice(headerStart, styles.indexOf("\n}", headerStart));
+    expect(headerRule).not.toContain("var(--module-accent)");
     expect(styles).toMatch(/\.module-header\s*\{[\s\S]*?padding:\s*9px 16px 8px/);
     expect(styles).toMatch(/\.control-bank\s*\{[\s\S]*?padding:\s*13px 16px 17px/);
     expect(styles).toMatch(/\.midi-strip\s*\{[\s\S]*?padding:\s*16px 18px/);

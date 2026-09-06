@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const styles = readFileSync(resolve("src/styles.css"), "utf8");
+const app = readFileSync(resolve("src/App.tsx"), "utf8");
 const layout = readFileSync(resolve("src/ui/layout.ts"), "utf8");
 const html = readFileSync(resolve("index.html"), "utf8");
 const viteConfig = readFileSync(resolve("vite.config.ts"), "utf8");
@@ -64,10 +65,27 @@ describe("1950s electronics-console finish", () => {
   });
 
   it("flashes only the powered-off control and leaves its powered-on state steady", () => {
-    expect(styles).toMatch(/\.power-button:not\(\.is-on\):not\(:disabled\)\s*\{[\s\S]*?animation:\s*power-ready-flash/);
-    expect(styles).toMatch(/\.power-button:not\(\.is-on\):not\(:disabled\) i\s*\{[\s\S]*?animation:\s*power-lamp-flash/);
-    expect(styles).toMatch(/\.power-button\.is-on\s*\{[\s\S]*?animation:\s*none;/);
-    expect(styles).toMatch(/\.power-button\.is-on i\s*\{[\s\S]*?animation:\s*none;/);
+    expect(styles).toMatch(/\.power-switch\[aria-checked="false"\]:not\(:disabled\)\s*\{[\s\S]*?animation:\s*power-ready-flash/);
+    expect(styles).toMatch(/\.power-switch\[aria-checked="false"\]:not\(:disabled\) span::after\s*\{[\s\S]*?animation:\s*power-switch-actuator-flash/);
+    expect(styles).toMatch(/\.power-switch\[aria-checked="true"\],[\s\S]*?\.power-switch\[aria-checked="true"\] span::after\s*\{[\s\S]*?animation:\s*none;/);
+  });
+
+  it("uses the module switch component with a horizontal left-off/right-on power orientation", () => {
+    const toggleStart = styles.indexOf(".toggle-switch {");
+    const toggleSwitch = styles.slice(toggleStart, styles.indexOf(".route-control", toggleStart));
+    expect(toggleSwitch).toMatch(/width:\s*58px;/);
+    expect(toggleSwitch).toMatch(/min-height:\s*86px;/);
+    expect(toggleSwitch).toMatch(/\.toggle-switch span::after\s*\{[\s\S]*?left:\s*50%;[\s\S]*?width:\s*16px;[\s\S]*?height:\s*18px;/);
+    expect(toggleSwitch).toMatch(/\.power-switch\s*\{[\s\S]*?width:\s*122px;[\s\S]*?min-height:\s*38px;[\s\S]*?flex-direction:\s*row;[\s\S]*?margin-top:\s*0;/);
+    expect(toggleSwitch).toMatch(/\.power-switch span\s*\{[\s\S]*?width:\s*45px;[\s\S]*?height:\s*24px;/);
+    expect(toggleSwitch).toMatch(/\.power-switch span::after\s*\{[\s\S]*?left:\s*3px;[\s\S]*?transform:\s*translateY\(-50%\);/);
+    expect(toggleSwitch).toMatch(/\.power-switch\[aria-checked="true"\] span::after\s*\{[\s\S]*?transform:\s*translate\(21px, -50%\);/);
+    expect(app).toContain('aria-label={externalInputBusy');
+    expect(app).toContain('className="toggle-switch power-switch"');
+    expect(app).toContain('role="switch"');
+    expect(app).toContain('aria-checked={powered}');
+    expect(app).toMatch(/<b aria-hidden="true">OFF<\/b>[\s\S]*?<span aria-hidden="true" \/>[\s\S]*?<b aria-hidden="true">ON<\/b>/);
+    expect(app).not.toContain('className="power-button');
   });
 
   it("reserves at least 20px touch-free gutters on compact screens", () => {

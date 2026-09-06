@@ -236,7 +236,8 @@ input:focus-visible,
 }
 
 .sequence-actions {
-  grid-template-columns: minmax(92px, 1fr) repeat(4, 44px);
+  grid-template-columns: repeat(5, 44px);
+  justify-content: end;
 }
 
 .patch-strip .button,
@@ -378,8 +379,7 @@ input:focus-visible,
   justify-content: flex-end;
 }
 
-.button,
-.power-button {
+.button {
   height: auto;
   min-height: 44px;
   border: 1px solid #202020;
@@ -410,8 +410,7 @@ input:focus-visible,
   background: linear-gradient(180deg, #535353, #303030);
 }
 
-.button:active,
-.power-button:active {
+.button:active {
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.72);
   transform: translateY(1px);
 }
@@ -431,79 +430,34 @@ input:focus-visible,
   background: linear-gradient(180deg, #c9c9c9, #8e8e8e);
 }
 
-.power-button {
-  display: inline-flex;
-  min-width: min(130px, 100%);
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  padding: 8px 16px;
-  border-color: #202020;
-  color: #eeeeee;
-  background: linear-gradient(180deg, #3c3c3c, #222222);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.18), 0 3px 0 #1d1d1d;
-}
-
-.power-button i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  border: 1px solid #181818;
-  background: #4a4a4a;
-  box-shadow: inset 1px 1px rgba(255, 255, 255, 0.2), 0 0 0 3px #252525;
-}
-
-.power-button:not(.is-on):not(:disabled) {
-  animation: power-ready-flash 1.6s steps(1, end) infinite;
-}
-
-.power-button:not(.is-on):not(:disabled) i {
-  animation: power-lamp-flash 1.6s steps(1, end) infinite;
-}
-
-.power-button.is-on {
-  border-color: #5d5d5d;
-  color: #202020;
-  background: linear-gradient(180deg, #dedede, #a9a9a9);
-  box-shadow: inset 0 1px #f4f4f4, 0 3px 0 #484848;
-  animation: none;
-}
-
-.power-button.is-on i {
-  background: #f3f3f3;
-  box-shadow: inset 1px 1px #ffffff, 0 0 9px rgba(255, 255, 255, 0.72), 0 0 0 3px #555555;
-  animation: none;
-}
-
 @keyframes power-ready-flash {
   0%, 49% {
-    border-color: #202020;
-    color: #eeeeee;
-    background: linear-gradient(180deg, #3c3c3c, #222222);
+    border-color: #414141;
+    background:
+      radial-gradient(circle at 7px 7px, #353535 0 1px, transparent 2px),
+      radial-gradient(circle at calc(100% - 7px) calc(100% - 7px), #353535 0 1px, transparent 2px),
+      linear-gradient(90deg, #737373, #a1a1a1 50%, #707070);
   }
 
   50%, 100% {
-    border-color: #666666;
-    color: #202020;
-    background: linear-gradient(180deg, #d5d5d5, #a5a5a5);
+    border-color: #868686;
+    background:
+      radial-gradient(circle at 7px 7px, #555555 0 1px, transparent 2px),
+      radial-gradient(circle at calc(100% - 7px) calc(100% - 7px), #555555 0 1px, transparent 2px),
+      linear-gradient(90deg, #b7b7b7, #eeeeee 50%, #b4b4b4);
   }
 }
 
-@keyframes power-lamp-flash {
+@keyframes power-switch-actuator-flash {
   0%, 49% {
-    background: #4a4a4a;
-    box-shadow: inset 1px 1px rgba(255, 255, 255, 0.2), 0 0 0 3px #252525;
+    background: linear-gradient(90deg, #555555, #a9a9a9 48%, #626262);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.34), 0 2px 4px #101010;
   }
 
   50%, 100% {
-    background: #f3f3f3;
-    box-shadow: inset 1px 1px #ffffff, 0 0 9px rgba(255, 255, 255, 0.72), 0 0 0 3px #555555;
+    background: linear-gradient(90deg, #a1a1a1, #f0f0f0 48%, #a8a8a8);
+    box-shadow: inset 0 1px #ffffff, 0 0 9px rgba(255, 255, 255, 0.72), 0 2px 4px #303030;
   }
-}
-
-.power-button:disabled {
-  cursor: wait;
-  opacity: 0.65;
 }
 
 .status-deck {
@@ -745,7 +699,6 @@ main {
   min-width: 0;
   overflow: hidden;
   border: 3px solid #383838;
-  border-top: 7px solid var(--module-accent);
   border-radius: 2px;
   background:
     repeating-linear-gradient(90deg, rgba(30, 30, 30, 0.025) 0 1px, transparent 1px 4px),
@@ -774,6 +727,7 @@ main {
 }
 
 .panel-screws {
+  --panel-screw-offset: 5px;
   position: absolute;
   inset: 0;
   z-index: 4;
@@ -804,26 +758,26 @@ main {
 
 .panel-screw--top-left {
   --screw-angle: -18deg;
-  top: 5px;
-  left: 5px;
+  top: var(--panel-screw-offset);
+  left: var(--panel-screw-offset);
 }
 
 .panel-screw--top-right {
   --screw-angle: 71deg;
-  top: 5px;
-  right: 5px;
+  top: var(--panel-screw-offset);
+  right: var(--panel-screw-offset);
 }
 
 .panel-screw--bottom-left {
   --screw-angle: 24deg;
-  bottom: 5px;
-  left: 5px;
+  bottom: var(--panel-screw-offset);
+  left: var(--panel-screw-offset);
 }
 
 .panel-screw--bottom-right {
   --screw-angle: -63deg;
-  right: 5px;
-  bottom: 5px;
+  right: var(--panel-screw-offset);
+  bottom: var(--panel-screw-offset);
 }
 
 .module--controllers { grid-column: span 4; }
@@ -845,7 +799,6 @@ main {
   padding: 9px 16px 8px;
   border-bottom: 3px double #686868;
   background:
-    linear-gradient(90deg, var(--module-accent) 0 5px, transparent 5px),
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.12) 0 1px, rgba(0, 0, 0, 0.025) 1px 3px),
     linear-gradient(180deg, #f0f0f0, #d6d6d6);
 }
@@ -1177,6 +1130,82 @@ main {
   letter-spacing: 0.1em;
 }
 
+.power-control {
+  display: flex;
+  min-width: 122px;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.power-control__label {
+  color: #292929;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.power-switch {
+  width: 122px;
+  min-height: 38px;
+  flex-direction: row;
+  gap: 7px;
+  margin-top: 0;
+}
+
+.power-switch span {
+  width: 45px;
+  height: 24px;
+  flex: 0 0 45px;
+}
+
+.power-switch span::after {
+  top: 50%;
+  bottom: auto;
+  left: 3px;
+  width: 18px;
+  height: 16px;
+  transform: translateY(-50%);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.power-switch b {
+  width: 22px;
+  flex: 0 0 22px;
+  color: #555555;
+  text-align: center;
+}
+
+.power-switch[aria-checked="false"] b:first-of-type,
+.power-switch[aria-checked="true"] b:last-of-type {
+  color: #1f1f1f;
+  font-weight: 900;
+}
+
+.power-switch[aria-checked="true"] span::after {
+  transform: translate(21px, -50%);
+}
+
+.power-switch[aria-checked="false"]:not(:disabled) {
+  animation: power-ready-flash 1.6s steps(1, end) infinite;
+}
+
+.power-switch[aria-checked="false"]:not(:disabled) span::after {
+  animation: power-switch-actuator-flash 1.6s steps(1, end) infinite;
+}
+
+.power-switch[aria-checked="true"],
+.power-switch[aria-checked="true"] span::after {
+  animation: none;
+}
+
+.power-switch:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .route-control {
   display: flex;
   min-width: min(116px, 100%);
@@ -1378,8 +1407,7 @@ main {
   gap: 18px;
   margin-top: 10px;
   padding: 16px 18px;
-  border: 2px solid #353535;
-  border-left: 7px solid var(--teal);
+  border: 3px solid #353535;
   border-radius: 1px;
   background:
     repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.14) 0 1px, rgba(0, 0, 0, 0.05) 1px 3px),
@@ -1443,7 +1471,6 @@ main {
   margin-top: 10px;
   overflow: hidden;
   border: 3px solid #282828;
-  border-top: 7px solid #666666;
   border-radius: 1px;
   background:
     radial-gradient(circle at 1px 1px, rgba(255, 255, 255, 0.07) 0 0.8px, transparent 1px),
@@ -2176,10 +2203,6 @@ footer span {
     font-size: 9px;
   }
 
-  .power-button {
-    min-width: min(112px, 100%);
-  }
-
   .status-deck {
     grid-template-columns: repeat(auto-fit, minmax(min(112px, 100%), 1fr));
     padding: 1px env(safe-area-inset-right) 1px env(safe-area-inset-left);
@@ -2281,13 +2304,6 @@ footer span {
   .brand-model {
     font-size: 8px;
     letter-spacing: 0.12em;
-  }
-
-  .power-button {
-    min-width: min(108px, 100%);
-    padding-right: 10px;
-    padding-left: 10px;
-    font-size: 10px;
   }
 
   .patch-strip {
@@ -2517,11 +2533,7 @@ footer span {
   }
 
   .sequence-actions {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .sequence-record-button {
-    grid-column: 1 / -1;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 
   .sequence-icon-button {
@@ -2688,8 +2700,8 @@ footer span {
     transition-duration: 0.01ms !important;
   }
 
-  .power-button:not(.is-on):not(:disabled),
-  .power-button:not(.is-on):not(:disabled) i {
+  .power-switch[aria-checked="false"]:not(:disabled),
+  .power-switch[aria-checked="false"]:not(:disabled) span::after {
     animation-duration: 3.2s;
   }
 }

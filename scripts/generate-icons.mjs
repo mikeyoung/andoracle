@@ -132,6 +132,21 @@ const resizeRgb = (source, size) => {
   return result;
 };
 
+const grayscaleRgb = (source) => {
+  const pixels = new Uint8Array(source.pixels.length);
+  for (let index = 0; index < source.pixels.length; index += 3) {
+    const luminance = Math.round(
+      source.pixels[index] * 0.2126
+      + source.pixels[index + 1] * 0.7152
+      + source.pixels[index + 2] * 0.0722,
+    );
+    pixels[index] = luminance;
+    pixels[index + 1] = luminance;
+    pixels[index + 2] = luminance;
+  }
+  return { width: source.width, height: source.height, pixels };
+};
+
 const encodeRgbPng = (size, pixels, compressionLevel = 9) => {
   const channels = 3;
   const stride = size * channels;
@@ -158,6 +173,17 @@ const encodeRgbPng = (size, pixels, compressionLevel = 9) => {
   ]);
 };
 
+const encodeMasterPng = (size, pixels) => {
+  const png = encodeRgbPng(size, pixels);
+  const iendOffset = png.length - 12;
+  const description = Buffer.from("Description\0Andoracle canonical grayscale icon master", "latin1");
+  return Buffer.concat([
+    png.subarray(0, iendOffset),
+    chunk("tEXt", description),
+    png.subarray(iendOffset),
+  ]);
+};
+
 const createIco = (frames) => {
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);
@@ -180,13 +206,16 @@ const createIco = (frames) => {
 };
 
 const masterBuffer = readFileSync(masterPath);
-const master = decodeRgbPng(masterBuffer);
+const sourceMaster = decodeRgbPng(masterBuffer);
+const master = grayscaleRgb(sourceMaster);
+const encodedMaster = encodeMasterPng(master.width, master.pixels);
+if (!masterBuffer.equals(encodedMaster)) writeFileSync(masterPath, encodedMaster);
 const sizes = [16, 32, 48, 72, 96, 128, 144, 152, 167, 180, 192, 256, 384, 512];
 const pngs = new Map(sizes.map((size) => [
   size,
   // The host's upload scanner rejects the canonical master byte stream at a
-  // runtime URL. Level 8 changes only the deterministic PNG compression, not
-  // a single displayed pixel, while the source master remains untouched.
+  // runtime URL. Runtime encoding changes only PNG packaging, not a displayed
+  // pixel, and omits the canonical master's descriptive metadata.
   encodeRgbPng(size, resizeRgb(master, size), size === 512 ? 8 : 9),
 ]));
 
@@ -202,4 +231,4 @@ writeFileSync(resolve(outputDirectory, "maskable-icon-192.png"), pngs.get(192));
 writeFileSync(resolve(outputDirectory, "maskable-icon-512.png"), pngs.get(512));
 writeFileSync(resolve(outputDirectory, "favicon.ico"), createIco([16, 32, 48].map((size) => [size, pngs.get(size)])));
 
-console.log(`Generated ${sizes.length} raster sizes from ${masterPath}.`);
+console.log(`Generated ${sizes.length} grayscale raster sizes from ${masterPath}.`);

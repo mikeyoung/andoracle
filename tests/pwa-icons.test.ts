@@ -134,11 +134,33 @@ describe("PWA icon assets", () => {
     expect(ico.readUInt16LE(2)).toBe(1);
     expect(ico.readUInt16LE(4)).toBe(3);
     expect([ico[6], ico[22], ico[38]]).toEqual([16, 32, 48]);
+    for (const [index, size] of [16, 32, 48].entries()) {
+      const entryOffset = 6 + index * 16;
+      const byteLength = ico.readUInt32LE(entryOffset + 8);
+      const imageOffset = ico.readUInt32LE(entryOffset + 12);
+      expect(ico.subarray(imageOffset, imageOffset + byteLength), `${size}px ICO frame`)
+        .toEqual(readFileSync(publicPath(`favicon-${size}.png`)));
+    }
     expect(html).toContain('rel="icon" href="%BASE_URL%favicon.ico" sizes="16x16 32x32 48x48"');
     expect(html).not.toContain('href="%BASE_URL%favicon.ico" sizes="any"');
   });
 
-  it("keeps contiguous retro sawtooth bands without dark gutters or spectral flag order", () => {
+  it("keeps contiguous grayscale sawtooth bands without dark gutters", () => {
+    for (const fileName of Object.keys(expectedPngs)) {
+      const image = readRgbPixels(fileName);
+      let grayscale = true;
+      for (let index = 0; index < image.pixels.length; index += 3) {
+        if (
+          image.pixels[index] !== image.pixels[index + 1]
+          || image.pixels[index] !== image.pixels[index + 2]
+        ) {
+          grayscale = false;
+          break;
+        }
+      }
+      expect(grayscale, `${fileName} contains chromatic pixels`).toBe(true);
+    }
+
     const master = readRgbPixels("icon-master-512.png");
     let minimumRgbSum = Number.POSITIVE_INFINITY;
     for (let index = 0; index < master.pixels.length; index += 3) {
@@ -149,18 +171,10 @@ describe("PWA icon assets", () => {
     }
     expect(minimumRgbSum).toBeGreaterThan(100);
 
-    const [ochre, teal, sienna, olive, plum, cream] = [30, 120, 210, 310, 410, 490]
-      .map((y) => pixelAt(master, 4, y));
-    expect(ochre[0]).toBeGreaterThan(ochre[1]);
-    expect(ochre[1]).toBeGreaterThan(ochre[2]);
-    expect(teal[1]).toBeGreaterThan(teal[0] + 25);
-    expect(teal[2]).toBeGreaterThan(teal[0] + 25);
-    expect(sienna[0]).toBeGreaterThan(sienna[1] * 2);
-    expect(olive[1]).toBeGreaterThan(olive[0]);
-    expect(olive[2]).toBeLessThan(olive[0] / 2);
-    expect(plum[0]).toBeGreaterThan(plum[1]);
-    expect(plum[2]).toBeGreaterThan(plum[1]);
-    expect(cream.every((channel) => channel > 140)).toBe(true);
+    const bandSamples = [30, 120, 210, 310, 410, 490].map((y) => pixelAt(master, 4, y));
+    expect(bandSamples.every(([red, green, blue]) => red === green && green === blue)).toBe(true);
+    expect(new Set(bandSamples.map(([luminance]) => luminance)).size).toBeGreaterThanOrEqual(5);
+    expect(bandSamples.at(-1)?.every((channel) => channel > 140)).toBe(true);
   });
 
   it("references general, maskable, Apple, and favicon assets from app metadata", () => {

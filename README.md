@@ -47,4 +47,4 @@ The full signal chain runs at 2× rate, oscillator discontinuities run at an add
 npm run check
 ```
 
-This runs deterministic DSP/schema tests and a production PWA build. The 512×512 `public/icon-master-512.png` is the canonical app-icon artwork; `npm run generate:icons` derives the checked-in favicon, Apple-touch, general PWA, and maskable sizes from it. Production builds regenerate those assets automatically.
+This runs deterministic DSP/schema tests and a production PWA build. The 512×512 `public/icon-master-512.png` is the canonical app-icon artwork; `npm run generate:icons` enforces grayscale pixels and derives the checked-in favicon, Apple-touch, general PWA, and maskable sizes from it. Production builds regenerate those assets automatically.

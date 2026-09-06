@@ -2089,7 +2089,14 @@ function App() {
                 Delete
               </button>
               <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
-              <button type="button" className="button button--danger" onClick={panic}>All notes off</button>
+              <button
+                type="button"
+                className="button button--danger"
+                aria-label="Panic: all notes off"
+                onClick={panic}
+              >
+                Panic
+              </button>
               <button
                 type="button"
                 className="button button--quiet help-button"
@@ -2129,22 +2136,29 @@ function App() {
         </div>
         <div className="power-strip">
           {installPrompt && <button type="button" className="button button--quiet install-button" onClick={install}>Install app</button>}
-          <button
-            type="button"
-            className={`power-button${powered ? " is-on" : ""}`}
-            aria-pressed={powered}
-            disabled={externalInputBusy || (powerBusy && powered)}
-            onClick={togglePower}
-          >
-            <i aria-hidden="true" />
-            {externalInputBusy
-              ? "Working…"
-              : powerBusy && !powered
-                ? "Cancel start"
-                : powerBusy
-                  ? "Working…"
-                  : powered ? "Power off" : "Power on"}
-          </button>
+          <div className="power-control">
+            <span className="power-control__label" aria-hidden="true">Power</span>
+            <button
+              type="button"
+              className="toggle-switch power-switch"
+              role="switch"
+              aria-checked={powered}
+              aria-busy={powerBusy || externalInputBusy}
+              aria-label={externalInputBusy
+                ? "Audio operation in progress"
+                : powerBusy && !powered
+                  ? "Cancel audio startup"
+                  : powerBusy
+                    ? "Audio power operation in progress"
+                    : powered ? "Power off" : "Power on"}
+              disabled={externalInputBusy || (powerBusy && powered)}
+              onClick={togglePower}
+            >
+              <b aria-hidden="true">OFF</b>
+              <span aria-hidden="true" />
+              <b aria-hidden="true">ON</b>
+            </button>
+          </div>
         </div>
       </header>
 

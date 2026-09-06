@@ -36,7 +36,7 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('role="group" aria-label="Sequence transport"');
     expect(markup).toContain('<label for="sequence-select">Sequence</label>');
     expect(markup).toContain('id="sequence-select"');
-    expect(markup).toContain('aria-label="Start recording" aria-pressed="false"');
+    expect(buttonTag(markup, "Start recording")).toContain('aria-pressed="false"');
     expect(buttonTag(markup, "Play loaded sequence")).toContain('aria-pressed="false"');
     expect(buttonTag(markup, "Play loaded sequence")).toContain("disabled");
     expect(buttonTag(markup, "Pause sequence")).toContain('aria-pressed="false"');
@@ -47,19 +47,22 @@ describe("SequenceTransport", () => {
     expect(markup).toContain("No sequences");
   });
 
-  it("uses icon-only Play, Pause, Stop, and trash controls with accessible names", () => {
+  it("uses matching icon-only Record, Play, Pause, Stop, and trash controls with accessible names", () => {
     const markup = renderTransport();
+    const record = buttonMarkup(markup, "Start recording");
     const play = buttonMarkup(markup, "Play loaded sequence");
     const pause = buttonMarkup(markup, "Pause sequence");
     const stop = buttonMarkup(markup, "Stop sequence and return to beginning");
     const remove = buttonMarkup(markup, "Delete active recording");
 
+    expect(record).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
+    expect(record).toContain("sequence-icon-button sequence-record-button");
     expect(play).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
     expect(pause).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
     expect(stop).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
     expect(remove).toContain('<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">');
     expect(remove).not.toMatch(/>\s*Delete\s*</);
-    expect(markup).toContain("Record</button>");
+    expect(record).not.toMatch(/>\s*Record\s*</);
   });
 
   it("renders saved names without colliding with the empty sentinel", () => {
@@ -72,7 +75,7 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('<option value="  visual spaces  ">  visual spaces  </option>');
   });
 
-  it("exposes recording state in text and ARIA while preventing selection or playback", () => {
+  it("exposes recording state through its icon and ARIA while preventing selection or playback", () => {
     const markup = renderTransport({
       sequenceNames: ["Take one"],
       activeName: "Take one",
@@ -80,8 +83,8 @@ describe("SequenceTransport", () => {
     });
     expect(markup).toContain('id="sequence-select" aria-label="Sequence" disabled=""');
     expect(markup).toContain('sequence-record-button is-active');
-    expect(markup).toContain('aria-label="Stop recording" aria-pressed="true"');
-    expect(markup).toContain("Stop record");
+    expect(buttonTag(markup, "Stop recording")).toContain('aria-pressed="true"');
+    expect(buttonMarkup(markup, "Stop recording")).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
     expect(buttonTag(markup, "Play loaded sequence")).toContain('aria-pressed="false"');
     expect(buttonTag(markup, "Play loaded sequence")).toContain("disabled");
     expect(buttonTag(markup, "Pause sequence")).toContain('aria-pressed="false"');
