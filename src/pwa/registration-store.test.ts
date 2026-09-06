@@ -5,7 +5,9 @@ import {
   PwaUpdatePendingError,
   ServiceWorkerCapabilityStore,
   bindPwaRegistrationRetries,
+  checkForNewerServiceWorker,
   type PwaRegistrationCallbacks,
+  type ServiceWorkerUpdateRegistration,
   type ServiceWorkerCapabilityTarget,
 } from "./registration-store";
 
@@ -72,6 +74,29 @@ describe("PwaRegistrationStore", () => {
     expect(updater).toHaveBeenCalledWith(true);
     expect(updater).toHaveBeenCalledTimes(1);
     unsubscribe();
+  });
+
+  it("asks the browser to check past a pre-existing waiting worker", async () => {
+    let callbacks: PwaRegistrationCallbacks | null = null;
+    const store = new PwaRegistrationStore((nextCallbacks) => {
+      callbacks = nextCallbacks;
+      return vi.fn(async () => undefined);
+    });
+    const waiting = { version: "1.0.12" };
+    const registration: {
+      installing: unknown | null;
+      waiting: unknown | null;
+      update: ReturnType<typeof vi.fn<() => Promise<void>>>;
+    } = {
+      installing: null,
+      waiting,
+      update: vi.fn(async () => undefined),
+    };
+
+    store.start();
+    callbacks!.onRegisteredSW("./sw.js", registration);
+    await vi.waitFor(() => expect(registration.update).toHaveBeenCalledTimes(1));
+    expect(registration.update).toHaveBeenCalledWith();
   });
 
   it("refuses new UI waiters while the browser updater never settles", async () => {
@@ -190,6 +215,41 @@ describe("PwaRegistrationStore", () => {
   it("routes App through the singleton store instead of a mount-scoped Workbox hook", () => {
     expect(appSource).toContain('from "./pwa/use-pwa-registration"');
     expect(appSource).not.toContain("virtual:pwa-register/react");
+  });
+});
+
+describe("checkForNewerServiceWorker", () => {
+  it("does not add a redundant update job without a waiting worker", async () => {
+    const update = vi.fn(async () => undefined);
+    const registration = (overrides: Partial<ServiceWorkerUpdateRegistration>) => ({
+      installing: null,
+      waiting: null,
+      update,
+      ...overrides,
+    });
+
+    await checkForNewerServiceWorker(undefined);
+    await checkForNewerServiceWorker(registration({}));
+    await checkForNewerServiceWorker(registration({ waiting: {}, installing: {} }));
+
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("contains rejected and synchronously thrown opportunistic update checks", async () => {
+    const failure = new Error("offline");
+    const rejectedRegistration = {
+      waiting: {},
+      update: vi.fn(async () => { throw failure; }),
+    };
+    const thrownRegistration = {
+      waiting: {},
+      update: vi.fn<() => Promise<unknown>>(() => { throw failure; }),
+    };
+
+    await expect(checkForNewerServiceWorker(rejectedRegistration)).resolves.toBeUndefined();
+    await expect(checkForNewerServiceWorker(thrownRegistration)).resolves.toBeUndefined();
+    expect(rejectedRegistration.update).toHaveBeenCalledTimes(1);
+    expect(thrownRegistration.update).toHaveBeenCalledTimes(1);
   });
 });
 

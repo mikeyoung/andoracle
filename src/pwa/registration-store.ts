@@ -1,11 +1,39 @@
 export interface PwaRegistrationCallbacks {
   onOfflineReady: () => void;
   onNeedRefresh: () => void;
+  onRegisteredSW: (
+    swScriptUrl: string,
+    registration: ServiceWorkerUpdateRegistration | undefined,
+  ) => void;
   onRegisterError: (error: unknown) => void;
 }
 
 export type PwaUpdater = (reloadPage?: boolean) => Promise<void>;
 export type PwaRegistrar = (callbacks: PwaRegistrationCallbacks) => PwaUpdater;
+
+export interface ServiceWorkerUpdateRegistration {
+  readonly installing?: unknown | null;
+  readonly waiting?: unknown | null;
+  update(): Promise<unknown>;
+}
+
+/**
+ * A same-URL register() resolves without checking the network when a worker is
+ * already waiting. Give a newer deployment one explicit update job in that
+ * state, unless the browser is already installing one, so rapid releases
+ * converge without adding a network check to ordinary launches.
+ */
+export const checkForNewerServiceWorker = async (
+  registration: ServiceWorkerUpdateRegistration | undefined,
+): Promise<void> => {
+  if (!registration?.waiting || registration.installing) return;
+  try {
+    await registration.update();
+  } catch {
+    // This check is opportunistic; keep the usable waiting worker and let the
+    // browser retry later if the user is offline or the server is unavailable.
+  }
+};
 
 export class PwaUpdatePendingError extends Error {
   constructor() {
@@ -70,6 +98,11 @@ export class PwaRegistrationStore {
         },
         onNeedRefresh: () => {
           if (this.registrationAttempt === attempt) this.update({ needRefresh: true });
+        },
+        onRegisteredSW: (_swScriptUrl, registration) => {
+          if (this.registrationAttempt === attempt) {
+            void checkForNewerServiceWorker(registration);
+          }
         },
         onRegisterError: (error) => {
           if (this.registrationAttempt !== attempt) return;
