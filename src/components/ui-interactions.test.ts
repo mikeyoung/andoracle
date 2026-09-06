@@ -11,7 +11,12 @@ import {
   shouldToggleAssistiveKey,
   visualKeySource,
 } from "./Keyboard";
-import { OutputMeter, outputPeakPercent } from "./OutputMeter";
+import {
+  EMPTY_ODYSSEY_METER,
+  OutputMeter,
+  odysseyMetersMatch,
+  outputPeakPercent,
+} from "./OutputMeter";
 import {
   DirectEntryInterruptionRegistry,
   DeferredRangePointerFocusRelease,
@@ -284,6 +289,14 @@ describe("output meter accessibility", () => {
     expect(outputPeakPercent(Number.POSITIVE_INFINITY)).toBe(0);
     expect(outputPeakPercent(-0.1)).toBe(0);
     expect(outputPeakPercent(1.1)).toBe(100);
+  });
+
+  it("suppresses identical telemetry frames without hiding a changed field", () => {
+    expect(odysseyMetersMatch(EMPTY_ODYSSEY_METER, { ...EMPTY_ODYSSEY_METER })).toBe(true);
+    expect(odysseyMetersMatch(EMPTY_ODYSSEY_METER, {
+      ...EMPTY_ODYSSEY_METER,
+      peak: 0.25,
+    })).toBe(false);
   });
 });
 

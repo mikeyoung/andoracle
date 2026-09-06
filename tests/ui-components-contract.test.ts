@@ -25,7 +25,7 @@ describe("dialog source contracts", () => {
   it("shows a temporary toast only after the gated clipboard pipeline succeeds", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
     const pipelineStart = source.indexOf("const performPatchShare = async");
-    const pipelineEnd = source.indexOf("const EMPTY_METER", pipelineStart);
+    const pipelineEnd = source.indexOf("const KEYBOARD_MAP", pipelineStart);
     const pipeline = source.slice(pipelineStart, pipelineEnd);
     const shareStart = source.indexOf("const sharePatch = async");
     const shareEnd = source.indexOf("const performance = useCallback", shareStart);
@@ -181,6 +181,41 @@ describe("dialog source contracts", () => {
     expect(openDelete.indexOf("sequenceRecorderRef.current?.isRecording"))
       .toBeLessThan(openDelete.indexOf("setDeleteConfirmation"));
     expect(patchButton).toContain("disabled={!activeUserPatchName || sequenceRecording}");
+  });
+
+  it("orders global, patch, and sequence controls as three deliberate rows", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const utilityRow = source.indexOf('<div className="utility-strip"');
+    const patchRow = source.indexOf('<div className="patch-strip"', utilityRow);
+    const sequenceRow = source.indexOf("<SequenceTransport", patchRow);
+    const utilityMarkup = source.slice(utilityRow, patchRow);
+
+    expect(utilityRow).toBeGreaterThanOrEqual(0);
+    expect(patchRow).toBeGreaterThan(utilityRow);
+    expect(sequenceRow).toBeGreaterThan(patchRow);
+    expect(utilityMarkup).toContain("Panic");
+    expect(utilityMarkup).toContain("Help");
+    expect(utilityMarkup).toContain("Share Patch");
+  });
+
+  it("isolates audio-rate telemetry from the root synthesizer render", () => {
+    const app = readFileSync(resolve("src/App.tsx"), "utf8");
+    const telemetry = readFileSync(resolve("src/components/OutputMeter.tsx"), "utf8");
+
+    expect(app).not.toContain("engine.onMeter(");
+    expect(app).toContain("<EngineTelemetry");
+    expect(telemetry).toContain("engine.onMeter((nextMeter) =>");
+    expect(telemetry).toContain("export const EngineTelemetry = memo(EngineTelemetryComponent);");
+    expect(telemetry).toMatch(/useEffect\(\(\) => \{[\s\S]*?if \(!running\) return;[\s\S]*?return engine\.onMeter/);
+  });
+
+  it("shares one cleaned-up storage listener across both local libraries", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+
+    expect(source.match(/window\.addEventListener\("storage", storageChanged\)/g)).toHaveLength(1);
+    expect(source.match(/window\.removeEventListener\("storage", storageChanged\)/g)).toHaveLength(1);
+    expect(source).toContain("event.key === null || event.key === USER_PATCHES_STORAGE_KEY");
+    expect(source).toContain("event.key === null || event.key === USER_SEQUENCES_STORAGE_KEY");
   });
 
   it("returns post-delete focus to the playable surface instead of a dropdown", () => {

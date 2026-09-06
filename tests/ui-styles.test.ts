@@ -112,7 +112,7 @@ describe("synth control styling", () => {
 
     expect(styles).toMatch(/\.library-deck\s*\{[\s\S]*?display:\s*grid;[\s\S]*?min-width:\s*0;[\s\S]*?\}/);
     expect(styles).toMatch(
-      /\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*minmax\(190px, 0\.55fr\) minmax\(0, 1\.45fr\);[\s\S]*?\}/,
+      /\.utility-strip,\s*\.patch-strip,\s*\.sequence-strip\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*minmax\(190px, 0\.55fr\) minmax\(0, 1\.45fr\);[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.sequence-record-button,\s*\.sequence-play-button,\s*\.sequence-pause-button,\s*\.sequence-stop-button\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?\}/,
@@ -125,16 +125,16 @@ describe("synth control styling", () => {
     expect(styles).toMatch(/\.sequence-pause-button\.is-active:disabled\s*\{[\s\S]*?opacity:\s*1;[\s\S]*?filter:\s*none;/);
     expect(styles).toMatch(/\.sequence-stop-button i\s*\{[\s\S]*?border-radius/);
     expect(styles).toMatch(
-      /\.patch-actions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(12, minmax\(0, 1fr\)\);[\s\S]*?\}/,
+      /\.utility-actions\s*\{[\s\S]*?grid-column:\s*2;[\s\S]*?grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.patch-actions > \.button:nth-child\(-n \+ 4\)\s*\{[\s\S]*?grid-column:\s*span 3;[\s\S]*?\}[\s\S]*?\.patch-actions > \.button:nth-child\(n \+ 5\)\s*\{[\s\S]*?grid-column:\s*span 4;/,
+      /\.patch-actions\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4, minmax\(0, 1fr\)\);[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /@media \(max-width:\s*440px\)[\s\S]*?\.patch-actions\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\.patch-actions > \.button:last-child\s*\{[\s\S]*?grid-column:\s*1 \/ -1;[\s\S]*?\.sequence-actions\s*\{[\s\S]*?repeat\(5, minmax\(0, 1fr\)\);/,
+      /@media \(max-width:\s*440px\)[\s\S]*?\.utility-actions\s*\{[\s\S]*?repeat\(3, minmax\(0, 1fr\)\);[\s\S]*?\.patch-actions\s*\{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\);[\s\S]*?\.sequence-actions\s*\{[\s\S]*?repeat\(5, minmax\(0, 1fr\)\);/,
     );
     expect(styles).toMatch(
-      /@media \(max-width:\s*260px\)[\s\S]*?\.patch-actions,\s*\.sequence-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
+      /@media \(max-width:\s*260px\)[\s\S]*?\.utility-actions,\s*\.patch-actions,\s*\.sequence-actions\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
     );
   });
 

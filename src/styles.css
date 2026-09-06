@@ -187,6 +187,7 @@ input:focus-visible,
   gap: 7px;
 }
 
+.utility-strip,
 .patch-strip,
 .sequence-strip {
   display: grid;
@@ -194,6 +195,10 @@ input:focus-visible,
   min-width: 0;
   align-items: center;
   gap: 8px;
+}
+
+.utility-strip {
+  min-height: 44px;
 }
 
 .power-strip {
@@ -223,16 +228,13 @@ input:focus-visible,
   gap: 8px;
 }
 
+.utility-actions {
+  grid-column: 2;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .patch-actions {
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-}
-
-.patch-actions > .button:nth-child(-n + 4) {
-  grid-column: span 3;
-}
-
-.patch-actions > .button:nth-child(n + 5) {
-  grid-column: span 4;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .sequence-actions {
@@ -240,6 +242,7 @@ input:focus-visible,
   justify-content: end;
 }
 
+.utility-strip .button,
 .patch-strip .button,
 .sequence-strip .button {
   min-width: 0;
@@ -2131,30 +2134,6 @@ footer span {
   }
 }
 
-@media (max-width: 700px) {
-  .patch-strip {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    overflow: visible;
-  }
-
-  .patch-strip select {
-    width: 100%;
-    min-width: 0;
-    grid-column: 1 / -1;
-  }
-
-  .patch-strip .button {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .patch-strip .share-button {
-    grid-column: auto;
-  }
-}
-
 @media (max-width: 960px) {
   .app-shell {
     border-right-width: 3px;
@@ -2304,28 +2283,6 @@ footer span {
   .brand-model {
     font-size: 8px;
     letter-spacing: 0.12em;
-  }
-
-  .patch-strip {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    overflow: visible;
-  }
-
-  .patch-strip select {
-    width: 100%;
-    min-width: 0;
-    grid-column: 1 / -1;
-  }
-
-  .patch-strip .button {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .patch-strip .share-button {
-    grid-column: auto;
   }
 
   main {
@@ -2478,6 +2435,7 @@ footer span {
     flex: 1 1 100%;
   }
 
+  .utility-strip,
   .patch-strip,
   .sequence-strip {
     order: initial;
@@ -2495,6 +2453,7 @@ footer span {
 }
 
 @media (max-width: 700px) {
+  .utility-strip,
   .patch-strip,
   .sequence-strip {
     display: grid;
@@ -2517,19 +2476,23 @@ footer span {
     width: 100%;
     min-width: 0;
   }
+
+  .utility-actions {
+    grid-column: auto;
+  }
 }
 
 @media (max-width: 440px) {
+  .utility-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .patch-actions {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .patch-actions > .button:nth-child(n) {
     grid-column: auto;
-  }
-
-  .patch-actions > .button:last-child {
-    grid-column: 1 / -1;
   }
 
   .sequence-actions {
@@ -2553,18 +2516,19 @@ footer span {
 /* This must follow the shared <=700px library grid so the narrowest layout
    wins the cascade and gives every full word a complete row. */
 @media (max-width: 260px) {
+  .utility-strip,
   .patch-strip,
   .sequence-strip {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .utility-actions,
   .patch-actions,
   .sequence-actions {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .patch-actions > .button:nth-child(n),
-  .patch-actions > .button:last-child,
   .sequence-record-button {
     grid-column: auto;
   }
@@ -2589,18 +2553,6 @@ footer span {
   .direct-entry h2 {
     font-size: 17px;
     letter-spacing: 0.01em;
-  }
-}
-
-/* Use one deliberate row only where all seven patch actions have enough room.
-   The intermediate desktop range keeps the balanced four-plus-three grid. */
-@media (min-width: 1000px) and (max-width: 1180px), (min-width: 1530px) {
-  .patch-actions {
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-  }
-
-  .patch-actions > .button:nth-child(n) {
-    grid-column: auto;
   }
 }
 

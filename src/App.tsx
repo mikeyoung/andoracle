@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { OdysseyAudioEngine, type AudioEngineStatus } from "./audio/engine";
-import type { OdysseyMeter, PerformanceState } from "./audio/dsp-core";
+import type { PerformanceState } from "./audio/dsp-core";
 import { DirectEntryModal } from "./components/DirectEntryModal";
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog";
 import { ExternalInputControl } from "./components/ExternalInputControl";
 import { HelpDialog } from "./components/HelpDialog";
 import { Keyboard } from "./components/Keyboard";
 import { MidiInputControl } from "./components/MidiInputControl";
-import { OutputMeter } from "./components/OutputMeter";
+import { EngineTelemetry } from "./components/OutputMeter";
 import { PanelScrews } from "./components/PanelScrews";
 import {
   PatchLibraryDialog,
@@ -124,34 +124,6 @@ const performPatchShare = async (shareUrl: string): Promise<PatchShareResult> =>
   await navigator.clipboard.writeText(shareUrl);
   return "copied";
 };
-
-const EMPTY_METER: OdysseyMeter = {
-  sampleRate: 44100,
-  gate: false,
-  lowNote: 48,
-  highNote: 48,
-  vco1Frequency: 0,
-  vco2Frequency: 0,
-  ar: 0,
-  adsr: 0,
-  sampleHold: 0,
-  peak: 0,
-  rms: 0,
-};
-
-const metersMatch = (left: OdysseyMeter, right: OdysseyMeter): boolean => (
-  left.sampleRate === right.sampleRate
-  && left.gate === right.gate
-  && left.lowNote === right.lowNote
-  && left.highNote === right.highNote
-  && left.vco1Frequency === right.vco1Frequency
-  && left.vco2Frequency === right.vco2Frequency
-  && left.ar === right.ar
-  && left.adsr === right.adsr
-  && left.sampleHold === right.sampleHold
-  && left.peak === right.peak
-  && left.rms === right.rms
-);
 
 const KEYBOARD_MAP: Readonly<Record<string, number>> = {
   KeyA: 48,
@@ -278,7 +250,6 @@ function App() {
   const [midiInputs, setMidiInputs] = useState<readonly MidiInputSummary[]>([]);
   const [presetName, setPresetName] = useState(() => matchingPresetName(initialPatch.params));
   const [activeUserPatchName, setActiveUserPatchName] = useState<string | null>(null);
-  const [meter, setMeter] = useState<OdysseyMeter>(EMPTY_METER);
   const [audioStatus, setAudioStatus] = useState<AudioEngineStatus>({
     state: "uninitialized",
     requestedSampleRate: 44100,
@@ -465,19 +436,14 @@ function App() {
 
   useEffect(() => {
     const storageChanged = (event: StorageEvent): void => {
-      if (event.key !== null && event.key !== USER_PATCHES_STORAGE_KEY) return;
-      const result = readUserPatches();
-      if (result.status !== "storage-error") setUserPatches(result.patches);
-    };
-    window.addEventListener("storage", storageChanged);
-    return () => window.removeEventListener("storage", storageChanged);
-  }, []);
-
-  useEffect(() => {
-    const storageChanged = (event: StorageEvent): void => {
-      if (event.key !== null && event.key !== USER_SEQUENCES_STORAGE_KEY) return;
-      const result = readUserSequences();
-      if (result.status !== "storage-error") setUserSequences(result.sequences);
+      if (event.key === null || event.key === USER_PATCHES_STORAGE_KEY) {
+        const result = readUserPatches();
+        if (result.status !== "storage-error") setUserPatches(result.patches);
+      }
+      if (event.key === null || event.key === USER_SEQUENCES_STORAGE_KEY) {
+        const result = readUserSequences();
+        if (result.status !== "storage-error") setUserSequences(result.sequences);
+      }
     };
     window.addEventListener("storage", storageChanged);
     return () => window.removeEventListener("storage", storageChanged);
@@ -553,15 +519,10 @@ function App() {
 
   useEffect(() => {
     mountedRef.current = true;
-    const unsubscribeMeter = engine.onMeter((nextMeter) => {
-      if (!mountedRef.current) return;
-      setMeter((currentMeter) => metersMatch(currentMeter, nextMeter) ? currentMeter : nextMeter);
-    });
     const unsubscribeStatus = engine.onStatus((status) => {
       if (!mountedRef.current) return;
       setAudioStatus(status);
       if (status.state !== "running") {
-        setMeter(EMPTY_METER);
         if (sequencePlayerRef.current?.isActive) {
           sequenceOperationRef.current += 1;
           sequencePlayerRef.current.stop(false);
@@ -603,7 +564,6 @@ function App() {
       engine.allNotesOff();
       engine.setPerformance({ bendSemitones: 0, vibratoSemitones: 0 });
       void midiSessionRef.current?.disconnect(true).catch(() => undefined);
-      unsubscribeMeter();
       unsubscribeStatus();
       unsubscribeExternalInput();
       queueMicrotask(() => {
@@ -2042,6 +2002,39 @@ function App() {
           </div>
         </div>
         <div className="library-deck">
+          <div className="utility-strip" role="group" aria-label="Global controls">
+            <div className="library-actions utility-actions">
+              <button
+                type="button"
+                className="button button--danger"
+                aria-label="Panic: all notes off"
+                onClick={panic}
+              >
+                Panic
+              </button>
+              <button
+                type="button"
+                className="button button--quiet help-button"
+                aria-haspopup="dialog"
+                onClick={(event) => {
+                  setDirectEditor(null);
+                  setPatchLibraryDialog(null);
+                  revokeActiveLibraryDeletion("Help replaced the deletion dialog.");
+                  setHelpDialogOrigin(event.currentTarget);
+                }}
+              >
+                Help
+              </button>
+              <button
+                type="button"
+                className="button button--quiet share-button"
+                disabled={shareBusy}
+                onClick={() => void sharePatch()}
+              >
+                {shareBusy ? "Sharing…" : "Share Patch"}
+              </button>
+            </div>
+          </div>
           <div className="patch-strip">
             <div className="library-picker patch-picker">
               <label htmlFor="preset">Patch</label>
@@ -2089,35 +2082,6 @@ function App() {
                 Delete
               </button>
               <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
-              <button
-                type="button"
-                className="button button--danger"
-                aria-label="Panic: all notes off"
-                onClick={panic}
-              >
-                Panic
-              </button>
-              <button
-                type="button"
-                className="button button--quiet help-button"
-                aria-haspopup="dialog"
-                onClick={(event) => {
-                  setDirectEditor(null);
-                  setPatchLibraryDialog(null);
-                  revokeActiveLibraryDeletion("Help replaced the deletion dialog.");
-                  setHelpDialogOrigin(event.currentTarget);
-                }}
-              >
-                Help
-              </button>
-              <button
-                type="button"
-                className="button button--quiet share-button"
-                disabled={shareBusy}
-                onClick={() => void sharePatch()}
-              >
-                {shareBusy ? "Sharing…" : "Share Patch"}
-              </button>
             </div>
           </div>
           <SequenceTransport
@@ -2167,19 +2131,12 @@ function App() {
           <span>ENGINE</span>
           <strong>{audioStatus.actualSampleRate ? `${(audioStatus.actualSampleRate / 1000).toFixed(1)} kHz` : "44.1 kHz requested"}</strong>
         </div>
-        <div className="voice-readout">
-          <span>VCO 1</span>
-          <strong>{meter.vco1Frequency > 0 ? formatParamValue("vco1Coarse", meter.vco1Frequency) : "—"}</strong>
-        </div>
-        <div className="voice-readout">
-          <span>VCO 2</span>
-          <strong>{meter.vco2Frequency > 0 ? formatParamValue("vco2Coarse", meter.vco2Frequency) : "—"}</strong>
-        </div>
-        <div className="voice-readout">
-          <span>ALLOCATION</span>
-          <strong>{allocatedLow !== null && allocatedHigh !== null ? `${allocatedLow} · ${allocatedHigh}` : "gate closed"}</strong>
-        </div>
-        <OutputMeter peak={meter.peak} />
+        <EngineTelemetry
+          engine={engine}
+          running={powered}
+          allocatedLow={allocatedLow}
+          allocatedHigh={allocatedHigh}
+        />
         <div className="network-status"><i className={online ? "is-online" : ""} />{online ? "Online" : offlineCapable ? "Offline ready" : "Offline unavailable"}</div>
       </div>
 
