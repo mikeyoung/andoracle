@@ -21,13 +21,15 @@ describe("panel screw coverage", () => {
   it("installs the shared overlay in every signal panel and both auxiliary panels", () => {
     const app = readFileSync(resolve("src/App.tsx"), "utf8");
     const panelLoopStart = app.indexOf("PANEL_SECTIONS.map");
-    const panelLoopEnd = app.indexOf("</section>", panelLoopStart);
+    const panelLoopEnd = app.indexOf("</div>", panelLoopStart);
     const panelLoop = app.slice(panelLoopStart, panelLoopEnd);
+    const panel = readFileSync(resolve("src/components/SynthPanel.tsx"), "utf8");
     const midi = readFileSync(resolve("src/components/MidiInputControl.tsx"), "utf8");
     const keyboard = readFileSync(resolve("src/components/Keyboard.tsx"), "utf8");
 
     expect(panelLoopStart).toBeGreaterThanOrEqual(0);
-    expect(panelLoop.match(/<PanelScrews \/>/g)).toHaveLength(1);
+    expect(panelLoop.match(/<SynthPanel/g)).toHaveLength(1);
+    expect(panel.match(/<PanelScrews \/>/g)).toHaveLength(1);
     expect(midi).toMatch(/<section className="midi-strip"[\s\S]*?<PanelScrews \/>/);
     expect(midi.match(/<PanelScrews \/>/g)).toHaveLength(1);
     expect(keyboard).toMatch(/<section className="keyboard-module"[\s\S]*?<PanelScrews \/>/);

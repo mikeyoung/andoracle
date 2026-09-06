@@ -20,6 +20,21 @@ interface PpcPadsProps {
 export type PadKind = "down" | "vibrato" | "up";
 export type PadActivation = " " | "Enter" | "assistive";
 
+const PPC_PAD_KINDS = ["down", "vibrato", "up"] as const;
+const PPC_PAD_LABELS: Readonly<Record<PadKind, string>> = {
+  down: "Bend down",
+  vibrato: "Vibrato",
+  up: "Bend up",
+};
+
+export interface PpcPointerState {
+  readonly kind: PadKind;
+  depth: number;
+  /** Geometry captured when pointer capture begins; touch-action prevents gesture scrolling. */
+  readonly top: number;
+  readonly height: number;
+}
+
 export const isPadActivationKey = (key: string): key is Exclude<PadActivation, "assistive"> => (
   key === " " || key === "Enter"
 );
@@ -40,18 +55,36 @@ export const ppcPointerDepth = (
   return Math.max(0, Math.min(1, rawDepth));
 };
 
-export const clearPpcOwnership = (
-  pointerValues: Map<number, { kind: PadKind; depth: number }>,
+/** Updates one captured pointer without forcing another layout measurement. */
+export const updatePpcPointerDepth = (
+  pointer: PpcPointerState,
+  clientY: number,
+  pressure: number,
+  pointerType: string,
+): boolean => {
+  const nextDepth = ppcPointerDepth(
+    clientY,
+    pointer.top,
+    pointer.height,
+    pressure,
+    pointerType,
+  );
+  if (Object.is(pointer.depth, nextDepth)) return false;
+  pointer.depth = nextDepth;
+  return true;
+};
+
+export const clearPpcOwnership = <PointerValue extends { kind: PadKind; depth: number }>(
+  pointerValues: Map<number, PointerValue>,
   keyboardActivations: Record<PadKind, Set<PadActivation>>,
   clickSuppressions: Record<PadKind, Set<Exclude<PadActivation, "assistive">>>,
   suppressionTimers: Map<string, number>,
   clearTimer: (timer: number) => void,
 ): boolean => {
   const wasActive = pointerValues.size > 0
-    || (Object.keys(keyboardActivations) as PadKind[])
-      .some((kind) => keyboardActivations[kind].size > 0);
+    || PPC_PAD_KINDS.some((kind) => keyboardActivations[kind].size > 0);
   pointerValues.clear();
-  for (const kind of Object.keys(keyboardActivations) as PadKind[]) {
+  for (const kind of PPC_PAD_KINDS) {
     keyboardActivations[kind].clear();
     clickSuppressions[kind].clear();
   }
@@ -62,7 +95,7 @@ export const clearPpcOwnership = (
 
 function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }: PpcPadsProps) {
   const [pressed, setPressed] = useState<Set<PadKind>>(new Set());
-  const pointerValues = useRef(new Map<number, { kind: PadKind; depth: number }>());
+  const pointerValues = useRef(new Map<number, PpcPointerState>());
   const keyboardActivations = useRef<Record<PadKind, Set<PadActivation>>>({
     down: new Set(),
     vibrato: new Set(),
@@ -91,40 +124,47 @@ function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }
     if (wasActive) onPerformanceRef.current({ bendSemitones: 0, vibratoSemitones: 0 });
   };
 
-  const emitPerformance = useCallback((): void => {
+  const emitPerformance = useCallback((updatePressed = true): void => {
     let down = keyboardActivations.current.down.size > 0 ? -bendRange : 0;
     let vibrato = keyboardActivations.current.vibrato.size > 0 ? vibratoRange : 0;
     let up = keyboardActivations.current.up.size > 0 ? bendRange : 0;
-    const activeKinds = new Set<PadKind>();
-    for (const kind of ["down", "vibrato", "up"] as const) {
-      if (keyboardActivations.current[kind].size > 0) activeKinds.add(kind);
+    const activeKinds = updatePressed ? new Set<PadKind>() : null;
+    if (activeKinds) {
+      for (const kind of PPC_PAD_KINDS) {
+        if (keyboardActivations.current[kind].size > 0) activeKinds.add(kind);
+      }
     }
     for (const pointer of pointerValues.current.values()) {
-      activeKinds.add(pointer.kind);
+      activeKinds?.add(pointer.kind);
       if (pointer.kind === "down") down = Math.min(down, -bendRange * pointer.depth);
       else if (pointer.kind === "up") up = Math.max(up, bendRange * pointer.depth);
       else vibrato = Math.max(vibrato, vibratoRange * pointer.depth);
     }
-    setPressed((current) => (
-      current.size === activeKinds.size && [...current].every((kind) => activeKinds.has(kind))
-        ? current
-        : activeKinds
-    ));
+    if (activeKinds) {
+      setPressed((current) => (
+        current.size === activeKinds.size && PPC_PAD_KINDS.every(
+          (kind) => current.has(kind) === activeKinds.has(kind),
+        )
+          ? current
+          : activeKinds
+      ));
+    }
     onPerformanceRef.current({
       bendSemitones: down + up,
       vibratoSemitones: vibrato,
     });
   }, [bendRange, vibratoRange]);
 
-  const depthForEvent = (event: PointerEvent<HTMLButtonElement>): number => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    return ppcPointerDepth(event.clientY, bounds.top, bounds.height, event.pressure, event.pointerType);
-  };
-
   const activate = (kind: PadKind, event: PointerEvent<HTMLButtonElement>): void => {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    pointerValues.current.set(event.pointerId, { kind, depth: depthForEvent(event) });
+    const bounds = event.currentTarget.getBoundingClientRect();
+    pointerValues.current.set(event.pointerId, {
+      kind,
+      depth: ppcPointerDepth(event.clientY, bounds.top, bounds.height, event.pressure, event.pointerType),
+      top: bounds.top,
+      height: bounds.height,
+    });
     emitPerformance();
   };
 
@@ -182,8 +222,7 @@ function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }
   useEffect(() => {
     if (
       pointerValues.current.size > 0
-      || (Object.keys(keyboardActivations.current) as PadKind[])
-        .some((kind) => keyboardActivations.current[kind].size > 0)
+      || PPC_PAD_KINDS.some((kind) => keyboardActivations.current[kind].size > 0)
     ) {
       emitPerformance();
     }
@@ -207,28 +246,30 @@ function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }
     reset(true);
   }, [resetEpoch]);
 
-  const labels: Record<PadKind, string> = {
-    down: "Bend down",
-    vibrato: "Vibrato",
-    up: "Bend up",
-  };
-
   return (
     <div className="ppc" role="group" aria-label="Proportional pitch controls">
       <span className="ppc-title">PPC</span>
-      {(Object.keys(labels) as PadKind[]).map((kind) => (
+      {PPC_PAD_KINDS.map((kind) => (
         <button
           key={kind}
           type="button"
           className={`ppc-pad ppc-pad--${kind}${pressed.has(kind) ? " is-pressed" : ""}`}
-          aria-label={`${labels[kind]} pressure pad`}
+          aria-label={`${PPC_PAD_LABELS[kind]} pressure pad`}
           aria-pressed={pressed.has(kind)}
           aria-keyshortcuts="Enter Space"
           onPointerDown={(event) => activate(kind, event)}
           onPointerMove={(event) => {
             if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-            pointerValues.current.set(event.pointerId, { kind, depth: depthForEvent(event) });
-            emitPerformance();
+            const pointer = pointerValues.current.get(event.pointerId);
+            if (!pointer || !updatePpcPointerDepth(
+              pointer,
+              event.clientY,
+              event.pressure,
+              event.pointerType,
+            )) return;
+            // Pointer membership cannot change during a captured move. Keep
+            // depth audio-rate responsive without enqueueing React state work.
+            emitPerformance(false);
           }}
           onPointerUp={(event) => releasePointer(event.pointerId)}
           onPointerCancel={(event) => releasePointer(event.pointerId)}
@@ -243,7 +284,7 @@ function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }
           onBlur={() => releasePad(kind)}
         >
           <span>{kind === "down" ? "−" : kind === "up" ? "+" : "≈"}</span>
-          <b>{labels[kind]}</b>
+          <b>{PPC_PAD_LABELS[kind]}</b>
         </button>
       ))}
     </div>

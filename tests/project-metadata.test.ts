@@ -85,11 +85,19 @@ describe("Andoracle project metadata", () => {
 
   it("ships IIS configuration required by the deployed PWA", () => {
     const webConfig = readProjectFile("public/web.config");
+    const serviceWorkerLocation = webConfig.match(
+      /<location path="sw\.js">([\s\S]*?)<\/location>/,
+    )?.[1] ?? "";
 
     expect(webConfig).toContain('<add value="index.html" />');
     expect(webConfig).toContain('<mimeMap fileExtension=".webmanifest" mimeType="application/manifest+json" />');
     expect(webConfig).toContain('<location path="sw.js">');
-    expect(webConfig).toContain('<clientCache cacheControlMode="DisableCache" />');
+    expect(serviceWorkerLocation).toContain('<clientCache cacheControlMode="DisableCache" />');
+    expect(serviceWorkerLocation).toContain(
+      '<add name="Cache-Control" value="no-cache, no-store, must-revalidate" />',
+    );
+    expect(serviceWorkerLocation).toContain('<add name="Pragma" value="no-cache" />');
+    expect(serviceWorkerLocation).toContain('<add name="Expires" value="0" />');
   });
 
   it("states the emulation boundary in the durable project documentation", () => {
@@ -101,5 +109,15 @@ describe("Andoracle project metadata", () => {
     expect(readme).toContain("not component-for-component circuit simulation");
     expect(research).toContain("guides Andoracle's functional behavior and signal routing");
     expect(app).toContain("ARP Odyssey-inspired duophonic browser synthesizer");
+  });
+
+  it("keeps the documented panic control aligned with its visible UI label", () => {
+    const readme = readProjectFile("README.md");
+    const app = readProjectFile("src/App.tsx");
+
+    expect(readme).toContain("Use **Panic** to release every physical note");
+    expect(readme).not.toContain("Use **All notes off**");
+    expect(app).toContain('aria-label="Panic: all notes off"');
+    expect(app).toMatch(/>\s*Panic\s*<\/button>/);
   });
 });

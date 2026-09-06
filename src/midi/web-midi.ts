@@ -544,6 +544,10 @@ export class WebMidiSession {
             return;
           }
           if (input.connection !== "open") {
+            // A non-conforming driver can resolve open() without transitioning
+            // the port. Do not leave that half-open host resource behind or
+            // let repeated refreshes accumulate driver-owned handles.
+            await this.closeIfUnowned(input, rawOperation);
             throw new Error(`${input.name?.trim() || "MIDI input"} did not enter the open state.`);
           }
           const owner = liveInputOwners.get(input)?.deref();

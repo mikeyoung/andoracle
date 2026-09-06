@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { MidiInputSummary } from "../midi/web-midi";
 import { PanelScrews } from "./PanelScrews";
 
@@ -12,7 +13,7 @@ interface MidiInputControlProps {
   onRefresh: () => void;
 }
 
-export function MidiInputControl({
+function MidiInputControlComponent({
   supported,
   unsupportedReason,
   enabled,
@@ -60,3 +61,5 @@ export function MidiInputControl({
     </section>
   );
 }
+
+export const MidiInputControl = memo(MidiInputControlComponent);

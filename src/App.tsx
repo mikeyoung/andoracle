@@ -3,12 +3,10 @@ import { OdysseyAudioEngine, type AudioEngineStatus } from "./audio/engine";
 import type { PerformanceState } from "./audio/dsp-core";
 import { DirectEntryModal } from "./components/DirectEntryModal";
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog";
-import { ExternalInputControl } from "./components/ExternalInputControl";
 import { HelpDialog } from "./components/HelpDialog";
 import { Keyboard } from "./components/Keyboard";
 import { MidiInputControl } from "./components/MidiInputControl";
 import { EngineTelemetry } from "./components/OutputMeter";
-import { PanelScrews } from "./components/PanelScrews";
 import {
   PatchLibraryDialog,
   type PatchLibraryMode,
@@ -20,13 +18,7 @@ import {
   type SequenceSaveOutcome,
 } from "./components/SequenceCommitDialog";
 import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
-import {
-  ChoiceControl,
-  RangeControl,
-  RoutedFader,
-  ToggleControl,
-} from "./components/ParameterControls";
-import { PpcPads } from "./components/PpcPads";
+import { SynthPanel } from "./components/SynthPanel";
 import { OperationCancellationRegistry } from "./cancellable-operation";
 import {
   HOST_OPERATION_UI_TIMEOUT_MS,
@@ -83,7 +75,7 @@ import {
   NoteSequenceRecorder,
   SEQUENCE_SOURCE_PREFIX,
 } from "./sequencer/transport";
-import { PANEL_SECTIONS, type LayoutItem } from "./ui/layout";
+import { PANEL_SECTIONS } from "./ui/layout";
 
 // Keep the pre-Andoracle key so existing users retain their last patch after the rename.
 const PATCH_STORAGE_KEY = "arpy-odyssey:last-patch:v1";
@@ -304,6 +296,10 @@ function App() {
   } | null>(null);
   const [userPatches, setUserPatches] = useState<readonly UserPatch[]>(() => readUserPatches().patches);
   const [userSequences, setUserSequences] = useState<readonly UserNoteSequence[]>(() => readUserSequences().sequences);
+  const sequenceNames = useMemo(
+    () => userSequences.map((sequence) => sequence.name),
+    [userSequences],
+  );
   const [activeSequenceName, setActiveSequenceName] = useState<string | null>(null);
   const [sequenceRecording, setSequenceRecording] = useState(false);
   const [sequencePlaybackState, setSequencePlaybackState] = useState<SequencePlaybackState>("stopped");
@@ -835,7 +831,7 @@ function App() {
     };
   }, []);
 
-  const toggleSequenceRecording = (): void => {
+  const toggleSequenceRecording = useCallback((): void => {
     const recorder = sequenceRecorderRef.current;
     if (!recorder) return;
     if (recorder.isRecording) {
@@ -856,9 +852,9 @@ function App() {
     );
     setSequenceRecording(true);
     setNotice("Recording keyboard notes. Press Record again to stop; one minute of silence stops automatically.");
-  };
+  }, [finishSequenceRecording, revokeActiveLibraryDeletion]);
 
-  const selectSequence = (name: string): void => {
+  const selectSequence = useCallback((name: string): void => {
     sequenceOperationRef.current += 1;
     sequencePlayerRef.current?.stop(false);
     setSequencePlaybackState("stopped");
@@ -889,7 +885,7 @@ function App() {
     activeSequenceDataRef.current = sequence.data;
     setActiveSequenceName(sequence.name);
     setNotice(`Loaded sequence “${sequence.name}”.`);
-  };
+  }, [userSequences]);
 
   const saveSequenceTake = async (
     name: string,
@@ -1180,7 +1176,7 @@ function App() {
     }
   };
 
-  const loadNamedPatch = (name: string): string | null => {
+  const loadNamedPatch = useCallback((name: string): string | null => {
     const patch = userPatches.find((candidate) => candidate.name === name);
     if (!patch) return "That saved patch is no longer available. Close this dialog and try again.";
 
@@ -1195,7 +1191,12 @@ function App() {
     syncPerformance(next);
     setNotice(`Loaded user patch “${patch.name}”. Audio power and connected devices were left unchanged.`);
     return null;
-  };
+  }, [engine, syncPerformance, userPatches]);
+
+  const selectUserPatch = useCallback((name: string): void => {
+    const error = loadNamedPatch(name);
+    if (error) setNotice(error);
+  }, [loadNamedPatch]);
 
   const openActivePatchDeletion = (origin: HTMLButtonElement): void => {
     if (sequenceRecording || sequenceRecorderRef.current?.isRecording) {
@@ -1217,7 +1218,7 @@ function App() {
     setDeleteConfirmation({ kind: "patch", patch, origin });
   };
 
-  const openActiveRecordingDeletion = (origin: HTMLButtonElement): void => {
+  const openActiveRecordingDeletion = useCallback((origin: HTMLButtonElement): void => {
     const sequence = activeSequenceName
       ? userSequences.find(
         (candidate) => userSequenceNameKey(candidate.name) === userSequenceNameKey(activeSequenceName),
@@ -1231,7 +1232,7 @@ function App() {
     setPatchLibraryDialog(null);
     setHelpDialogOrigin(null);
     setDeleteConfirmation({ kind: "recording", sequence, origin });
-  };
+  }, [activeSequenceName, sequenceRecording, userSequences]);
 
   const beginDeleteOperationAuthority = (
     kind: DeleteConfirmationTarget["kind"],
@@ -1496,7 +1497,7 @@ function App() {
     }
   };
 
-  const playSequence = async (): Promise<void> => {
+  const playSequence = useCallback(async (): Promise<void> => {
     const player = sequencePlayerRef.current;
     if (!player || sequenceRecording) return;
     if (player.isPlaying) return;
@@ -1567,25 +1568,34 @@ function App() {
     } else {
       setSequencePlaybackState("stopped");
     }
-  };
+  }, [
+    activeSequenceName,
+    engine,
+    externalInputBusy,
+    powerBusy,
+    powered,
+    sequenceRecording,
+    syncPerformance,
+    userSequences,
+  ]);
 
-  const pauseSequencePlayback = (): void => {
+  const pauseSequencePlayback = useCallback((): void => {
     const player = sequencePlayerRef.current;
     if (!player?.pause()) return;
     sequenceOperationRef.current += 1;
     setSequencePlaybackState("paused");
     setNotice("Sequence paused. Play resumes from this position; Stop returns to the beginning.");
-  };
+  }, []);
 
-  const stopSequencePlayback = (): void => {
+  const stopSequencePlayback = useCallback((): void => {
     const player = sequencePlayerRef.current;
     if (!player?.isActive) return;
     sequenceOperationRef.current += 1;
     player.stop();
     setSequencePlaybackState("stopped");
-  };
+  }, []);
 
-  const toggleExternalInput = async (): Promise<void> => {
+  const toggleExternalInput = useCallback(async (): Promise<void> => {
     if (powerBusy) return;
     if (externalInputBusy) {
       const operation = ++externalInputOperationRef.current;
@@ -1672,7 +1682,14 @@ function App() {
         if (mountedRef.current) setExternalInputBusy(false);
       }
     }
-  };
+  }, [
+    engine,
+    externalInputBusy,
+    externalInputEnabled,
+    powerBusy,
+    powered,
+    syncPerformance,
+  ]);
 
   const panic = (): void => {
     sequenceOperationRef.current += 1;
@@ -1817,7 +1834,7 @@ function App() {
     return () => session.setHandlers(NOOP_MIDI_HANDLERS);
   }, [midiAllSoundOff, midiModulation, midiPitchBend, noteOff, noteOn]);
 
-  const toggleMidi = async (): Promise<void> => {
+  const toggleMidi = useCallback(async (): Promise<void> => {
     if (!midiAvailability.supported) return;
     if (midiBusy) {
       const operation = ++midiOperationRef.current;
@@ -1867,9 +1884,9 @@ function App() {
     } finally {
       if (mountedRef.current && operation === midiOperationRef.current) setMidiBusy(false);
     }
-  };
+  }, [midiAvailability.supported, midiBusy, midiEnabled]);
 
-  const refreshMidi = async (): Promise<void> => {
+  const refreshMidi = useCallback(async (): Promise<void> => {
     if (midiBusy) return;
     const operation = ++midiOperationRef.current;
     setMidiBusy(true);
@@ -1888,7 +1905,7 @@ function App() {
     } finally {
       if (mountedRef.current && operation === midiOperationRef.current) setMidiBusy(false);
     }
-  };
+  }, [midiBusy]);
 
   const install = async (): Promise<void> => {
     if (!installPrompt) return;
@@ -1942,53 +1959,6 @@ function App() {
       browserOperations.finish("pwa-update", cancellation);
       updateBusyRef.current = false;
       if (mountedRef.current) setUpdateBusy(false);
-    }
-  };
-
-  const renderItem = (item: LayoutItem, accent: string, index: number) => {
-    const shared = {
-      accent,
-      onChange: changeParam,
-      onDirectEdit: openDirectEditor,
-    };
-    switch (item.kind) {
-      case "range":
-        return (
-          <RangeControl
-            key={`${item.param}-${index}`}
-            param={item.param}
-            value={params[item.param]}
-            displayScale={item.param === "vco1Coarse" && params.vco1Mode < 0.5 ? 0.01 : 1}
-            {...shared}
-          />
-        );
-      case "choice":
-        return <ChoiceControl key={`${item.param}-${index}`} param={item.param} value={params[item.param]} {...shared} />;
-      case "toggle":
-        return <ToggleControl key={`${item.param}-${index}`} param={item.param} value={params[item.param]} {...shared} />;
-      case "route":
-        return <RoutedFader key={`${item.source}-${index}`} source={item.source} amount={item.amount} values={params} {...shared} />;
-      case "external":
-        return (
-          <ExternalInputControl
-            key={`external-${index}`}
-            enabled={externalInputEnabled}
-            busy={externalInputBusy}
-            disabled={powerBusy}
-            error={externalInputError}
-            onToggle={() => void toggleExternalInput()}
-          />
-        );
-      case "ppc":
-        return (
-          <PpcPads
-            key={`ppc-${index}`}
-            bendRange={params.ppcBendRange}
-            vibratoRange={params.ppcVibratoRange}
-            resetEpoch={inputResetEpoch}
-            onPerformance={performance}
-          />
-        );
     }
   };
 
@@ -2058,10 +2028,7 @@ function App() {
                 userPatches={userPatches}
                 activeUserPatchName={activeUserPatchName}
                 selectedFactoryName={presetName}
-                onSelectUserPatch={(name) => {
-                  const error = loadNamedPatch(name);
-                  if (error) setNotice(error);
-                }}
+                onSelectUserPatch={selectUserPatch}
                 onSelectFactoryPatch={applyPatch}
               />
             </div>
@@ -2101,14 +2068,14 @@ function App() {
             </div>
           </div>
           <SequenceTransport
-            sequenceNames={userSequences.map((sequence) => sequence.name)}
+            sequenceNames={sequenceNames}
             activeName={activeSequenceName}
             recording={sequenceRecording}
             playbackState={sequencePlaybackState}
             recordButtonRef={recordButtonRef}
             onSelect={selectSequence}
             onRecord={toggleSequenceRecording}
-            onPlay={() => void playSequence()}
+            onPlay={playSequence}
             onPause={pauseSequencePlayback}
             onStop={stopSequencePlayback}
             onDelete={openActiveRecordingDeletion}
@@ -2200,21 +2167,22 @@ function App() {
           <span>VCO 1 / VCO 2 / noise / ring</span><i>→</i><span>mixer</span><i>→</i><span>delay</span><i>→</i><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA</span><i>→</i><span>output</span>
         </div>
         <div className="panel-grid">
-          {PANEL_SECTIONS.map((section) => {
-            const hasRoutedFaders = section.items.some((item) => item.kind === "route");
-            return (
-              <section key={section.id} className={`module module--${section.id}`} style={{ "--module-accent": section.accent } as React.CSSProperties}>
-                <PanelScrews />
-                <header className="module-header">
-                  <span className="module-eyebrow">{section.eyebrow}</span>
-                  <h2>{section.title}</h2>
-                </header>
-                <div className={`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}`}>
-                  {section.items.map((item, index) => renderItem(item, section.accent, index))}
-                </div>
-              </section>
-            );
-          })}
+          {PANEL_SECTIONS.map((section) => (
+            <SynthPanel
+              key={section.id}
+              section={section}
+              params={params}
+              externalInputEnabled={externalInputEnabled}
+              externalInputBusy={externalInputBusy}
+              externalInputError={externalInputError}
+              powerBusy={powerBusy}
+              inputResetEpoch={inputResetEpoch}
+              onChange={changeParam}
+              onDirectEdit={openDirectEditor}
+              onToggleExternalInput={toggleExternalInput}
+              onPerformance={performance}
+            />
+          ))}
         </div>
 
         <MidiInputControl
@@ -2224,8 +2192,8 @@ function App() {
           busy={midiBusy}
           error={midiError}
           inputs={midiInputs}
-          onToggle={() => void toggleMidi()}
-          onRefresh={() => void refreshMidi()}
+          onToggle={toggleMidi}
+          onRefresh={refreshMidi}
         />
 
         <Keyboard

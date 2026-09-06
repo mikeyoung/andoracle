@@ -22,9 +22,9 @@ describe("dialog source contracts", () => {
   });
 
   it("marks every panel containing routed faders for aligned selector spacing", () => {
-    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const source = readFileSync(resolve("src/components/SynthPanel.tsx"), "utf8");
 
-    expect(source).toContain('section.items.some((item) => item.kind === "route")');
+    expect(source).toContain('item.kind === "route"');
     expect(source).toContain('`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}`');
   });
 
@@ -159,7 +159,7 @@ describe("dialog source contracts", () => {
 
   it("keeps engine power state synchronized when deletion cancels a pending Play", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
-    const playStart = source.indexOf("const playSequence = async");
+    const playStart = source.indexOf("const playSequence = useCallback(async");
     const powerStarted = source.indexOf("await engine.powerOn(paramsRef.current)", playStart);
     const powerSynchronized = source.indexOf("setPowered(true)", powerStarted);
     const obsoletePlaybackGuard = source.indexOf(

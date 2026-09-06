@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Ref } from "react";
+import { memo, useEffect, useRef, type Ref } from "react";
 import { DeferredSelectFocusRelease, type SelectInteractionModality } from "./select-focus";
 
 export type SequencePlaybackState = "stopped" | "playing" | "paused";
@@ -18,7 +18,7 @@ interface SequenceTransportProps {
 }
 
 /** Persistent, touch-sized access to the local note-sequence transport. */
-export function SequenceTransport({
+function SequenceTransportComponent({
   sequenceNames,
   activeName,
   recording,
@@ -139,3 +139,5 @@ export function SequenceTransport({
     </div>
   );
 }
+
+export const SequenceTransport = memo(SequenceTransportComponent);

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { FACTORY_PRESETS } from "../synth/presets";
 import { userPatchNameKey, type UserPatch } from "../synth/user-patches";
 import { DeferredSelectFocusRelease, type SelectInteractionModality } from "./select-focus";
@@ -33,7 +33,7 @@ export const resolvePatchSelection = (
 };
 
 /** Persistent selector for immutable factory patches and every local user patch. */
-export function PatchSelector({
+function PatchSelectorComponent({
   userPatches,
   activeUserPatchName,
   selectedFactoryName,
@@ -93,3 +93,5 @@ export function PatchSelector({
     </select>
   );
 }
+
+export const PatchSelector = memo(PatchSelectorComponent);

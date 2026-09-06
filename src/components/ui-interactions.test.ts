@@ -42,6 +42,7 @@ import {
   PpcPads,
   ppcPointerDepth,
   shouldToggleAssistivePad,
+  updatePpcPointerDepth,
   type PadActivation,
   type PadKind,
 } from "./PpcPads";
@@ -218,6 +219,22 @@ describe("PPC interaction contracts", () => {
   it("uses actual pen pressure while preserving position control for touch", () => {
     expect(ppcPointerDepth(280, 100, 200, 0.8, "pen")).toBe(0.8);
     expect(ppcPointerDepth(280, 100, 200, 0.8, "touch")).toBeCloseTo(0.1);
+  });
+
+  it("reuses pointer-down geometry and suppresses unchanged move work", () => {
+    const pointer = {
+      kind: "up" as const,
+      depth: 0.5,
+      top: 100,
+      height: 200,
+    };
+
+    expect(updatePpcPointerDepth(pointer, 200, 0, "touch")).toBe(false);
+    expect(pointer.depth).toBe(0.5);
+    expect(updatePpcPointerDepth(pointer, 150, 0, "touch")).toBe(true);
+    expect(pointer.depth).toBe(0.75);
+    expect(updatePpcPointerDepth(pointer, 275, 0.4, "pen")).toBe(true);
+    expect(pointer.depth).toBe(0.4);
   });
 
   it("renders three pressed-state pads with keyboard shortcut metadata", () => {

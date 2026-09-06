@@ -716,6 +716,30 @@ describe("Web MIDI decoding", () => {
     await session.disconnect();
   });
 
+  it("closes a port whose open promise resolves without entering the open state", async () => {
+    const input = new FakeMidiInput("stalled-keys", "Stalled Keys");
+    input.open.mockImplementationOnce(async () => input as unknown as MIDIInput);
+    const access = new FakeMidiAccess();
+    access.inputs.set(input.id, input as unknown as MIDIInput);
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", {
+      requestMIDIAccess: vi.fn(async () => access as unknown as MIDIAccess),
+    });
+    const handlers = makeHandlers();
+    const session = new WebMidiSession(handlers);
+
+    await expect(session.connect()).resolves.toEqual([]);
+    expect(handlers.error).toHaveBeenCalledWith("Stalled Keys did not enter the open state.");
+    expect(input.close).toHaveBeenCalledTimes(1);
+    expect(input.onmidimessage).toBeNull();
+
+    await expect(session.refresh()).resolves.toEqual([
+      { id: "stalled-keys", name: "Stalled Keys", manufacturer: "Test" },
+    ]);
+    expect(input.open).toHaveBeenCalledTimes(2);
+    await session.disconnect();
+  });
+
   it("falls back to a remaining device's latest wheel values after unplug", async () => {
     const first = new FakeMidiInput("first", "First Keys");
     const second = new FakeMidiInput("second", "Second Keys");

@@ -22,7 +22,7 @@ Open the printed local URL, press **Power on** to enable audio, then play the on
 - Open **Help** for a concise guide to every supported way of playing Andoracle.
 - Enable **Auto gate** for sound without holding a key.
 - Select the transpose-glide revision behavior, original or repaired Type III cutoff scaling, pedal override, and portamento-foot-switch bypass from the panel.
-- Use **All notes off** to release every physical note, PPC gesture, and the auto gate.
+- Use **Panic** to release every physical note, PPC gesture, and the auto gate.
 - Press **Connect MIDI** to authorize compatible USB or Bluetooth MIDI keyboards. All detected inputs are monitored, hot-plugged devices refresh automatically, pitch bend uses the panel bend range, and CC1 modulation uses the panel vibrato depth. MIDI access is optional and requires a browser with Web MIDI support on HTTPS or localhost.
 - Use **External audio** to route an audio-interface or microphone input through the mixer, stereo delay, VCF, HPF, and VCA. The browser asks for input permission only when you press it.
 - Patch edits save automatically in local storage and are encoded in the URL fragment. Use **Share Patch** (or copy the current browser URL) to share all 80 patch controls; opening it restores the patch without restoring audio power, held notes, or hardware permissions. Factory patches remain available from the header.
