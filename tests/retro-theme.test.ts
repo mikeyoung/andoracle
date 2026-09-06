@@ -35,6 +35,7 @@ describe("1950s electronics-console finish", () => {
     expect(styles).not.toContain("backdrop-filter");
     expect(styles).toMatch(/body\s*\{[\s\S]*?background-image:[\s\S]*?radial-gradient[\s\S]*?repeating-linear-gradient/);
     expect(styles).toMatch(/\.module\s*\{[\s\S]*?var\(--ivory-raised\)[\s\S]*?var\(--ivory-panel\)/);
+    expect(styles).toMatch(/\.midi-strip\s*\{[\s\S]*?var\(--ivory-raised\)[\s\S]*?var\(--ivory-panel\)/);
     expect(styles).toMatch(/\.keyboard-module\s*\{[\s\S]*?background:[\s\S]*?radial-gradient[\s\S]*?linear-gradient/);
   });
 

@@ -33,7 +33,11 @@ import {
   KeyedHostOperationGate,
   createHostOperationDeadline,
 } from "./host-operation";
-import { NoteOwnershipIndex } from "./note-ownership";
+import {
+  NoteOwnershipIndex,
+  findNoteExtremes,
+  noteSetsMatch,
+} from "./note-ownership";
 import {
   WebMidiSession,
   combinePerformanceSources,
@@ -46,7 +50,6 @@ import { usePwaRegistration, useServiceWorkerCapability } from "./pwa/use-pwa-re
 import {
   DEFAULT_PARAMS,
   PARAM_KEYS,
-  formatParamValue,
   normalizeParamValue,
   normalizePatch,
   type ParamKey,
@@ -600,7 +603,11 @@ function App() {
   }, []);
 
   const syncActiveNotes = useCallback((): void => {
-    if (mountedRef.current) setActiveNotes(new Set(noteSources.current.values()));
+    if (!mountedRef.current) return;
+    const nextNotes = new Set(noteSources.current.values());
+    setActiveNotes((currentNotes) => (
+      noteSetsMatch(currentNotes, nextNotes) ? currentNotes : nextNotes
+    ));
   }, []);
 
   const syncPerformance = useCallback((settings: SynthParams = paramsRef.current): void => {
@@ -673,14 +680,21 @@ function App() {
     if (!source.startsWith(SEQUENCE_SOURCE_PREFIX)) {
       sequenceRecorderRef.current?.noteOn(source, note);
     }
+    let visibleNotesChanged = false;
     if (previous !== undefined) {
       noteSources.current.delete(source);
-      if (noteOwnerCounts.current.remove(previous)) engine.noteOff(previous);
+      if (noteOwnerCounts.current.remove(previous)) {
+        visibleNotesChanged = true;
+        engine.noteOff(previous);
+      }
     }
     noteSources.current.set(source, note);
-    if (noteOwnerCounts.current.add(note)) engine.noteOn(note);
+    if (noteOwnerCounts.current.add(note)) {
+      visibleNotesChanged = true;
+      engine.noteOn(note);
+    }
     else engine.keyboardTrigger();
-    syncActiveNotes();
+    if (visibleNotesChanged) syncActiveNotes();
   }, [engine, syncActiveNotes]);
 
   const noteOff = useCallback((source: string): void => {
@@ -690,8 +704,10 @@ function App() {
       sequenceRecorderRef.current?.noteOff(source);
     }
     noteSources.current.delete(source);
-    if (noteOwnerCounts.current.remove(note)) engine.noteOff(note);
-    syncActiveNotes();
+    if (noteOwnerCounts.current.remove(note)) {
+      engine.noteOff(note);
+      syncActiveNotes();
+    }
   }, [engine, syncActiveNotes]);
 
   const releasePhysicalNotes = useCallback((): void => {
@@ -726,7 +742,7 @@ function App() {
     for (const note of releasedNotes) engine.noteOff(note);
     performanceSources.current.ppcBendSemitones = 0;
     performanceSources.current.ppcVibratoSemitones = 0;
-    syncActiveNotes();
+    if (releasedNotes.size > 0) syncActiveNotes();
     syncPerformance();
   }, [engine, syncActiveNotes, syncPerformance]);
 
@@ -1976,17 +1992,17 @@ function App() {
     }
   };
 
-  const physicalNotes = useMemo(() => [...activeNotes].sort((a, b) => a - b), [activeNotes]);
+  const physicalNoteExtremes = useMemo(() => findNoteExtremes(activeNotes), [activeNotes]);
   const allocatedLow = powered
-    ? physicalNotes.length > 0
-      ? physicalNotes[0]
+    ? physicalNoteExtremes.low !== null
+      ? physicalNoteExtremes.low
       : params.autoRun > 0.5
         ? Math.round(params.autoNote)
         : null
     : null;
   const allocatedHigh = powered
-    ? physicalNotes.length > 0
-      ? physicalNotes[physicalNotes.length - 1]
+    ? physicalNoteExtremes.high !== null
+      ? physicalNoteExtremes.high
       : allocatedLow
     : null;
   const sampleRateOkay = audioStatus.actualSampleRate === null || audioStatus.actualSampleRate === 44100;
@@ -2180,14 +2196,6 @@ function App() {
           <span role="status" aria-live="polite" aria-atomic="true">{notice}</span>
           <span><b>Tip:</b> right-click or long-press any parameter to enter its exact value and see its valid range.</span>
         </div>
-        <Keyboard
-          activeNotes={activeNotes}
-          allocatedLow={allocatedLow}
-          allocatedHigh={allocatedHigh}
-          resetEpoch={inputResetEpoch}
-          onNoteOn={noteOn}
-          onNoteOff={noteOff}
-        />
         <div className="signal-flow" role="group" aria-label="Synthesizer signal flow">
           <span>VCO 1 / VCO 2 / noise / ring</span><i>→</i><span>mixer</span><i>→</i><span>delay</span><i>→</i><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA</span><i>→</i><span>output</span>
         </div>
@@ -2218,6 +2226,15 @@ function App() {
           inputs={midiInputs}
           onToggle={() => void toggleMidi()}
           onRefresh={() => void refreshMidi()}
+        />
+
+        <Keyboard
+          activeNotes={activeNotes}
+          allocatedLow={allocatedLow}
+          allocatedHigh={allocatedHigh}
+          resetEpoch={inputResetEpoch}
+          onNoteOn={noteOn}
+          onNoteOff={noteOff}
         />
       </main>
 

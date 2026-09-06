@@ -1,3 +1,29 @@
+export interface NoteExtremes {
+  readonly low: number | null;
+  readonly high: number | null;
+}
+
+/** Compares the pitch set shown by the keyboard without allocating or sorting. */
+export const noteSetsMatch = (left: ReadonlySet<number>, right: ReadonlySet<number>): boolean => {
+  if (left.size !== right.size) return false;
+  for (const note of left) {
+    if (!right.has(note)) return false;
+  }
+  return true;
+};
+
+/** Finds the Odyssey low/high note allocation without copying or sorting notes. */
+export const findNoteExtremes = (notes: ReadonlySet<number>): NoteExtremes => {
+  if (notes.size === 0) return { low: null, high: null };
+  let low = Number.POSITIVE_INFINITY;
+  let high = Number.NEGATIVE_INFINITY;
+  for (const note of notes) {
+    if (note < low) low = note;
+    if (note > high) high = note;
+  }
+  return { low, high };
+};
+
 /**
  * Tracks how many independent keyboard, pointer, MIDI, and sequencer sources
  * own each pitch. This keeps hot note events O(1) while preserving the rule

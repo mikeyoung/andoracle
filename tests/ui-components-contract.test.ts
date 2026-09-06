@@ -3,15 +3,21 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("dialog source contracts", () => {
-  it("places the playable keyboard between the patch indicator and signal path", () => {
+  it("places the playable keyboard at the bottom of the synthesizer", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
     const indicator = source.indexOf('<div className="usage-note">');
     const keyboard = source.indexOf("<Keyboard", indicator);
     const signalPath = source.indexOf('<div className="signal-flow"', indicator);
+    const panelGrid = source.indexOf('<div className="panel-grid">', signalPath);
+    const midiInput = source.indexOf("<MidiInputControl", panelGrid);
+    const mainEnd = source.indexOf("</main>", midiInput);
 
     expect(indicator).toBeGreaterThanOrEqual(0);
-    expect(keyboard).toBeGreaterThan(indicator);
-    expect(signalPath).toBeGreaterThan(keyboard);
+    expect(signalPath).toBeGreaterThan(indicator);
+    expect(panelGrid).toBeGreaterThan(signalPath);
+    expect(midiInput).toBeGreaterThan(panelGrid);
+    expect(keyboard).toBeGreaterThan(midiInput);
+    expect(mainEnd).toBeGreaterThan(keyboard);
     expect(source.match(/<Keyboard/g)).toHaveLength(1);
   });
 
@@ -206,7 +212,8 @@ describe("dialog source contracts", () => {
     expect(app).toContain("<EngineTelemetry");
     expect(telemetry).toContain("engine.onMeter((nextMeter) =>");
     expect(telemetry).toContain("export const EngineTelemetry = memo(EngineTelemetryComponent);");
-    expect(telemetry).toMatch(/useEffect\(\(\) => \{[\s\S]*?if \(!running\) return;[\s\S]*?return engine\.onMeter/);
+    expect(telemetry).toContain("function LiveEngineTelemetry(");
+    expect(telemetry).toMatch(/return running \? \([\s\S]*?<LiveEngineTelemetry[\s\S]*?: \([\s\S]*?<TelemetryReadout[\s\S]*?meter=\{EMPTY_ODYSSEY_METER\}/);
   });
 
   it("shares one cleaned-up storage listener across both local libraries", () => {

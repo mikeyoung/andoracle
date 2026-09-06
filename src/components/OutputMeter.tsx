@@ -64,6 +64,68 @@ interface EngineTelemetryProps {
   allocatedHigh: number | null;
 }
 
+interface TelemetryReadoutProps {
+  meter: OdysseyMeter;
+  allocatedLow: number | null;
+  allocatedHigh: number | null;
+}
+
+function TelemetryReadout({ meter, allocatedLow, allocatedHigh }: TelemetryReadoutProps) {
+  return (
+    <Fragment>
+      <div className="voice-readout">
+        <span>VCO 1</span>
+        <strong>{meter.vco1Frequency > 0
+          ? formatParamValue("vco1Coarse", meter.vco1Frequency)
+          : "—"}</strong>
+      </div>
+      <div className="voice-readout">
+        <span>VCO 2</span>
+        <strong>{meter.vco2Frequency > 0
+          ? formatParamValue("vco2Coarse", meter.vco2Frequency)
+          : "—"}</strong>
+      </div>
+      <div className="voice-readout">
+        <span>ALLOCATION</span>
+        <strong>{allocatedLow !== null && allocatedHigh !== null
+          ? `${allocatedLow} · ${allocatedHigh}`
+          : "gate closed"}</strong>
+      </div>
+      <OutputMeter peak={meter.peak} />
+    </Fragment>
+  );
+}
+
+type LiveEngineTelemetryProps = Omit<EngineTelemetryProps, "running">;
+
+/** A fresh mount for each power-on prevents a previous session's meter flashing. */
+function LiveEngineTelemetry({
+  engine,
+  allocatedLow,
+  allocatedHigh,
+}: LiveEngineTelemetryProps) {
+  const [snapshot, setSnapshot] = useState<{
+    readonly engine: OdysseyAudioEngine;
+    readonly meter: OdysseyMeter;
+  }>(() => ({ engine, meter: EMPTY_ODYSSEY_METER }));
+
+  useEffect(() => engine.onMeter((nextMeter) => {
+    setSnapshot((current) => (
+      current.engine === engine && odysseyMetersMatch(current.meter, nextMeter)
+        ? current
+        : { engine, meter: nextMeter }
+    ));
+  }), [engine]);
+
+  return (
+    <TelemetryReadout
+      meter={snapshot.engine === engine ? snapshot.meter : EMPTY_ODYSSEY_METER}
+      allocatedLow={allocatedLow}
+      allocatedHigh={allocatedHigh}
+    />
+  );
+}
+
 /**
  * Keeps the worklet's display-only update stream below the App boundary. Meter
  * frames must never make every synth control reconcile at audio-display rate.
@@ -74,40 +136,18 @@ function EngineTelemetryComponent({
   allocatedLow,
   allocatedHigh,
 }: EngineTelemetryProps) {
-  const [meter, setMeter] = useState<OdysseyMeter>(EMPTY_ODYSSEY_METER);
-
-  useEffect(() => {
-    if (!running) return;
-    return engine.onMeter((nextMeter) => {
-      setMeter((currentMeter) => (
-        odysseyMetersMatch(currentMeter, nextMeter) ? currentMeter : nextMeter
-      ));
-    });
-  }, [engine, running]);
-
-  const visibleMeter = running ? meter : EMPTY_ODYSSEY_METER;
-  return (
-    <Fragment>
-      <div className="voice-readout">
-        <span>VCO 1</span>
-        <strong>{visibleMeter.vco1Frequency > 0
-          ? formatParamValue("vco1Coarse", visibleMeter.vco1Frequency)
-          : "—"}</strong>
-      </div>
-      <div className="voice-readout">
-        <span>VCO 2</span>
-        <strong>{visibleMeter.vco2Frequency > 0
-          ? formatParamValue("vco2Coarse", visibleMeter.vco2Frequency)
-          : "—"}</strong>
-      </div>
-      <div className="voice-readout">
-        <span>ALLOCATION</span>
-        <strong>{allocatedLow !== null && allocatedHigh !== null
-          ? `${allocatedLow} · ${allocatedHigh}`
-          : "gate closed"}</strong>
-      </div>
-      <OutputMeter peak={visibleMeter.peak} />
-    </Fragment>
+  return running ? (
+    <LiveEngineTelemetry
+      engine={engine}
+      allocatedLow={allocatedLow}
+      allocatedHigh={allocatedHigh}
+    />
+  ) : (
+    <TelemetryReadout
+      meter={EMPTY_ODYSSEY_METER}
+      allocatedLow={allocatedLow}
+      allocatedHigh={allocatedHigh}
+    />
   );
 }
 

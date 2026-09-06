@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { NoteOwnershipIndex } from "./note-ownership";
+import {
+  NoteOwnershipIndex,
+  findNoteExtremes,
+  noteSetsMatch,
+} from "./note-ownership";
 
 describe("NoteOwnershipIndex", () => {
   it("reports only the first attack and final release of a shared pitch", () => {
@@ -26,5 +30,22 @@ describe("NoteOwnershipIndex", () => {
     for (let owner = 0; owner < 10_000; owner += 1) ownership.add(owner % 128);
     ownership.clear();
     for (let note = 0; note < 128; note += 1) expect(ownership.count(note)).toBe(0);
+  });
+
+  it("compares visible pitch sets independent of insertion order", () => {
+    const first = new Set([72, 48, 60]);
+    const reordered = new Set([48, 60, 72]);
+
+    expect(noteSetsMatch(first, reordered)).toBe(true);
+    expect(noteSetsMatch(first, new Set([48, 60]))).toBe(false);
+    expect(noteSetsMatch(first, new Set([48, 60, 71]))).toBe(false);
+  });
+
+  it("finds low/high allocation without sorting or mutating notes", () => {
+    const notes = new Set([67, 36, 127, 48]);
+
+    expect(findNoteExtremes(notes)).toEqual({ low: 36, high: 127 });
+    expect([...notes]).toEqual([67, 36, 127, 48]);
+    expect(findNoteExtremes(new Set())).toEqual({ low: null, high: null });
   });
 });

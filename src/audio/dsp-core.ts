@@ -280,8 +280,8 @@ class TransistorLadderFilter {
   process(input: number, feedback: number, poleCoefficient: number): number {
     const last = this.stages[3].state;
     let value = softSaturate(input - last * feedback, 1.55);
-    for (const stage of this.stages) {
-      value = stage.process(value, poleCoefficient);
+    for (let index = 0; index < this.stages.length; index += 1) {
+      value = this.stages[index].process(value, poleCoefficient);
       value = softSaturate(value, 1.22);
     }
     return softSaturate(value, 1.3);
@@ -782,8 +782,10 @@ export class OdysseyDSP {
   setParams(changes: Partial<SynthParams>): void {
     const previousGate = this.requestedKeyboardGate;
     const previousAuto = this.params.autoRun;
-    for (const [rawKey, rawValue] of Object.entries(changes)) {
+    for (const rawKey in changes) {
+      if (!Object.hasOwn(changes, rawKey)) continue;
       const key = rawKey as ParamKey;
+      const rawValue = changes[key];
       if (!(key in DEFAULT_PARAMS) || typeof rawValue !== "number") continue;
       this.params[key] = normalizeParamValue(key, rawValue);
     }
@@ -929,18 +931,20 @@ export class OdysseyDSP {
   }
 
   private refreshAllocation(trigger = false, collapseInterval = false, force = false): void {
-    const notes = this.keys.size > 0
-      ? [...this.keys].sort((a, b) => a - b)
-      : this.params.autoRun > 0.5
-        ? [Math.round(this.params.autoNote)]
-        : [];
-    const gate = notes.length > 0;
+    const hasKeys = this.keys.size > 0;
+    const autoGate = !hasKeys && this.params.autoRun > 0.5;
+    const gate = hasKeys || autoGate;
     let lowNote = this.requestedLowNote;
     let highNote = this.requestedHighNote;
-    if (notes.length > 0) {
-      lowNote = notes[0];
-      highNote = notes[notes.length - 1];
+    if (hasKeys) {
+      lowNote = Number.POSITIVE_INFINITY;
+      highNote = Number.NEGATIVE_INFINITY;
+      for (const note of this.keys) {
+        if (note < lowNote) lowNote = note;
+        if (note > highNote) highNote = note;
+      }
     }
+    else if (autoGate) lowNote = highNote = Math.round(this.params.autoNote);
     else if (collapseInterval) highNote = lowNote;
     const changed = gate !== this.requestedKeyboardGate
       || lowNote !== this.requestedLowNote
@@ -951,7 +955,15 @@ export class OdysseyDSP {
     if (changed || trigger || force) {
       if (this.articulationCount < MAX_ARTICULATION_EVENTS) {
         const insertionIndex = (this.articulationHead + this.articulationCount) % MAX_ARTICULATION_EVENTS;
-        this.articulationQueue[insertionIndex] = { gate, lowNote, highNote, trigger };
+        const reusable = this.articulationQueue[insertionIndex];
+        if (reusable) {
+          reusable.gate = gate;
+          reusable.lowNote = lowNote;
+          reusable.highNote = highNote;
+          reusable.trigger = trigger;
+        } else {
+          this.articulationQueue[insertionIndex] = { gate, lowNote, highNote, trigger };
+        }
         this.articulationCount += 1;
       } else {
         // Preserve the queued chronology and coalesce only its tail to the
@@ -970,14 +982,12 @@ export class OdysseyDSP {
   private shiftArticulation(): KeyboardArticulationEvent | undefined {
     if (this.articulationCount === 0) return undefined;
     const articulation = this.articulationQueue[this.articulationHead];
-    this.articulationQueue[this.articulationHead] = undefined;
     this.articulationHead = (this.articulationHead + 1) % MAX_ARTICULATION_EVENTS;
     this.articulationCount -= 1;
     return articulation;
   }
 
   private clearArticulationQueue(): void {
-    this.articulationQueue.fill(undefined);
     this.articulationHead = 0;
     this.articulationCount = 0;
   }

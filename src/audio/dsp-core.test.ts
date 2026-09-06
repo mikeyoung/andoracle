@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OdysseyDSP } from "./dsp-core";
+import { DEFAULT_PARAMS, type SynthParams } from "../synth/params";
 
 const render = (dsp: OdysseyDSP, frames: number): [Float32Array, Float32Array] => {
   const left = new Float32Array(frames);
@@ -113,6 +114,17 @@ describe("OdysseyDSP", () => {
     expect(dsp.getHeldNotes()).toEqual([60]);
     expect(dsp.getMeter()).toMatchObject({ gate: true, lowNote: 60, highNote: 60 });
     expect(left.some((sample) => Math.abs(sample) > 1e-4)).toBe(true);
+  });
+
+  it("applies only own parameter fields without enumerating inherited values", () => {
+    const dsp = new OdysseyDSP(44100);
+    const changes = Object.create({ autoRun: 1 }) as Partial<SynthParams>;
+    changes.masterVolume = 0.25;
+
+    dsp.setParams(changes);
+
+    expect(dsp.params.masterVolume).toBe(0.25);
+    expect(dsp.params.autoRun).toBe(DEFAULT_PARAMS.autoRun);
   });
 
   it("tunes A4 accurately from the default coarse calibration", () => {

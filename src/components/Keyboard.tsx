@@ -81,6 +81,14 @@ interface KeyboardRowGeometry {
   keys: KeyGeometry[];
 }
 
+interface RenderedKeyboardKey extends KeyGeometry {
+  readonly style: CSSProperties;
+}
+
+interface RenderedKeyboardRow extends KeyboardRowGeometry {
+  readonly renderedKeys: readonly RenderedKeyboardKey[];
+}
+
 const isWhite = (note: number): boolean => WHITE_PITCHES.has(((note % 12) + 12) % 12);
 
 export const createKeyboardRowGeometry = (startNote: number, endNote: number): KeyboardRowGeometry => {
@@ -107,11 +115,39 @@ const MOBILE_KEYBOARD_ROWS = [
   createKeyboardRowGeometry(48, 59),
   createKeyboardRowGeometry(60, 72),
 ] as const;
+const TWO_ROW_OFFSETS = [0, 7, 3] as const;
 
 const renderKeysForRow = (row: KeyboardRowGeometry): KeyGeometry[] => [
   ...row.keys.filter((key) => key.white),
   ...row.keys.filter((key) => !key.white),
 ];
+
+// Key geometry is immutable. Precompute every CSS variable once so rapid note
+// and focus updates only reconcile pressed/allocation state on the 37 buttons.
+const RENDERED_KEYBOARD_ROWS: readonly RenderedKeyboardRow[] = MOBILE_KEYBOARD_ROWS.map(
+  (row, rowIndex) => ({
+    ...row,
+    renderedKeys: renderKeysForRow(row).map((key) => {
+      const width = key.white ? 1 : BLACK_KEY_WIDTH;
+      const mobileWidth = key.white ? 1 : MOBILE_BLACK_KEY_WIDTH;
+      const localMobileLeft = key.white
+        ? key.left
+        : key.left + (BLACK_KEY_WIDTH - MOBILE_BLACK_KEY_WIDTH) / 2;
+      const desktopKey = KEYBOARD_GLOBAL_KEYS.get(key.note)!;
+      return {
+        ...key,
+        style: {
+          "--desktop-key-left": `${(desktopKey.left / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
+          "--desktop-key-width": `${(width / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
+          "--two-row-key-left": `${((TWO_ROW_OFFSETS[rowIndex] + localMobileLeft) / TWO_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+          "--two-row-key-width": `${(mobileWidth / TWO_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+          "--three-row-key-left": `${(localMobileLeft / THREE_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+          "--three-row-key-width": `${(mobileWidth / THREE_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
+        } as CSSProperties,
+      };
+    }),
+  }),
+);
 
 function KeyboardComponent({
   activeNotes,
@@ -316,7 +352,7 @@ function KeyboardComponent({
         onLostPointerCapture={end}
         onContextMenu={(event) => event.preventDefault()}
       >
-        {MOBILE_KEYBOARD_ROWS.map((row, rowIndex) => (
+        {RENDERED_KEYBOARD_ROWS.map((row, rowIndex) => (
           <div
             key={row.startNote}
             className="keyboard-surface"
@@ -324,31 +360,16 @@ function KeyboardComponent({
             aria-label={`${midiNoteName(row.startNote)} through ${midiNoteName(row.endNote)}`}
             data-keyboard-row={rowIndex + 1}
           >
-            {renderKeysForRow(row).map((key) => {
+            {row.renderedKeys.map((key) => {
               const active = activeNotes.has(key.note);
               const low = allocatedLow === key.note;
               const high = allocatedHigh === key.note;
-              const width = key.white ? 1 : BLACK_KEY_WIDTH;
-              const mobileWidth = key.white ? 1 : MOBILE_BLACK_KEY_WIDTH;
-              const localMobileLeft = key.white
-                ? key.left
-                : key.left + (BLACK_KEY_WIDTH - MOBILE_BLACK_KEY_WIDTH) / 2;
-              const twoRowOffset = rowIndex === 0 ? 0 : rowIndex === 1 ? 7 : 3;
-              const desktopKey = KEYBOARD_GLOBAL_KEYS.get(key.note)!;
-              const style = {
-                "--desktop-key-left": `${(desktopKey.left / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
-                "--desktop-key-width": `${(width / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
-                "--two-row-key-left": `${((twoRowOffset + localMobileLeft) / TWO_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
-                "--two-row-key-width": `${(mobileWidth / TWO_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
-                "--three-row-key-left": `${(localMobileLeft / THREE_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
-                "--three-row-key-width": `${(mobileWidth / THREE_ROW_KEYBOARD_WHITE_COLUMNS) * 100}%`,
-              } as CSSProperties;
               return (
                 <button
                   key={key.note}
                   type="button"
                   className={`piano-key piano-key--${key.white ? "white" : "black"}${active ? " is-active" : ""}${low ? " is-low" : ""}${high ? " is-high" : ""}`}
-                  style={style}
+                  style={key.style}
                   data-note={key.note}
                   data-row-start={key.note === row.startNote || undefined}
                   aria-label={midiNoteName(key.note)}
