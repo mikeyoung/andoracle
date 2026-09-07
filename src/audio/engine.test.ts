@@ -285,6 +285,42 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
+  it("quarantines a worklet whose message port closes before its browser error event", async () => {
+    installAudioFakes({}, {});
+    const engine = new OdysseyAudioEngine();
+    const statuses: Array<{ state: string; error: string | null }> = [];
+    const unsubscribe = engine.onStatus(({ state, error }) => statuses.push({ state, error }));
+    await engine.powerOn(DEFAULT_PARAMS);
+    const failedContext = contexts[0];
+    const failedNode = workletNodes[0];
+    const sendFailure = new DOMException("The message port is closed.", "InvalidStateError");
+    failedNode.port.postMessage.mockImplementationOnce(() => {
+      throw sendFailure;
+    });
+
+    expect(() => engine.noteOn(60)).not.toThrow();
+    expect(failedNode.port.onmessage).toBeNull();
+    expect(failedNode.port.close).toHaveBeenCalledTimes(1);
+    expect(failedNode.disconnect).toHaveBeenCalledTimes(1);
+    expect(failedContext.gainNode.disconnect).toHaveBeenCalledTimes(1);
+    expect(failedContext.close).toHaveBeenCalledTimes(1);
+    expect(statuses.at(-1)).toEqual({
+      state: "closed",
+      error: "The audio processor stopped unexpectedly. Press Power on to restart it.",
+    });
+
+    // Let the retired context's raw close release its single-flight record,
+    // then prove the next user gesture receives an entirely fresh graph.
+    await Promise.resolve();
+    await engine.powerOn(DEFAULT_PARAMS);
+    expect(contexts).toHaveLength(2);
+    expect(workletNodes).toHaveLength(2);
+    expect(contexts[1].state).toBe("running");
+
+    unsubscribe();
+    await engine.dispose();
+  });
+
   it("resumes an interrupted context without constructing a replacement", async () => {
     const engine = new OdysseyAudioEngine();
     await engine.powerOn(DEFAULT_PARAMS);

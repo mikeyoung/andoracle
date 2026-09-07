@@ -241,6 +241,9 @@ describe("note-sequence compact codec", () => {
     expect(decodeNoteSequence("AA+/ ")).toBeNull();
     expect(decodeNoteSequence("AB")).toBeNull();
     expect(decodeNoteSequence("AAB")).toBeNull();
+    expect(decodeNoteSequence("éAAA")).toBeNull();
+    expect(decodeNoteSequence("AAéA")).toBeNull();
+    expect(decodeNoteSequence("AAAé")).toBeNull();
   });
 
   it("rejects truncated, overlong, overflowing, and actionless varints", () => {

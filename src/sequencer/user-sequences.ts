@@ -229,7 +229,7 @@ export const normalizeCapturedNoteSequence = (
   const sourceEvents = eventsFromInput(input);
   if (!sourceEvents || sourceEvents.length === 0) return null;
 
-  const heldCounts = Array.from({ length: 128 }, () => 0);
+  const heldCounts = new Float64Array(128);
   const events: NoteSequenceEvent[] = [];
   let durationMs = 0;
   let noteCount = 0;
@@ -280,28 +280,36 @@ const appendUnsignedVarint = (bytes: number[], value: number): void => {
   bytes.push(remainder);
 };
 
+interface UnsignedVarintCursor {
+  value: number;
+  next: number;
+}
+
 const readUnsignedVarint = (
   bytes: Uint8Array,
   start: number,
-): readonly [value: number, next: number] | null => {
+  result: UnsignedVarintCursor,
+): boolean => {
   let value = 0;
   let factor = 1;
 
   for (let index = start; index < bytes.length; index += 1) {
     const byte = bytes[index];
     const digit = byte % 128;
-    if (digit > Math.floor((Number.MAX_SAFE_INTEGER - value) / factor)) return null;
+    if (digit > Math.floor((Number.MAX_SAFE_INTEGER - value) / factor)) return false;
     value += digit * factor;
 
     if (byte < 128) {
       // A zero most-significant group makes the varint needlessly ambiguous.
-      if (index > start && digit === 0) return null;
-      return [value, index + 1];
+      if (index > start && digit === 0) return false;
+      result.value = value;
+      result.next = index + 1;
+      return true;
     }
-    if (factor > Math.floor(Number.MAX_SAFE_INTEGER / 128)) return null;
+    if (factor > Math.floor(Number.MAX_SAFE_INTEGER / 128)) return false;
     factor *= 128;
   }
-  return null;
+  return false;
 };
 
 const encodeBase64Url = (bytes: readonly number[]): string => {
@@ -338,8 +346,19 @@ const base64UrlValues = (() => {
   return values;
 })();
 
+const base64UrlValueAt = (encoded: string, index: number): number => {
+  const code = encoded.charCodeAt(index);
+  return code < base64UrlValues.length ? base64UrlValues[code] : 255;
+};
+
 const decodeBase64Url = (encoded: string): Uint8Array | null => {
-  if (!/^[A-Za-z0-9_-]*$/.test(encoded) || encoded.length % 4 === 1) return null;
+  if (encoded.length % 4 === 1) return null;
+  // Validate before allocating the output buffer. Persisted storage is
+  // untrusted; discovering a bad character only after allocating for a very
+  // large malformed string would create avoidable memory pressure.
+  for (let index = 0; index < encoded.length; index += 1) {
+    if (base64UrlValueAt(encoded, index) === 255) return null;
+  }
   const remainder = encoded.length % 4;
   const outputLength = Math.floor(encoded.length * 6 / 8);
   const output = new Uint8Array(outputLength);
@@ -347,10 +366,10 @@ const decodeBase64Url = (encoded: string): Uint8Array | null => {
   let index = 0;
 
   while (index + 4 <= encoded.length) {
-    const first = base64UrlValues[encoded.charCodeAt(index)];
-    const second = base64UrlValues[encoded.charCodeAt(index + 1)];
-    const third = base64UrlValues[encoded.charCodeAt(index + 2)];
-    const fourth = base64UrlValues[encoded.charCodeAt(index + 3)];
+    const first = base64UrlValueAt(encoded, index);
+    const second = base64UrlValueAt(encoded, index + 1);
+    const third = base64UrlValueAt(encoded, index + 2);
+    const fourth = base64UrlValueAt(encoded, index + 3);
     const packed = first * 262_144 + second * 4_096 + third * 64 + fourth;
     output[outputIndex] = Math.floor(packed / 65_536);
     output[outputIndex + 1] = Math.floor(packed / 256) % 256;
@@ -360,15 +379,15 @@ const decodeBase64Url = (encoded: string): Uint8Array | null => {
   }
 
   if (remainder === 2) {
-    const first = base64UrlValues[encoded.charCodeAt(index)];
-    const second = base64UrlValues[encoded.charCodeAt(index + 1)];
+    const first = base64UrlValueAt(encoded, index);
+    const second = base64UrlValueAt(encoded, index + 1);
     // Unused low bits must be zero for one canonical encoding per byte stream.
     if (second % 16 !== 0) return null;
     output[outputIndex] = first * 4 + Math.floor(second / 16);
   } else if (remainder === 3) {
-    const first = base64UrlValues[encoded.charCodeAt(index)];
-    const second = base64UrlValues[encoded.charCodeAt(index + 1)];
-    const third = base64UrlValues[encoded.charCodeAt(index + 2)];
+    const first = base64UrlValueAt(encoded, index);
+    const second = base64UrlValueAt(encoded, index + 1);
+    const third = base64UrlValueAt(encoded, index + 2);
     if (third % 4 !== 0) return null;
     output[outputIndex] = first * 4 + Math.floor(second / 16);
     output[outputIndex + 1] = (second % 16) * 16 + Math.floor(third / 4);
@@ -377,23 +396,64 @@ const decodeBase64Url = (encoded: string): Uint8Array | null => {
   return output;
 };
 
+interface PreparedNoteSequence {
+  readonly data: string;
+  readonly durationMs: number;
+  readonly noteCount: number;
+  readonly eventCount: number;
+}
+
 /**
- * Encodes validated note events compactly. Typical events occupy two or three
- * bytes before base64url: an unsigned-varint millisecond delta and one action
- * byte whose high bit is note-on and whose low seven bits are the MIDI note.
+ * Validates and snapshots a take directly into its compact immutable form.
+ * This avoids cloning every event before encoding, which is material for the
+ * deliberately unlimited recording length and for writes waiting on Web Locks.
  */
-const encodeValidatedEvents = (events: readonly NoteSequenceEvent[]): string => {
+const prepareNoteSequence = (input: SequenceInput): PreparedNoteSequence | null => {
+  const events = eventsFromInput(input);
+  if (!events || events.length === 0) return null;
+
   const bytes: number[] = [];
-  for (const event of events) {
-    appendUnsignedVarint(bytes, event.deltaMs);
-    bytes.push(event.note + (event.on ? 128 : 0));
+  const heldCounts = new Float64Array(128);
+  let durationMs = 0;
+  let noteCount = 0;
+  let eventCount = 0;
+  for (const candidate of events) {
+    if (
+      !isObjectRecord(candidate)
+      || !Number.isSafeInteger(candidate.deltaMs)
+      || candidate.deltaMs < 0
+      || !Number.isInteger(candidate.note)
+      || candidate.note < 0
+      || candidate.note > 127
+      || typeof candidate.on !== "boolean"
+    ) {
+      return null;
+    }
+    if (candidate.deltaMs > Number.MAX_SAFE_INTEGER - durationMs) return null;
+    durationMs += candidate.deltaMs;
+    if (candidate.on) {
+      if (heldCounts[candidate.note] === Number.MAX_SAFE_INTEGER) return null;
+      heldCounts[candidate.note] += 1;
+      noteCount += 1;
+    } else {
+      if (heldCounts[candidate.note] === 0) return null;
+      heldCounts[candidate.note] -= 1;
+    }
+    eventCount += 1;
+    appendUnsignedVarint(bytes, candidate.deltaMs === 0 ? 0 : candidate.deltaMs);
+    bytes.push(candidate.note + (candidate.on ? 128 : 0));
   }
-  return encodeBase64Url(bytes);
+  if (noteCount === 0 || heldCounts.some((count) => count !== 0)) return null;
+  return {
+    data: encodeBase64Url(bytes),
+    durationMs,
+    noteCount,
+    eventCount,
+  };
 };
 
 export const encodeNoteSequence = (input: SequenceInput): string | null => {
-  const captured = normalizeCapturedNoteSequence(input);
-  return captured ? encodeValidatedEvents(captured.events) : null;
+  return prepareNoteSequence(input)?.data ?? null;
 };
 
 interface InspectedNoteSequence {
@@ -415,15 +475,15 @@ const inspectNoteSequence = (
   if (!bytes || bytes.length === 0) return null;
 
   const events: NoteSequenceEvent[] | null = collectEvents ? [] : null;
-  const heldCounts = Array.from({ length: 128 }, () => 0);
+  const heldCounts = new Float64Array(128);
+  const decodedDelta: UnsignedVarintCursor = { value: 0, next: 0 };
   let cursor = 0;
   let durationMs = 0;
   let noteCount = 0;
   let eventCount = 0;
   while (cursor < bytes.length) {
-    const decodedDelta = readUnsignedVarint(bytes, cursor);
-    if (!decodedDelta) return null;
-    const [deltaMs, next] = decodedDelta;
+    if (!readUnsignedVarint(bytes, cursor, decodedDelta)) return null;
+    const { value: deltaMs, next } = decodedDelta;
     if (next >= bytes.length) return null;
     const action = bytes[next];
     const note = action % 128;
@@ -660,11 +720,10 @@ const matchesUserSequenceSnapshot = (
   && Object.is(stored.noteCount, expected.noteCount)
   && Object.is(stored.eventCount, expected.eventCount);
 
-/** Adds a new named sequence without ever overwriting an existing name. */
-export const saveUserSequence = (
+const savePreparedUserSequence = (
   name: string,
-  input: SequenceInput,
-  storage: UserSequenceStorage | null = defaultStorage(),
+  prepare: () => PreparedNoteSequence | null,
+  storage: UserSequenceStorage | null,
 ): SaveUserSequenceResult => {
   const readResult = readUserSequences(storage);
   const sequences = readResult.sequences;
@@ -697,16 +756,12 @@ export const saveUserSequence = (
     };
   }
 
-  const captured = normalizeCapturedNoteSequence(input);
-  if (!captured) return { status: "invalid-sequence", sequences };
-  const data = encodeValidatedEvents(captured.events);
+  const prepared = prepare();
+  if (!prepared) return { status: "invalid-sequence", sequences };
 
   const sequence: UserNoteSequence = {
     name: normalizedName,
-    data,
-    durationMs: captured.durationMs,
-    noteCount: captured.noteCount,
-    eventCount: captured.events.length,
+    ...prepared,
   };
   const nextSequences = [...sequences, sequence];
 
@@ -718,15 +773,26 @@ export const saveUserSequence = (
   }
 };
 
+/** Adds a new named sequence without ever overwriting an existing name. */
+export const saveUserSequence = (
+  name: string,
+  input: SequenceInput,
+  storage: UserSequenceStorage | null = defaultStorage(),
+): SaveUserSequenceResult => savePreparedUserSequence(
+  name,
+  () => prepareNoteSequence(input),
+  storage,
+);
+
 /**
  * Replaces one saved take only when it still exactly matches the snapshot the
  * user confirmed. The persisted display name and collection position remain
  * stable even when the submitted name uses different case or Unicode form.
  */
-export const replaceUserSequence = (
+const replacePreparedUserSequence = (
   expected: UserNoteSequence,
-  input: SequenceInput,
-  storage: UserSequenceStorage | null = defaultStorage(),
+  prepare: () => PreparedNoteSequence | null,
+  storage: UserSequenceStorage | null,
 ): ReplaceUserSequenceResult => {
   const readResult = readUserSequences(storage);
   const sequences = readResult.sequences;
@@ -751,15 +817,12 @@ export const replaceUserSequence = (
     return { status: "stale-target", currentSequence, sequences };
   }
 
-  const captured = normalizeCapturedNoteSequence(input);
-  if (!captured) return { status: "invalid-sequence", sequences };
+  const prepared = prepare();
+  if (!prepared) return { status: "invalid-sequence", sequences };
 
   const sequence: UserNoteSequence = {
     name: currentSequence.name,
-    data: encodeValidatedEvents(captured.events),
-    durationMs: captured.durationMs,
-    noteCount: captured.noteCount,
-    eventCount: captured.events.length,
+    ...prepared,
   };
   const nextSequences = [
     ...sequences.slice(0, sequenceIndex),
@@ -774,6 +837,16 @@ export const replaceUserSequence = (
     return { status: "storage-error", sequences };
   }
 };
+
+export const replaceUserSequence = (
+  expected: UserNoteSequence,
+  input: SequenceInput,
+  storage: UserSequenceStorage | null = defaultStorage(),
+): ReplaceUserSequenceResult => replacePreparedUserSequence(
+  expected,
+  () => prepareNoteSequence(input),
+  storage,
+);
 
 /**
  * Removes one saved take only when it still exactly matches the snapshot shown
@@ -933,9 +1006,11 @@ export const saveUserSequenceSafely = (
   signal?: AbortSignal,
 ): Promise<SafeSaveUserSequenceResult> => {
   if (signal?.aborted) return Promise.resolve(createUserSequenceBusyReader(storage)());
-  const inputSnapshot = normalizeCapturedNoteSequence(input);
+  // Snapshot directly to the compact wire form. A long take no longer leaves
+  // a second per-event object graph retained behind a deferred host lock.
+  const inputSnapshot = prepareNoteSequence(input);
   return runUserSequenceWriteSafely<SafeSaveUserSequenceResult>(
-    () => saveUserSequence(name, inputSnapshot ?? [], storage),
+    () => savePreparedUserSequence(name, () => inputSnapshot, storage),
     createUserSequenceBusyReader(storage),
     lockManager,
     signal,
@@ -955,9 +1030,9 @@ export const replaceUserSequenceSafely = (
   signal?: AbortSignal,
 ): Promise<SafeReplaceUserSequenceResult> => {
   const expectedSnapshot = snapshotUserSequence(expected);
-  const inputSnapshot = normalizeCapturedNoteSequence(input);
+  const inputSnapshot = prepareNoteSequence(input);
   return runUserSequenceWriteSafely<SafeReplaceUserSequenceResult>(
-    () => replaceUserSequence(expectedSnapshot, inputSnapshot ?? [], storage),
+    () => replacePreparedUserSequence(expectedSnapshot, () => inputSnapshot, storage),
     createUserSequenceBusyReader(storage),
     lockManager,
     signal,

@@ -82,10 +82,12 @@ interface KeyboardRowGeometry {
 }
 
 interface RenderedKeyboardKey extends KeyGeometry {
+  readonly label: string;
   readonly style: CSSProperties;
 }
 
 interface RenderedKeyboardRow extends KeyboardRowGeometry {
+  readonly label: string;
   readonly renderedKeys: readonly RenderedKeyboardKey[];
 }
 
@@ -127,6 +129,7 @@ const renderKeysForRow = (row: KeyboardRowGeometry): KeyGeometry[] => [
 const RENDERED_KEYBOARD_ROWS: readonly RenderedKeyboardRow[] = MOBILE_KEYBOARD_ROWS.map(
   (row, rowIndex) => ({
     ...row,
+    label: `${midiNoteName(row.startNote)} through ${midiNoteName(row.endNote)}`,
     renderedKeys: renderKeysForRow(row).map((key) => {
       const width = key.white ? 1 : BLACK_KEY_WIDTH;
       const mobileWidth = key.white ? 1 : MOBILE_BLACK_KEY_WIDTH;
@@ -136,6 +139,7 @@ const RENDERED_KEYBOARD_ROWS: readonly RenderedKeyboardRow[] = MOBILE_KEYBOARD_R
       const desktopKey = KEYBOARD_GLOBAL_KEYS.get(key.note)!;
       return {
         ...key,
+        label: midiNoteName(key.note),
         style: {
           "--desktop-key-left": `${(desktopKey.left / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
           "--desktop-key-width": `${(width / KEYBOARD_GEOMETRY.whiteCount) * 100}%`,
@@ -357,7 +361,7 @@ function KeyboardComponent({
             key={row.startNote}
             className="keyboard-surface"
             role="group"
-            aria-label={`${midiNoteName(row.startNote)} through ${midiNoteName(row.endNote)}`}
+            aria-label={row.label}
             data-keyboard-row={rowIndex + 1}
           >
             {row.renderedKeys.map((key) => {
@@ -372,7 +376,7 @@ function KeyboardComponent({
                   style={key.style}
                   data-note={key.note}
                   data-row-start={key.note === row.startNote || undefined}
-                  aria-label={midiNoteName(key.note)}
+                  aria-label={key.label}
                   aria-pressed={active}
                   aria-keyshortcuts="Enter Space"
                   tabIndex={focusedNote === key.note ? 0 : -1}
@@ -386,7 +390,7 @@ function KeyboardComponent({
                   onClick={(event) => syntheticClick(key.note, event)}
                   onBlur={() => releaseVisualNote(key.note)}
                 >
-                  {key.white && key.note % 12 === 0 && <span>{midiNoteName(key.note)}</span>}
+                  {key.white && key.note % 12 === 0 && <span>{key.label}</span>}
                 </button>
               );
             })}

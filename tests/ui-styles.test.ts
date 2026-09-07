@@ -107,6 +107,24 @@ describe("synth control styling", () => {
     expect(styles).toMatch(/\.status-deck\s*\{[\s\S]*?repeat\(auto-fit, minmax\(min\(112px, 100%\), 1fr\)\);[\s\S]*?\}/);
   });
 
+  it("keeps the VCF/HPF and VCA/Output panels full width throughout the tablet breakpoint", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+    const tabletStart = styles.indexOf("@media (max-width: 1180px)");
+    const tabletEnd = styles.indexOf("@media (max-width: 1180px)", tabletStart + 1);
+    const tablet = styles.slice(tabletStart, tabletEnd);
+    const mobileStart = styles.indexOf("@media (max-width: 960px)");
+    const mobileEnd = styles.indexOf("@media (max-width: 700px)", mobileStart);
+    const mobile = styles.slice(mobileStart, mobileEnd);
+
+    expect(tablet).toMatch(/\.panel-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
+    expect(tablet).toMatch(
+      /\.module--filter,\s*\.module--amplifier,\s*\.module--envelopes\s*\{[^}]*grid-column:\s*span 2;/,
+    );
+    expect(mobile).toMatch(
+      /\.module,\s*\.module--envelopes\s*\{[^}]*grid-column:\s*span 1;/,
+    );
+  });
+
   it("keeps the persistent sequence transport touch-sized and reflowable", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
 

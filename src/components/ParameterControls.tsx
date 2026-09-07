@@ -341,7 +341,24 @@ export const nextChoiceValue = (param: ParamKey, value: number): number | undefi
   return options[(current + 1) % options.length]?.value;
 };
 
-const accentStyle = (accent: string): CSSProperties => ({ "--accent": accent } as CSSProperties);
+const accentStyles = new Map<string, CSSProperties>();
+const rangeDescriptions = new Map<ParamKey, string>();
+
+const accentStyle = (accent: string): CSSProperties => {
+  const cached = accentStyles.get(accent);
+  if (cached) return cached;
+  const style = { "--accent": accent } as CSSProperties;
+  accentStyles.set(accent, style);
+  return style;
+};
+
+const rangeDescription = (param: ParamKey): string => {
+  const cached = rangeDescriptions.get(param);
+  if (cached !== undefined) return cached;
+  const description = describeValidValues(param);
+  rangeDescriptions.set(param, description);
+  return description;
+};
 
 function RangeControlComponent({
   param,
@@ -359,8 +376,12 @@ function RangeControlComponent({
   const directHandlers = useDirectEntry(param, onDirectEdit, () => onChange(param, value));
   const position = Math.round(paramToNormalized(param, value) * 1000);
   const displayedValue = value * displayScale;
-  const rangeDescription = displayScale === 1
-    ? describeValidValues(param)
+  // Formatting is visible both beside the fader and to assistive technology.
+  // Compute it once per value change rather than repeating the same numeric
+  // formatting work during a rapid pointer drag.
+  const formattedValue = formatParamValue(param, displayedValue);
+  const validRangeDescription = displayScale === 1
+    ? rangeDescription(param)
     : `${spec.min * displayScale} ${spec.unit ?? ""} to ${spec.max * displayScale} ${spec.unit ?? ""}; step ${spec.step * displayScale} ${spec.unit ?? ""}`;
 
   return (
@@ -384,7 +405,7 @@ function RangeControlComponent({
           value={position}
           aria-label={spec.label}
           aria-orientation="vertical"
-          aria-valuetext={formatParamValue(param, displayedValue)}
+          aria-valuetext={formattedValue}
           aria-describedby={`param-${param}-range`}
           onKeyDown={(event) => {
             const next = keyboardAdjustedRangeValue(param, value, event.key);
@@ -401,9 +422,9 @@ function RangeControlComponent({
           onLostPointerCapture={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
         />
       </div>
-      <output htmlFor={`param-${param}`}>{formatParamValue(param, displayedValue)}</output>
+      <output htmlFor={`param-${param}`}>{formattedValue}</output>
       <span id={`param-${param}-range`} className="visually-hidden">
-        Valid range: {rangeDescription}.
+        Valid range: {validRangeDescription}.
       </span>
     </div>
   );

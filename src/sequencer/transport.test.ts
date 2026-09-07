@@ -571,6 +571,30 @@ describe("NoteSequencePlayer", () => {
     expect(offs).toHaveLength(2);
   });
 
+  it("preserves FIFO ownership across a deeply layered same-note take", () => {
+    const { time, calls, player } = setup();
+    const events: NoteSequenceEvent[] = [];
+    for (let index = 0; index < 2_048; index += 1) {
+      events.push({ deltaMs: 0, note: 60, on: true });
+    }
+    for (let index = 0; index < 2_048; index += 1) {
+      events.push({ deltaMs: 0, note: 60, on: false });
+    }
+
+    player.play(take(events));
+    time.advance(0);
+
+    const started = calls
+      .filter((call) => call.startsWith("on:"))
+      .map((call) => call.slice(3, -3));
+    const released = calls
+      .filter((call) => call.startsWith("off:"))
+      .map((call) => call.slice(4));
+    expect(released).toEqual(started);
+    expect(calls.at(-1)).toBe("finished:ended");
+    expect(time.tasks.size).toBe(0);
+  });
+
   it("stop cancels its timer and releases every active playback source", () => {
     const { time, calls, player } = setup();
     player.play(take([

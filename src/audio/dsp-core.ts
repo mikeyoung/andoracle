@@ -504,6 +504,17 @@ class StereoDelay {
   private dryGain = 1;
   private wetGain = 0;
   private initialized = false;
+  private targetDelayLeft = 1;
+  private targetDelayRight = 1;
+  private feedback = DEFAULT_PARAMS.delayFeedback;
+  private enabled = DEFAULT_PARAMS.delayEnabled > 0.5;
+  private pingPong = DEFAULT_PARAMS.delayPingPong > 0.5;
+  private targetWetMakeup = DELAY_WET_MAKEUP;
+  // A never-enabled/reset delay contains only zeroes. Its bypass can advance
+  // time smoothing without reading, filtering, and rewriting two empty rings
+  // at audio rate. Once enabled, the normal path keeps draining tails while
+  // bypassed, preserving the instrument's existing spillover semantics.
+  private pristine = true;
   outputLeft = 0;
   outputRight = 0;
 
@@ -515,6 +526,7 @@ class StereoDelay {
       -1 / (DELAY_PRESENTATION_SMOOTHING_SECONDS * rate),
     );
     this.timeSmoothing = 1 - Math.exp(-1 / (0.055 * rate));
+    this.setParams(DEFAULT_PARAMS);
   }
 
   reset(): void {
@@ -525,18 +537,46 @@ class StereoDelay {
     this.delayRight = 1;
     this.toneLeft = 0;
     this.toneRight = 0;
-    this.toneFrequency = Number.NaN;
-    this.toneCoefficient = 0;
-    this.targetCleanTapBlend = 0;
     this.audibleCleanTapBlend = 0;
     this.wetMakeup = DELAY_WET_MAKEUP;
     this.presentationInitialized = false;
-    this.mixValue = Number.NaN;
-    this.dryGain = 1;
-    this.wetGain = 0;
     this.initialized = false;
+    this.pristine = true;
     this.outputLeft = 0;
     this.outputRight = 0;
+  }
+
+  /** Moves parameter-only work out of the per-sample audio path. */
+  setParams(params: SynthParams): void {
+    const baseSamples = clamp(params.delayTime * 0.001 * this.rate, 1, this.left.length - 3);
+    this.targetDelayLeft = baseSamples;
+    this.targetDelayRight = clamp(
+      baseSamples * (1 + params.delaySpread * 0.22),
+      1,
+      this.right.length - 3,
+    );
+
+    const delayTone = clamp(params.delayTone, DELAY_TONE_MINIMUM, DELAY_TONE_MAXIMUM);
+    if (delayTone !== this.toneFrequency) {
+      this.toneFrequency = delayTone;
+      this.toneCoefficient = 1 - Math.exp(-TAU * delayTone / this.rate);
+      const normalizedTone = Math.log(delayTone / DELAY_TONE_MINIMUM)
+        / Math.log(DELAY_TONE_MAXIMUM / DELAY_TONE_MINIMUM);
+      this.targetCleanTapBlend = normalizedTone * DELAY_MAX_CLEAN_TAP_BLEND;
+    }
+
+    const mix = clamp(params.delayMix, 0, 1);
+    if (mix !== this.mixValue) {
+      this.mixValue = mix;
+      this.dryGain = Math.cos(mix * Math.PI * 0.5);
+      this.wetGain = Math.sin(mix * Math.PI * 0.5);
+    }
+    this.feedback = params.delayFeedback;
+    this.enabled = params.delayEnabled > 0.5;
+    this.pingPong = params.delayPingPong > 0.5;
+    this.targetWetMakeup = DELAY_WET_MAKEUP * (
+      this.pingPong ? DELAY_PING_PONG_POWER_MAKEUP : 1
+    );
   }
 
   private read(buffer: Float32Array, delaySamples: number): number {
@@ -548,70 +588,56 @@ class StereoDelay {
     return buffer[indexA] * (1 - fraction) + buffer[indexB] * fraction;
   }
 
-  process(input: number, params: SynthParams): void {
-    const baseSamples = clamp(params.delayTime * 0.001 * this.rate, 1, this.left.length - 3);
-    const targetLeft = baseSamples;
-    const targetRight = clamp(baseSamples * (1 + params.delaySpread * 0.22), 1, this.right.length - 3);
+  process(input: number): void {
     if (!this.initialized) {
-      this.delayLeft = targetLeft;
-      this.delayRight = targetRight;
+      this.delayLeft = this.targetDelayLeft;
+      this.delayRight = this.targetDelayRight;
       this.initialized = true;
     }
-    this.delayLeft += (targetLeft - this.delayLeft) * this.timeSmoothing;
-    this.delayRight += (targetRight - this.delayRight) * this.timeSmoothing;
+    this.delayLeft += (this.targetDelayLeft - this.delayLeft) * this.timeSmoothing;
+    this.delayRight += (this.targetDelayRight - this.delayRight) * this.timeSmoothing;
+
+    if (!this.enabled && this.pristine) {
+      this.outputLeft = input;
+      this.outputRight = input;
+      return;
+    }
+    if (this.enabled) this.pristine = false;
 
     const wetLeft = this.read(this.left, this.delayLeft);
     const wetRight = this.read(this.right, this.delayRight);
-    const delayTone = clamp(params.delayTone, DELAY_TONE_MINIMUM, DELAY_TONE_MAXIMUM);
-    if (delayTone !== this.toneFrequency) {
-      this.toneFrequency = delayTone;
-      this.toneCoefficient = 1 - Math.exp(-TAU * delayTone / this.rate);
-      const normalizedTone = Math.log(delayTone / DELAY_TONE_MINIMUM)
-        / Math.log(DELAY_TONE_MAXIMUM / DELAY_TONE_MINIMUM);
-      this.targetCleanTapBlend = normalizedTone * DELAY_MAX_CLEAN_TAP_BLEND;
-    }
     this.toneLeft += this.toneCoefficient * (wetLeft - this.toneLeft);
     this.toneRight += this.toneCoefficient * (wetRight - this.toneRight);
 
-    const feedback = params.delayFeedback;
-    const injectedInput = params.delayEnabled > 0.5 ? input : 0;
-    const writeLeft = params.delayPingPong > 0.5
-      ? injectedInput + this.toneRight * feedback
-      : injectedInput + this.toneLeft * feedback;
-    const writeRight = params.delayPingPong > 0.5
-      ? this.toneLeft * feedback
-      : injectedInput + this.toneRight * feedback;
+    const injectedInput = this.enabled ? input : 0;
+    const writeLeft = this.pingPong
+      ? injectedInput + this.toneRight * this.feedback
+      : injectedInput + this.toneLeft * this.feedback;
+    const writeRight = this.pingPong
+      ? this.toneLeft * this.feedback
+      : injectedInput + this.toneRight * this.feedback;
     this.left[this.writeIndex] = softClip(writeLeft);
     this.right[this.writeIndex] = softClip(writeRight);
     this.writeIndex += 1;
     if (this.writeIndex === this.left.length) this.writeIndex = 0;
 
-    if (params.delayEnabled < 0.5) {
+    if (!this.enabled) {
       this.outputLeft = input;
       this.outputRight = input;
       return;
     }
-    const mix = clamp(params.delayMix, 0, 1);
-    if (mix !== this.mixValue) {
-      this.mixValue = mix;
-      this.dryGain = Math.cos(mix * Math.PI * 0.5);
-      this.wetGain = Math.sin(mix * Math.PI * 0.5);
-    }
     // Keep the feedback loop fully tone-filtered, while retaining more attack
     // and upper-harmonic detail in the audible tap as Tone moves upward. At
     // the darkest setting the tap remains completely filtered.
-    const targetWetMakeup = DELAY_WET_MAKEUP * (
-      params.delayPingPong > 0.5 ? DELAY_PING_PONG_POWER_MAKEUP : 1
-    );
     if (!this.presentationInitialized) {
       this.audibleCleanTapBlend = this.targetCleanTapBlend;
-      this.wetMakeup = targetWetMakeup;
+      this.wetMakeup = this.targetWetMakeup;
       this.presentationInitialized = true;
     } else {
       this.audibleCleanTapBlend += (
         this.targetCleanTapBlend - this.audibleCleanTapBlend
       ) * this.presentationSmoothing;
-      this.wetMakeup += (targetWetMakeup - this.wetMakeup) * this.presentationSmoothing;
+      this.wetMakeup += (this.targetWetMakeup - this.wetMakeup) * this.presentationSmoothing;
     }
     const audibleWetLeft = this.toneLeft
       + (wetLeft - this.toneLeft) * this.audibleCleanTapBlend;
@@ -799,6 +825,7 @@ export class OdysseyDSP {
       if (!(key in DEFAULT_PARAMS) || typeof rawValue !== "number") continue;
       this.params[key] = normalizeParamValue(key, rawValue);
     }
+    this.delay.setParams(this.params);
     const nextGate = this.keys.size > 0 || this.params.autoRun > 0.5;
     const autoStartedGate = previousAuto !== this.params.autoRun && !previousGate && nextGate;
     if (autoStartedGate) this.hardMuted = false;
@@ -1459,7 +1486,7 @@ export class OdysseyDSP {
         const interpolatedExternal = this.previousExternalSample
           + (externalSample - this.previousExternalSample) * interpolation;
         const mixed = this.processMixer(selectedNoise, interpolatedExternal);
-        this.delay.process(mixed, this.params);
+        this.delay.process(mixed);
         this.processFinalFilterAndVca(
           this.delay.outputLeft,
           this.delay.outputRight,

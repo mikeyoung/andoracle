@@ -185,10 +185,29 @@ export interface NoteSequencePlayerHandlers {
   finished(reason: "ended" | "stopped"): void;
 }
 
+interface PendingNoteSources {
+  readonly sources: string[];
+  head: number;
+}
+
+// Avoid Array.shift()'s O(n) reindexing for heavily layered recordings while
+// occasionally compacting consumed prefixes so a continuously overlapping
+// pitch cannot retain source strings for the entire take.
+const takePendingSource = (pending: PendingNoteSources): string | undefined => {
+  const source = pending.sources[pending.head];
+  if (source === undefined) return undefined;
+  pending.head += 1;
+  if (pending.head >= 1_024 && pending.head * 2 >= pending.sources.length) {
+    pending.sources.splice(0, pending.head);
+    pending.head = 0;
+  }
+  return source;
+};
+
 /** One-timer, drift-corrected playback routed through App's normal note ownership. */
 export class NoteSequencePlayer {
   private events: readonly NoteSequenceEvent[] = [];
-  private readonly sourcesByNote = new Map<number, string[]>();
+  private readonly sourcesByNote = new Map<number, PendingNoteSources>();
   private timer: number | null = null;
   private startedAt = 0;
   private cursor = 0;
@@ -344,17 +363,18 @@ export class NoteSequencePlayer {
     if (event.on) {
       const source = `${SEQUENCE_SOURCE_PREFIX}${this.generation}:${this.sourceSerial}`;
       this.sourceSerial += 1;
-      const sources = this.sourcesByNote.get(event.note) ?? [];
-      sources.push(source);
-      this.sourcesByNote.set(event.note, sources);
+      const pending = this.sourcesByNote.get(event.note);
+      if (pending) pending.sources.push(source);
+      else this.sourcesByNote.set(event.note, { sources: [source], head: 0 });
       if (this.sourcesAudible) this.handlers.noteOn(source, event.note);
       return;
     }
 
-    const sources = this.sourcesByNote.get(event.note);
-    const source = sources?.shift();
-    if (!sources || !source) return;
-    if (sources.length === 0) this.sourcesByNote.delete(event.note);
+    const pending = this.sourcesByNote.get(event.note);
+    if (!pending) return;
+    const source = takePendingSource(pending);
+    if (!source) return;
+    if (pending.head === pending.sources.length) this.sourcesByNote.delete(event.note);
     if (this.sourcesAudible) this.handlers.noteOff(source);
   }
 
@@ -377,8 +397,11 @@ export class NoteSequencePlayer {
 
   private silenceSources(): void {
     if (!this.sourcesAudible) return;
-    for (const sources of this.sourcesByNote.values()) {
-      for (const source of sources) this.handlers.noteOff(source);
+    for (const pending of this.sourcesByNote.values()) {
+      for (let index = pending.head; index < pending.sources.length; index += 1) {
+        const source = pending.sources[index];
+        if (source !== undefined) this.handlers.noteOff(source);
+      }
     }
     this.sourcesAudible = false;
   }
@@ -388,8 +411,10 @@ export class NoteSequencePlayer {
     // Mark restoration audible before callbacks so even a deliberately
     // re-entrant Pause can release the first restored note safely.
     this.sourcesAudible = true;
-    for (const [note, sources] of this.sourcesByNote) {
-      for (const source of sources) {
+    for (const [note, pending] of this.sourcesByNote) {
+      for (let index = pending.head; index < pending.sources.length; index += 1) {
+        const source = pending.sources[index];
+        if (source === undefined) continue;
         this.handlers.noteOn(source, note);
         if (!this.playing || this.paused || !this.sourcesAudible) return;
       }

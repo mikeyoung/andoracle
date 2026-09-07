@@ -158,6 +158,26 @@ export class OdysseyAudioEngine {
     this.externalInputListener?.(connected);
   }
 
+  /**
+   * Treat a failed worklet-port send as processor failure, not as a UI-event
+   * exception. A browser can close a MessagePort before its processorerror or
+   * AudioContext statechange callback reaches the main thread. Quarantining
+   * the graph here releases its nodes/context immediately and lets Power build
+   * a fresh processor instead of leaving a reported-running orphan behind.
+   */
+  private postToProcessor(message: unknown): boolean {
+    const context = this.context;
+    const node = this.node;
+    if (!context || context.state !== "running" || !node) return false;
+    try {
+      node.port.postMessage(message);
+      return true;
+    } catch {
+      this.handleProcessorError(context, node);
+      return false;
+    }
+  }
+
   private requestMeter(): void {
     const context = this.context;
     const node = this.node;
@@ -168,10 +188,9 @@ export class OdysseyAudioEngine {
       || context.state !== "running"
       || !node
     ) return;
-    try {
-      node.port.postMessage({ type: "request-meter" });
+    if (this.postToProcessor({ type: "request-meter" })) {
       this.meterRequestOutstanding = true;
-    } catch {
+    } else {
       this.meterRequestOutstanding = false;
     }
   }
@@ -552,9 +571,13 @@ export class OdysseyAudioEngine {
       output.gain.cancelScheduledValues(now);
       output.gain.setValueAtTime(output.gain.value, now);
       output.gain.linearRampToValueAtTime(1, now + 0.035);
-      this.node?.port.postMessage({ type: "all-notes-off" });
-      this.node?.port.postMessage({ type: "params", params: this.params });
-      this.node?.port.postMessage({ type: "performance", performance: this.performance });
+      if (
+        !this.postToProcessor({ type: "all-notes-off" })
+        || !this.postToProcessor({ type: "params", params: this.params })
+        || !this.postToProcessor({ type: "performance", performance: this.performance })
+      ) {
+        throw new Error("The audio processor stopped before it could accept the current controls.");
+      }
       this.emitStatus({ state: context.state, error: null });
       this.requestMeter();
     } catch (error) {
@@ -743,7 +766,9 @@ export class OdysseyAudioEngine {
       }
       // MIDI CC120 latches the shared DSP silent until a new sound source
       // arrives. A freshly attached external stream is such a source.
-      node.port.postMessage({ type: "resume-sound" });
+      if (!this.postToProcessor({ type: "resume-sound" })) {
+        throw new Error("The audio processor stopped while live input was connecting.");
+      }
     } catch (error) {
       if (committed) {
         this.clearExternalInput(stream);
@@ -854,27 +879,27 @@ export class OdysseyAudioEngine {
 
   setParams(params: Partial<SynthParams>): void {
     if (this.params) Object.assign(this.params, params);
-    if (this.context?.state === "running") this.node?.port.postMessage({ type: "params", params });
+    this.postToProcessor({ type: "params", params });
   }
 
   noteOn(note: number): void {
-    if (this.context?.state === "running") this.node?.port.postMessage({ type: "note-on", note });
+    this.postToProcessor({ type: "note-on", note });
   }
 
   noteOff(note: number): void {
-    if (this.context?.state === "running") this.node?.port.postMessage({ type: "note-off", note });
+    this.postToProcessor({ type: "note-off", note });
   }
 
   keyboardTrigger(): void {
-    if (this.context?.state === "running") this.node?.port.postMessage({ type: "keyboard-trigger" });
+    this.postToProcessor({ type: "keyboard-trigger" });
   }
 
   allNotesOff(): void {
-    if (this.context?.state === "running") this.node?.port.postMessage({ type: "all-notes-off" });
+    this.postToProcessor({ type: "all-notes-off" });
   }
 
   allSoundOff(): void {
-    if (this.context?.state === "running") this.node?.port.postMessage({ type: "all-sound-off" });
+    this.postToProcessor({ type: "all-sound-off" });
   }
 
   setPerformance(performance: Partial<PerformanceState>): void {
@@ -882,9 +907,7 @@ export class OdysseyAudioEngine {
     // object is engine-owned, so update it in place instead of allocating an
     // otherwise identical two-field snapshot for every report.
     Object.assign(this.performance, performance);
-    if (this.context?.state === "running") {
-      this.node?.port.postMessage({ type: "performance", performance });
-    }
+    this.postToProcessor({ type: "performance", performance });
   }
 
   dispose(): Promise<void> {
