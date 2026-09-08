@@ -110,6 +110,19 @@ const transparentExternalPatch = (
   ...overrides,
 });
 
+interface StereoDelayHarness {
+  readonly left: Float32Array;
+  readonly right: Float32Array;
+  readonly outputLeft: number;
+  readonly outputRight: number;
+  readonly tailIsRetired: boolean;
+  process(inputLeft: number, inputRight?: number, captureInput?: boolean): void;
+}
+
+const inspectDelay = (dsp: OdysseyDSP): StereoDelayHarness => (
+  dsp as unknown as { delay: StereoDelayHarness }
+).delay;
+
 const wetTransferAt = (frequency: number, delayTone = 6_200): number => {
   const input = windowedSineBurst(4_000, 512, frequency);
   const dry = new OdysseyDSP(SAMPLE_RATE);
@@ -132,6 +145,427 @@ const wetTransferAt = (frequency: number, delayTone = 6_200): number => {
 };
 
 describe("stereo delay feature regressions", () => {
+  const keyboardDelayTail = (delayTrails: number): Float32Array => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      mixer1Level: 0,
+      mixer2Source: 0,
+      mixer2Level: 1,
+      mixer3Level: 0,
+      delayEnabled: 1,
+      delayTime: 40,
+      delayFeedback: 0.78,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 0,
+      delayPingPong: 0,
+      delayTrails,
+      filterType: 1,
+      filterCutoff: 16_000,
+      filterResonance: 0,
+      filterMod1Amount: 0,
+      filterMod2Amount: 0,
+      filterMod3Amount: 0,
+      hpfCutoff: 16,
+      driveEnabled: 0,
+      vcaInitialGain: 0,
+      vcaEnvelopeSource: 1,
+      vcaEnvelopeAmount: 1,
+      adsrSource: 0,
+      adsrAttack: 0.005,
+      adsrDecay: 0.01,
+      adsrSustain: 1,
+      adsrRelease: 0.015,
+      masterVolume: 1,
+    });
+    dsp.noteOn(48);
+    render(dsp, 6_000);
+    dsp.noteOff(48);
+    return render(dsp, 4_000)[0];
+  };
+
+  it("lets repeats decay after keyboard release only when Trails is enabled", () => {
+    const cutTail = keyboardDelayTail(0);
+    const trailingTail = keyboardDelayTail(1);
+    const cutEnergy = windowEnergy(cutTail, 800, 3_800);
+    const trailingEnergy = windowEnergy(trailingTail, 800, 3_800);
+
+    expect(trailingEnergy).toBeGreaterThan(0.01);
+    expect(cutEnergy).toBeLessThan(trailingEnergy * 0.001);
+  });
+
+  it("does not replay a previous keypress when non-trailing delay resumes", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      mixer1Level: 0,
+      mixer2Source: 0,
+      mixer2Level: 1,
+      mixer3Level: 0,
+      delayEnabled: 1,
+      delayTime: 40,
+      delayFeedback: 0.85,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 0,
+      delayPingPong: 0,
+      delayTrails: 0,
+      filterType: 1,
+      filterCutoff: 16_000,
+      filterResonance: 0,
+      filterMod1Amount: 0,
+      filterMod2Amount: 0,
+      filterMod3Amount: 0,
+      hpfCutoff: 16,
+      driveEnabled: 0,
+      vcaInitialGain: 0,
+      vcaEnvelopeSource: 1,
+      vcaEnvelopeAmount: 1,
+      adsrSource: 0,
+      adsrAttack: 0.005,
+      adsrDecay: 0.01,
+      adsrSustain: 1,
+      adsrRelease: 0.015,
+      masterVolume: 1,
+    });
+
+    dsp.noteOn(48);
+    render(dsp, 6_000);
+    dsp.noteOff(48);
+    render(dsp, 2_000);
+    dsp.noteOn(60);
+    const [beforeNewRepeat] = render(dsp, 1_200);
+    const [newRepeat] = render(dsp, 1_000);
+
+    const beforePeak = maximumAbsolute(beforeNewRepeat);
+    const repeatPeak = maximumAbsolute(newRepeat);
+    expect(beforePeak).toBeLessThan(0.0002);
+    expect(repeatPeak).toBeGreaterThan(0.001);
+    expect(beforePeak).toBeLessThan(repeatPeak * 0.01);
+  });
+
+  it("does not replay an AUTO phrase when the gate stops and restarts", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      autoRun: 1,
+      autoNote: 48,
+      mixer1Level: 0,
+      mixer2Source: 0,
+      mixer2Level: 1,
+      mixer3Level: 0,
+      delayEnabled: 1,
+      delayTime: 40,
+      delayFeedback: 0.85,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 0,
+      delayPingPong: 0,
+      delayTrails: 0,
+      filterType: 1,
+      filterCutoff: 16_000,
+      filterResonance: 0,
+      filterMod1Amount: 0,
+      filterMod2Amount: 0,
+      filterMod3Amount: 0,
+      hpfCutoff: 16,
+      driveEnabled: 0,
+      vcaInitialGain: 0,
+      vcaEnvelopeSource: 1,
+      vcaEnvelopeAmount: 1,
+      adsrSource: 0,
+      adsrAttack: 0.005,
+      adsrDecay: 0.01,
+      adsrSustain: 1,
+      adsrRelease: 0.015,
+      masterVolume: 1,
+    });
+    render(dsp, 6_000);
+    dsp.setParams({ autoRun: 0 });
+    render(dsp, 2_000);
+    dsp.setParams({ autoRun: 1, autoNote: 60 });
+
+    const [beforeNewRepeat] = render(dsp, 1_200);
+    const [newRepeat] = render(dsp, 1_000);
+    const beforePeak = maximumAbsolute(beforeNewRepeat);
+    const repeatPeak = maximumAbsolute(newRepeat);
+    expect(beforePeak).toBeLessThan(0.0002);
+    expect(repeatPeak).toBeGreaterThan(0.001);
+    expect(beforePeak).toBeLessThan(repeatPeak * 0.01);
+  });
+
+  it("captures an external source at the smallest nonzero VCA initial gain", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams(transparentExternalPatch({
+      delayTime: 10,
+      delayFeedback: 0,
+      delayMix: 1,
+      vcaInitialGain: 0.001,
+    }));
+
+    const [left, right] = processExternal(dsp, impulse(2_000, 1));
+    expect(maximumAbsolute(left.slice(380, 900))).toBeGreaterThan(0.0001);
+    expect(maximumAbsolute(right.slice(380, 900))).toBeGreaterThan(0.0001);
+  });
+
+  it("keeps an inaudible closed-VCA LFO route on the pristine delay path", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      mixer1Level: 1,
+      delayEnabled: 1,
+      delayTrails: 0,
+      vcaInitialGain: 0,
+      vcaEnvelopeAmount: 0,
+      vcaEnvelopeSource: 1,
+      adsrSource: 1,
+    });
+
+    const [left, right] = render(dsp, 8_192);
+    expect(maximumAbsolute(left)).toBeLessThan(1e-9);
+    expect(maximumAbsolute(right)).toBeLessThan(1e-9);
+    expect(dsp.getDiagnostics().delayTailRetired).toBe(true);
+  });
+
+  it("rejects non-finite external samples without poisoning recursive delay state", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams(transparentExternalPatch({
+      delayTime: 10,
+      delayFeedback: 0.8,
+      delayMix: 1,
+      delayTrails: 1,
+    }));
+    const malformed = new Float32Array(512);
+    malformed[0] = Number.NaN;
+    malformed[1] = Number.POSITIVE_INFINITY;
+    malformed[2] = Number.NEGATIVE_INFINITY;
+    const [malformedLeft, malformedRight] = processExternal(dsp, malformed);
+    assertFiniteAndBounded(malformedLeft);
+    assertFiniteAndBounded(malformedRight);
+
+    const [recoveredLeft, recoveredRight] = processExternal(dsp, impulse(2_000));
+    assertFiniteAndBounded(recoveredLeft);
+    assertFiniteAndBounded(recoveredRight);
+    expect(maximumAbsolute(recoveredLeft)).toBeGreaterThan(0.001);
+    expect(maximumAbsolute(recoveredRight)).toBeGreaterThan(0.001);
+  });
+
+  it("smooths full-range wet-mix changes during continuous audio", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams(transparentExternalPatch({
+      delayTime: 17,
+      delayFeedback: 0.4,
+      delayMix: 0,
+    }));
+    const [before] = processExternal(dsp, sineSegment(0, 8_192, 733));
+    const baselineStep = maximumAdjacentStep(before.slice(-1_024));
+
+    dsp.setParams({ delayMix: 1 });
+    const [transition] = processExternal(dsp, sineSegment(8_192, 2_048, 733));
+    const transitionStep = maximumAdjacentStep(transition, before.at(-1));
+
+    expect(baselineStep).toBeGreaterThan(0.001);
+    expect(transitionStep).toBeLessThan(baselineStep * 1.6);
+  });
+
+  it("preserves independent stereo inputs in ordinary mode and alternates their sum in ping-pong", () => {
+    const ordinaryDsp = new OdysseyDSP(SAMPLE_RATE);
+    ordinaryDsp.setParams({
+      delayEnabled: 1,
+      delayTime: 1,
+      delayFeedback: 0,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 0,
+      delayPingPong: 0,
+    });
+    const ordinary = inspectDelay(ordinaryDsp);
+    const ordinaryLeft = new Float32Array(256);
+    const ordinaryRight = new Float32Array(256);
+    for (let index = 0; index < ordinaryLeft.length; index += 1) {
+      ordinary.process(index === 0 ? 0.8 : 0, index === 0 ? -0.2 : 0);
+      ordinaryLeft[index] = ordinary.outputLeft;
+      ordinaryRight[index] = ordinary.outputRight;
+    }
+    expect(maximumAbsolute(ordinaryLeft.slice(80, 150))).toBeGreaterThan(0.1);
+    expect(Math.min(...ordinaryRight.slice(80, 150))).toBeLessThan(-0.02);
+
+    const pingPongDsp = new OdysseyDSP(SAMPLE_RATE);
+    pingPongDsp.setParams({
+      delayEnabled: 1,
+      delayTime: 1,
+      delayFeedback: 0.8,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 0,
+      delayPingPong: 1,
+    });
+    const pingPong = inspectDelay(pingPongDsp);
+    const pingLeft = new Float32Array(320);
+    const pingRight = new Float32Array(320);
+    for (let index = 0; index < pingLeft.length; index += 1) {
+      pingPong.process(index === 0 ? 0.8 : 0, index === 0 ? 0.2 : 0);
+      pingLeft[index] = pingPong.outputLeft;
+      pingRight[index] = pingPong.outputRight;
+    }
+    const firstLeft = windowEnergy(pingLeft, 80, 155);
+    const firstRight = windowEnergy(pingRight, 80, 155);
+    const secondLeft = windowEnergy(pingLeft, 170, 260);
+    const secondRight = windowEnergy(pingRight, 170, 260);
+    expect(firstLeft).toBeGreaterThan(firstRight * 1_000);
+    expect(secondRight).toBeGreaterThan(secondLeft * 10);
+  });
+
+  it("invalidates retained ring samples in constant time without reallocating buffers", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      delayEnabled: 1,
+      delayTime: 1,
+      delayFeedback: 0.92,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 1,
+      delayPingPong: 1,
+      delayTrails: 0,
+    });
+    const delay = inspectDelay(dsp);
+    const leftBuffer = delay.left;
+    const rightBuffer = delay.right;
+    for (let index = 0; index < leftBuffer.length + 512; index += 1) {
+      const sample = Math.sin(index * 0.071) * 0.4;
+      delay.process(sample, -sample * 0.5);
+    }
+    expect(delay.tailIsRetired).toBe(false);
+
+    for (let toggle = 0; toggle < 128; toggle += 1) {
+      dsp.setParams({ delayTrails: toggle % 2 });
+      expect(inspectDelay(dsp).left).toBe(leftBuffer);
+      expect(inspectDelay(dsp).right).toBe(rightBuffer);
+    }
+    dsp.setParams({ delayTrails: 1 });
+    expect(delay.tailIsRetired).toBe(true);
+    let postResetPeak = 0;
+    for (let index = 0; index < 512; index += 1) {
+      delay.process(0, 0);
+      postResetPeak = Math.max(
+        postResetPeak,
+        Math.abs(delay.outputLeft),
+        Math.abs(delay.outputRight),
+      );
+    }
+    expect(postResetPeak).toBe(0);
+  });
+
+  it("preserves a no-Trails phrase reset when a suspended articulation queue coalesces off then on", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      mixer1Level: 0,
+      mixer2Level: 0,
+      mixer3Level: 0,
+      externalLevel: 0,
+      delayEnabled: 1,
+      delayTime: 20,
+      delayFeedback: 0.92,
+      delayMix: 1,
+      delayTrails: 0,
+      vcaInitialGain: 0,
+      vcaEnvelopeAmount: 0,
+    });
+    dsp.noteOn(60);
+    render(dsp, 1);
+    const delay = inspectDelay(dsp);
+    delay.process(0.8, -0.4);
+    expect(delay.tailIsRetired).toBe(false);
+
+    for (let index = 0; index < 512; index += 1) dsp.keyboardTrigger();
+    expect(dsp.getDiagnostics().pendingArticulations).toBe(512);
+    dsp.noteOff(60);
+    dsp.noteOn(61);
+    expect(dsp.getDiagnostics().pendingArticulations).toBe(512);
+
+    render(dsp, 256);
+    expect(dsp.getDiagnostics().pendingArticulations).toBe(0);
+    expect(delay.tailIsRetired).toBe(true);
+  });
+
+  it("retires an inaudible tail while Delay remains enabled", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      delayEnabled: 1,
+      delayTime: 5,
+      delayFeedback: 0,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 0,
+      delayPingPong: 0,
+    });
+    const delay = inspectDelay(dsp);
+    delay.process(0.8, -0.4);
+    for (let index = 0; index < delay.left.length * 2 + 1_024; index += 1) {
+      delay.process(0, 0);
+    }
+    expect(delay.tailIsRetired).toBe(true);
+  });
+
+  it("stays finite through repeated enabled, bypassed, and Trails transitions", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      delayEnabled: 1,
+      delayTime: 3,
+      delayFeedback: 0.92,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 1,
+      delayPingPong: 1,
+    });
+    const delay = inspectDelay(dsp);
+    for (let cycle = 0; cycle < 256; cycle += 1) {
+      dsp.setParams({
+        delayEnabled: cycle % 3 === 0 ? 0 : 1,
+        delayTrails: cycle % 2,
+      });
+      for (let sample = 0; sample < 32; sample += 1) {
+        const inputLeft = sample === 0 ? 0.9 : 0;
+        const inputRight = sample === 0 ? -0.45 : 0;
+        delay.process(inputLeft, inputRight);
+        expect(Number.isFinite(delay.outputLeft)).toBe(true);
+        expect(Number.isFinite(delay.outputRight)).toBe(true);
+        expect(Math.abs(delay.outputLeft)).toBeLessThanOrEqual(2);
+        expect(Math.abs(delay.outputRight)).toBeLessThanOrEqual(2);
+        if (cycle % 3 === 0) {
+          expect(delay.outputLeft).toBe(inputLeft);
+          expect(delay.outputRight).toBe(inputRight);
+        }
+      }
+    }
+  });
+
+  it("keeps a 30-second maximum-feedback ping-pong render finite and bounded", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams({
+      delayEnabled: 1,
+      delayTime: 1_000,
+      delayFeedback: 0.92,
+      delayMix: 1,
+      delayTone: 18_000,
+      delaySpread: 1,
+      delayPingPong: 1,
+    });
+    const delay = inspectDelay(dsp);
+    const bufferLeft = delay.left;
+    const bufferRight = delay.right;
+    const samples = SAMPLE_RATE * 2 * 30;
+    let peak = 0;
+    let allFinite = true;
+    for (let index = 0; index < samples; index += 1) {
+      delay.process(index === 0 ? 0.99 : 0, index === 0 ? 0.33 : 0);
+      allFinite &&= Number.isFinite(delay.outputLeft) && Number.isFinite(delay.outputRight);
+      peak = Math.max(peak, Math.abs(delay.outputLeft), Math.abs(delay.outputRight));
+    }
+    expect(allFinite).toBe(true);
+    expect(peak).toBeGreaterThan(0.01);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(delay.left).toBe(bufferLeft);
+    expect(delay.right).toBe(bufferRight);
+  });
+
   it("keeps the first ping-pong repeat prominent at a typical wet mix", () => {
     const dsp = new OdysseyDSP(SAMPLE_RATE);
     dsp.setParams(transparentExternalPatch({
@@ -349,6 +783,7 @@ describe("stereo delay feature regressions", () => {
       delayTone: 18_000,
       delaySpread: 1,
       delayPingPong: 1,
+      delayTrails: 1,
       filterType: 2,
       filterResonance: 1,
       driveEnabled: 1,

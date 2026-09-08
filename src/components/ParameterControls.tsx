@@ -274,7 +274,7 @@ export const shouldEmitRangeChange = (current: number, next: number): boolean =>
 
 /**
  * Pointer users expect the computer-note keys to become active again as soon
- * as a fader gesture ends. Keyboard users never enter this path, so a fader
+ * as a dial gesture ends. Keyboard users never enter this path, so a dial
  * reached with Tab keeps focus for Arrow, Home, End, and Page key adjustment.
  */
 export class DeferredRangePointerFocusRelease {
@@ -303,10 +303,10 @@ export class DeferredRangePointerFocusRelease {
 }
 
 /**
- * Gives controlled normalized faders predictable keyboard semantics. Native
+ * Gives controlled normalized dials predictable keyboard semantics. Native
  * one-unit movement in the 0–1000 presentation range can round straight back
  * to the current synth value (notably for integer and coarse-step controls),
- * leaving an Arrow key unable to move the fader at all.
+ * leaving an Arrow key unable to move the dial at all.
  */
 export const keyboardAdjustedRangeValue = (
   param: ParamKey,
@@ -375,8 +375,11 @@ function RangeControlComponent({
   const spec = PARAM_SPECS[param];
   const directHandlers = useDirectEntry(param, onDirectEdit, () => onChange(param, value));
   const position = Math.round(paramToNormalized(param, value) * 1000);
+  const dialStyle = {
+    "--dial-angle": `${-135 + (position / 1000) * 270}deg`,
+  } as CSSProperties;
   const displayedValue = value * displayScale;
-  // Formatting is visible both beside the fader and to assistive technology.
+  // Formatting is visible both beside the dial and to assistive technology.
   // Compute it once per value change rather than repeating the same numeric
   // formatting work during a rapid pointer drag.
   const formattedValue = formatParamValue(param, displayedValue);
@@ -392,10 +395,7 @@ function RangeControlComponent({
       {...directHandlers}
     >
       <label htmlFor={`param-${param}`}>{spec.shortLabel ?? spec.label}</label>
-      <div className="fader-shell">
-        <span className="fader-scale" aria-hidden="true">
-          <i /><i /><i /><i /><i /><i /><i /><i /><i />
-        </span>
+      <div className="dial-shell" style={dialStyle}>
         <input
           id={`param-${param}`}
           type="range"
@@ -421,6 +421,10 @@ function RangeControlComponent({
           onPointerCancel={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
           onLostPointerCapture={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
         />
+        <span className="dial-scale" aria-hidden="true">
+          <i /><i /><i /><i /><i /><i /><i /><i /><i />
+        </span>
+        <span className="dial-face" aria-hidden="true"><i /></span>
       </div>
       <output htmlFor={`param-${param}`}>{formattedValue}</output>
       <span id={`param-${param}-range`} className="visually-hidden">

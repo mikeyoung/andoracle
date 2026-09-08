@@ -21,7 +21,7 @@ export function ExternalInputControl({ enabled, busy, disabled = false, error, o
         <b>{busy ? "Cancel connection" : enabled ? "Live input on" : "Use live input"}</b>
       </button>
       <small className={error ? "control-error" : undefined} role={error ? "alert" : undefined}>
-        {error ?? "Audio interface or microphone → mixer → delay → filters"}
+        {error ?? "Audio interface or microphone → mixer → synth signal path"}
       </small>
     </div>
   );

@@ -22,6 +22,7 @@ import {
   DeferredRangePointerFocusRelease,
   keyboardAdjustedRangeValue,
   LongPressClickSuppression,
+  RangeControl,
   shouldConsumeLongPressClick,
   shouldEmitRangeChange,
 } from "./ParameterControls";
@@ -318,6 +319,49 @@ describe("output meter accessibility", () => {
 });
 
 describe("range control change filtering", () => {
+  it("renders native vertical inputs as accessible 270-degree rotary dials", () => {
+    const renderDial = (value: number) => renderToStaticMarkup(createElement(RangeControl, {
+      param: "masterVolume",
+      value,
+      accent: "#808080",
+      onChange: vi.fn(),
+      onDirectEdit: vi.fn(),
+    }));
+    const minimum = renderDial(0);
+    const middle = renderDial(0.5);
+    const maximum = renderDial(1);
+
+    expect(minimum).toContain('class="dial-shell" style="--dial-angle:-135deg"');
+    expect(middle).toContain('class="dial-shell" style="--dial-angle:0deg"');
+    expect(maximum).toContain('class="dial-shell" style="--dial-angle:135deg"');
+    expect(middle).toContain('type="range"');
+    expect(middle).toContain('aria-label="Master volume"');
+    expect(middle).toContain('aria-orientation="vertical"');
+    expect(middle).toContain('aria-valuetext="50%"');
+    expect(middle).toContain('class="dial-scale" aria-hidden="true"');
+    expect(middle).toContain('class="dial-face" aria-hidden="true"');
+  });
+
+  it("keeps every range parameter finite and bounded across both dial endpoints", () => {
+    const rangeParams = PARAM_KEYS.filter((param) => PARAM_SPECS[param].control === "range");
+
+    for (const param of rangeParams) {
+      const renderDial = (value: number) => renderToStaticMarkup(createElement(RangeControl, {
+        param,
+        value,
+        accent: "#808080",
+        onChange: vi.fn(),
+        onDirectEdit: vi.fn(),
+      }));
+      const minimum = renderDial(PARAM_SPECS[param].min);
+      const maximum = renderDial(PARAM_SPECS[param].max);
+
+      expect(minimum, `${param} minimum`).toContain('style="--dial-angle:-135deg"');
+      expect(maximum, `${param} maximum`).toContain('style="--dial-angle:135deg"');
+      expect(`${minimum}${maximum}`, `${param} output`).not.toMatch(/NaN|Infinity/);
+    }
+  });
+
   it("releases focus after Chromium's pointer default and owns the pending timer", () => {
     const blur = vi.fn();
     const callbacks = new Map<number, () => void>();

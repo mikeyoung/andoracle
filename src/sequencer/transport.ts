@@ -216,6 +216,8 @@ export class NoteSequencePlayer {
   private playing = false;
   private paused = false;
   private pausedElapsedMs = 0;
+  /** Fixed playhead used while an overdue resume is caught up across tasks. */
+  private resumeCatchUpElapsedMs: number | null = null;
   private sourcesAudible = false;
   private sourceSerial = 0;
 
@@ -256,7 +258,12 @@ export class NoteSequencePlayer {
   /** Freezes the sequence clock and silences sequence-owned notes. */
   pause(): boolean {
     if (!this.playing) return false;
-    this.pausedElapsedMs = Math.max(0, this.clock.now() - this.startedAt);
+    // A large overdue resume may still be catching up across zero-delay
+    // tasks. Freeze at its original playhead instead of counting that
+    // intentionally yielded catch-up time as audible sequence time.
+    this.pausedElapsedMs = this.resumeCatchUpElapsedMs
+      ?? Math.max(0, this.clock.now() - this.startedAt);
+    this.resumeCatchUpElapsedMs = null;
     this.playing = false;
     this.paused = true;
     this.generation += 1;
@@ -279,7 +286,23 @@ export class NoteSequencePlayer {
     // pause position while sources are still silent so Resume never chases a
     // note whose recorded release has already passed (or emits a whole stale
     // phrase at once).
-    this.advanceSilentlyTo(this.pausedElapsedMs);
+    this.resumeCatchUpElapsedMs = this.pausedElapsedMs;
+    return this.continueResume(generation);
+  }
+
+  private continueResume(generation: number): boolean {
+    if (!this.playing || generation !== this.generation) return false;
+    const resumeElapsedMs = this.resumeCatchUpElapsedMs;
+    if (resumeElapsedMs === null) return false;
+
+    if (!this.advanceSilentlyTo(resumeElapsedMs, PLAYBACK_BATCH_SIZE)) {
+      this.scheduleTimer(() => {
+        this.continueResume(generation);
+      }, 0);
+      return true;
+    }
+
+    this.resumeCatchUpElapsedMs = null;
     if (this.cursor >= this.events.length) {
       this.playing = false;
       this.releaseAllSources();
@@ -290,6 +313,9 @@ export class NoteSequencePlayer {
       this.handlers.finished("ended");
       return false;
     }
+    // Catch-up tasks are part of the paused interval. Restart the monotonic
+    // origin here so yielding never shortens the next recorded delay.
+    this.startedAt = this.clock.now() - resumeElapsedMs;
     this.restoreSources();
     if (!this.playing || generation !== this.generation) return false;
     this.tick(generation);
@@ -307,6 +333,7 @@ export class NoteSequencePlayer {
     this.cursor = 0;
     this.nextDueMs = 0;
     this.pausedElapsedMs = 0;
+    this.resumeCatchUpElapsedMs = null;
     if (notify && wasActive) this.handlers.finished("stopped");
   }
 
@@ -315,7 +342,6 @@ export class NoteSequencePlayer {
   }
 
   private tick(generation: number): void {
-    this.timer = null;
     if (!this.playing || generation !== this.generation) return;
     const elapsedMs = Math.max(0, this.clock.now() - this.startedAt);
     let processed = 0;
@@ -356,7 +382,7 @@ export class NoteSequencePlayer {
           PLAYBACK_TIMER_SLICE_MS,
           Math.max(0, this.nextDueMs - (this.clock.now() - this.startedAt)),
         );
-    this.timer = this.timers.setTimeout(() => this.tick(generation), delay);
+    this.scheduleTimer(() => this.tick(generation), delay);
   }
 
   private dispatch(event: NoteSequenceEvent): void {
@@ -378,21 +404,39 @@ export class NoteSequencePlayer {
     if (this.sourcesAudible) this.handlers.noteOff(source);
   }
 
-  private advanceSilentlyTo(elapsedMs: number): void {
-    while (this.cursor < this.events.length && this.nextDueMs <= elapsedMs) {
+  /** Returns true once no event remains due at the requested playhead. */
+  private advanceSilentlyTo(elapsedMs: number, limit: number): boolean {
+    let processed = 0;
+    while (
+      this.cursor < this.events.length
+      && this.nextDueMs <= elapsedMs
+      && processed < limit
+    ) {
       const event = this.events[this.cursor];
       if (!event) break;
       this.cursor += 1;
+      processed += 1;
       const next = this.events[this.cursor];
       if (next) this.nextDueMs += next.deltaMs;
       this.dispatch(event);
     }
+    return this.cursor >= this.events.length || this.nextDueMs > elapsedMs;
   }
 
   private clearTimer(): void {
     if (this.timer === null) return;
     this.timers.clearTimeout(this.timer);
     this.timer = null;
+  }
+
+  private scheduleTimer(callback: () => void, delayMs: number): void {
+    const handle = this.timers.setTimeout(() => {
+      // A cancelled callback can still be invoked by a broken host or a
+      // captured test task. It must not orphan a newer generation's timer.
+      if (this.timer === handle) this.timer = null;
+      callback();
+    }, delayMs);
+    this.timer = handle;
   }
 
   private silenceSources(): void {

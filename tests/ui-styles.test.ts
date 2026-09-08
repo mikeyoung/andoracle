@@ -17,12 +17,26 @@ describe("synth control styling", () => {
     );
   });
 
-  it("centers Blink and WebKit fader thumbs on their vertical tracks", () => {
+  it("renders compact black dials with white indicators over native range inputs", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
 
     expect(styles).toMatch(
-      /\.fader-shell input\[type="range"\]::\-webkit-slider-thumb\s*\{[\s\S]*?width:\s*34px;[\s\S]*?transform:\s*translateX\(\-14px\);[\s\S]*?\}/,
+      /\.dial-shell\s*\{[\s\S]*?width:\s*68px;[\s\S]*?height:\s*68px;[\s\S]*?flex:\s*0 0 68px;/,
     );
+    expect(styles).toMatch(
+      /\.dial-face\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*7px;[\s\S]*?width:\s*54px;[\s\S]*?height:\s*54px;[\s\S]*?border:\s*2px solid #050505;[\s\S]*?border-radius:\s*50%;[\s\S]*?background:\s*#111111;[\s\S]*?repeating-conic-gradient\(#1d1d1d/,
+    );
+    expect(styles).toMatch(
+      /\.dial-face i\s*\{[\s\S]*?width:\s*3px;[\s\S]*?height:\s*17px;[\s\S]*?background:\s*#f7f7f7;/,
+    );
+    expect(styles).toMatch(
+      /\.dial-shell input\[type="range"\]\s*\{[\s\S]*?width:\s*68px;[\s\S]*?height:\s*68px;[\s\S]*?opacity:\s*0;[\s\S]*?writing-mode:\s*vertical-lr;/,
+    );
+    expect(styles).toMatch(
+      /\.dial-shell input\[type="range"\]:focus-visible ~ \.dial-face\s*\{[\s\S]*?outline:\s*3px solid #c9c9c9;/,
+    );
+    expect(styles).toMatch(/\.control-bank\s*\{[\s\S]*?min-height:\s*184px;/);
+    expect(styles).toMatch(/@media \(max-width:\s*960px\)[\s\S]*?\.control-bank\s*\{[\s\S]*?min-height:\s*184px;/);
   });
 
   it("sizes dropdown-style selectors to their complete multiline text", () => {
@@ -32,13 +46,13 @@ describe("synth control styling", () => {
       /\.parameter--choice\s*\{[\s\S]*?min-width:\s*min\(118px, 100%\);[\s\S]*?flex:\s*1 1 118px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*0;[\s\S]*?font-size:\s*13\.5px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
+      /\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?height:\s*auto;[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*13\.5px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.route-control\s*\{[\s\S]*?min-width:\s*min\(116px, 100%\);[\s\S]*?flex:\s*1 1 116px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*0;[\s\S]*?font-size:\s*12px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
+      /\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*12px;[\s\S]*?line-height:\s*1\.2;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.choice-button span\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?overflow:\s*visible;[\s\S]*?white-space:\s*normal;[\s\S]*?overflow-wrap:\s*normal;[\s\S]*?word-break:\s*normal;[\s\S]*?hyphens:\s*none;[\s\S]*?\}/,
@@ -62,19 +76,19 @@ describe("synth control styling", () => {
     expect(styles).not.toContain(".choice-switch-bank");
   });
 
-  it("gives selectors adaptive space while bottom-aligning every full-length fader", () => {
+  it("gives selectors adaptive space while bottom-aligning every routed dial", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
 
     expect(styles).toMatch(
       /\.control-bank--routed > \.parameter--range,\s*\.control-bank--routed > \.route-control\s*\{[\s\S]*?justify-content:\s*flex-end;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
-      /\.control-bank--routed \.parameter--range \.fader-shell\s*\{[\s\S]*?flex:\s*0 0 196px;[\s\S]*?\}/,
+      /\.control-bank--routed \.parameter--range \.dial-shell\s*\{[\s\S]*?flex:\s*0 0 68px;[\s\S]*?\}/,
     );
     expect(styles).toMatch(
       /\.control-bank--routed \.parameter--range output\s*\{[\s\S]*?margin-top:\s*0;[\s\S]*?\}/,
     );
-    expect(styles).not.toMatch(/\.route-control \.fader-shell(?:\s|\{|::)/);
+    expect(styles).not.toMatch(/\.route-control \.dial-shell(?:\s|\{|::)/);
   });
 
   it("keeps clipboard confirmation visible, responsive, and nonblocking", () => {
@@ -86,8 +100,52 @@ describe("synth control styling", () => {
     expect(rule).toMatch(/position:\s*fixed;/);
     expect(rule).toMatch(/bottom:\s*calc\(18px \+ env\(safe-area-inset-bottom\)\);/);
     expect(rule).toMatch(/max-width:\s*calc\(100vw - 24px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\);/);
+    expect(rule).toMatch(/right:\s*calc\(12px \+ env\(safe-area-inset-right\)\);/);
+    expect(rule).toMatch(/left:\s*calc\(12px \+ env\(safe-area-inset-left\)\);/);
+    expect(rule).toMatch(/margin-right:\s*auto;/);
+    expect(rule).toMatch(/margin-left:\s*auto;/);
     expect(rule).toMatch(/pointer-events:\s*none;/);
-    expect(rule).not.toMatch(/text-overflow|max-height|white-space:\s*nowrap|overflow:\s*(?:hidden|clip)/);
+    expect(rule).not.toMatch(/text-overflow|max-height|white-space:\s*nowrap|overflow:\s*(?:hidden|clip)|transform:/);
+  });
+
+  it("keeps every compact control at least touch-sized", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+
+    expect(styles).toMatch(/\.dial-shell\s*\{[\s\S]*?width:\s*68px;[\s\S]*?height:\s*68px;/);
+    expect(styles).toMatch(/\.parameter--choice select,\s*\.choice-button\s*\{[\s\S]*?min-height:\s*44px;/);
+    expect(styles).toMatch(/\.route-control \.parameter--choice select,\s*\.route-control \.choice-button\s*\{[\s\S]*?min-height:\s*44px;/);
+    expect(styles).toMatch(/\.power-switch\s*\{[\s\S]*?width:\s*122px;[\s\S]*?min-height:\s*44px;/);
+    expect(styles).toMatch(/\.sequence-icon-button\s*\{[\s\S]*?width:\s*44px;[\s\S]*?min-width:\s*44px;/);
+  });
+
+  it("keeps overflow, readable color, and dynamic-viewport fallbacks for older mobile engines", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+
+    for (const selector of ["html", "body", ".app-shell"]) {
+      const start = styles.indexOf(`${selector} {`);
+      const rule = styles.slice(start, styles.indexOf("\n}", start));
+      expect(rule.indexOf("overflow-x: hidden;")).toBeLessThan(rule.indexOf("overflow-x: clip;"));
+    }
+    expect(styles).toMatch(/\.parameter output\s*\{[\s\S]*?color:\s*#343434;[\s\S]*?color:\s*color-mix/);
+    expect(styles).toMatch(/\.choice-button i\s*\{[\s\S]*?border-top:\s*5px solid #333333;[\s\S]*?border-top-color:\s*color-mix/);
+    expect(styles).toMatch(/\.dial-face\s*\{[\s\S]*?background:\s*#111111;[\s\S]*?background:[\s\S]*?repeating-conic-gradient/);
+    expect(styles).toMatch(/\.patch-library-list\s*\{[\s\S]*?max-height:\s*min\(310px, 42vh\);[\s\S]*?max-height:\s*min\(310px, 42dvh\);/);
+  });
+
+  it("preserves the wide help layout inside compact safe-area gutters", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+    const compact = styles.slice(styles.lastIndexOf("@media (max-width: 960px)"));
+
+    expect(compact).toMatch(/\.help-dialog\s*\{[\s\S]*?width:\s*min\(620px, calc\(100vw - 40px - env\(safe-area-inset-left\) - env\(safe-area-inset-right\)\)\);[\s\S]*?max-width:/);
+  });
+
+  it("removes continuous hardware animation when reduced motion is requested", () => {
+    const styles = readFileSync(resolve("src/styles.css"), "utf8");
+    const reducedMotion = styles.slice(styles.indexOf("@media (prefers-reduced-motion: reduce)"));
+
+    expect(reducedMotion).toMatch(/transition-duration:\s*0\.01ms !important;/);
+    expect(reducedMotion).toMatch(/\.power-switch\[aria-checked="false"\]:not\(:disabled\),[\s\S]*?animation:\s*none;/);
+    expect(reducedMotion).not.toMatch(/animation-duration:\s*3\.2s/);
   });
 
   it("reflows every formerly horizontal strip instead of requiring sideways scrolling", () => {

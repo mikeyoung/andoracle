@@ -491,6 +491,7 @@ const PARAM_SPEC_DEFINITIONS = {
   },
   delaySpread: percent("Stereo spread", "Delay", 0.35),
   delayPingPong: toggle("Ping-pong", "Delay", 1),
+  delayTrails: toggle("Trails", "Delay"),
 } as const satisfies Record<string, ParamSpec>;
 
 export type ParamKey = keyof typeof PARAM_SPEC_DEFINITIONS;

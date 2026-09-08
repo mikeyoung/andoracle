@@ -51,6 +51,7 @@ describe("parameter schema", () => {
       "delayTone",
       "delaySpread",
       "delayPingPong",
+      "delayTrails",
     ]);
   });
 

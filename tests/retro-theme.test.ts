@@ -46,7 +46,8 @@ describe("1950s electronics-console finish", () => {
     expect(styles).toMatch(/\.module-header\s*\{[\s\S]*?linear-gradient\(180deg, #f0f0f0, #d6d6d6\)/);
     expect(styles).toMatch(/\.module-header h2,[\s\S]*?color:\s*#202020;/);
     expect(styles).toMatch(/\.panel-screw\s*\{[\s\S]*?border-radius:\s*50%;[\s\S]*?radial-gradient\(circle at 34% 28%,/);
-    expect(styles).toMatch(/\.fader-shell input\[type="range"\]::\-webkit-slider-thumb\s*\{[\s\S]*?width:\s*34px;[\s\S]*?transform:\s*translateX\(\-14px\);/);
+    expect(styles).toMatch(/\.dial-face\s*\{[\s\S]*?border:\s*2px solid #050505;[\s\S]*?border-radius:\s*50%;[\s\S]*?background:\s*#111111;[\s\S]*?repeating-conic-gradient\(#1d1d1d/);
+    expect(styles).toMatch(/\.dial-face i\s*\{[\s\S]*?background:\s*#f7f7f7;/);
     expect(styles).toMatch(/\.piano-key--black\s*\{[\s\S]*?min-width:\s*0;[\s\S]*?height:\s*139px;/);
     expect(styles).toContain("@media (forced-colors: active)");
   });
@@ -77,7 +78,7 @@ describe("1950s electronics-console finish", () => {
     expect(toggleSwitch).toMatch(/width:\s*58px;/);
     expect(toggleSwitch).toMatch(/min-height:\s*86px;/);
     expect(toggleSwitch).toMatch(/\.toggle-switch span::after\s*\{[\s\S]*?left:\s*50%;[\s\S]*?width:\s*16px;[\s\S]*?height:\s*18px;/);
-    expect(toggleSwitch).toMatch(/\.power-switch\s*\{[\s\S]*?width:\s*122px;[\s\S]*?min-height:\s*38px;[\s\S]*?flex-direction:\s*row;[\s\S]*?margin-top:\s*0;/);
+    expect(toggleSwitch).toMatch(/\.power-switch\s*\{[\s\S]*?width:\s*122px;[\s\S]*?min-height:\s*44px;[\s\S]*?flex-direction:\s*row;[\s\S]*?margin-top:\s*0;/);
     expect(toggleSwitch).toMatch(/\.power-switch span\s*\{[\s\S]*?width:\s*45px;[\s\S]*?height:\s*24px;/);
     expect(toggleSwitch).toMatch(/\.power-switch span::after\s*\{[\s\S]*?left:\s*3px;[\s\S]*?transform:\s*translateY\(-50%\);/);
     expect(toggleSwitch).toMatch(/\.power-switch\[aria-checked="true"\] span::after\s*\{[\s\S]*?transform:\s*translate\(21px, -50%\);/);

@@ -408,6 +408,27 @@ describe("NoteSequencePlayer", () => {
     expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(1);
   });
 
+  it("does not let a stale callback orphan the current timer handle", () => {
+    const { time, player } = setup();
+    player.play(take([
+      { deltaMs: 100, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]));
+    const stale = [...time.tasks.entries()][0];
+    expect(stale).toBeDefined();
+    if (!stale) throw new Error("Expected a playback timer.");
+    time.tasks.delete(stale[0]);
+    time.time = 25;
+    player.pause();
+    player.resume();
+    expect(time.tasks.size).toBe(1);
+
+    stale[1].callback();
+    expect(time.tasks.size).toBe(1);
+    player.pause();
+    expect(time.tasks.size).toBe(0);
+  });
+
   it("does not chase a note whose overdue release was still waiting in the timer queue", () => {
     const { time, calls, player } = setup();
     player.play(take([
@@ -450,6 +471,77 @@ describe("NoteSequencePlayer", () => {
     time.advance(50);
     expect(calls.filter((call) => call.startsWith("off:"))).toHaveLength(1);
     expect(calls.at(-1)).toBe("finished:ended");
+  });
+
+  it("slices a large silent resume catch-up into bounded timer tasks", () => {
+    const { time, calls, player } = setup();
+    const events: NoteSequenceEvent[] = [];
+    for (let index = 0; index < 600; index += 1) {
+      events.push({ deltaMs: index === 0 ? 100 : 0, note: index % 2 ? 60 : 61, on: true });
+    }
+    for (let index = 0; index < 600; index += 1) {
+      events.push({ deltaMs: 0, note: index % 2 ? 60 : 61, on: false });
+    }
+    player.play(take(events));
+
+    const stalled = [...time.tasks.entries()][0];
+    expect(stalled).toBeDefined();
+    if (!stalled) throw new Error("Expected a playback timer.");
+    time.tasks.delete(stalled[0]);
+    time.time = 100;
+    expect(player.pause()).toBe(true);
+
+    // The first resume task processes only one batch. Because all dispatch is
+    // silent during catch-up, completion is the only observable callback.
+    expect(player.resume()).toBe(true);
+    expect(calls).toEqual([]);
+    expect(time.tasks.size).toBe(1);
+    expect(time.nextDelay()).toBe(0);
+
+    const firstContinuation = [...time.tasks.entries()][0];
+    expect(firstContinuation).toBeDefined();
+    if (!firstContinuation) throw new Error("Expected a catch-up continuation.");
+    time.tasks.delete(firstContinuation[0]);
+    firstContinuation[1].callback();
+    expect(calls).toEqual([]);
+    expect(time.tasks.size).toBe(1);
+
+    const finalContinuation = [...time.tasks.entries()][0];
+    expect(finalContinuation).toBeDefined();
+    if (!finalContinuation) throw new Error("Expected a final catch-up continuation.");
+    time.tasks.delete(finalContinuation[0]);
+    finalContinuation[1].callback();
+    expect(calls).toEqual(["finished:ended"]);
+    expect(player.isActive).toBe(false);
+    expect(time.tasks.size).toBe(0);
+  });
+
+  it("can pause a sliced catch-up without counting yielded time", () => {
+    const { time, calls, player } = setup();
+    const events: NoteSequenceEvent[] = [];
+    for (let index = 0; index < 600; index += 1) {
+      events.push({ deltaMs: index === 0 ? 100 : 0, note: index % 2 ? 60 : 61, on: true });
+    }
+    for (let index = 0; index < 600; index += 1) {
+      events.push({ deltaMs: index === 0 ? 900 : 0, note: index % 2 ? 60 : 61, on: false });
+    }
+    player.play(take(events));
+
+    const stalled = [...time.tasks.entries()][0];
+    expect(stalled).toBeDefined();
+    if (!stalled) throw new Error("Expected a playback timer.");
+    time.tasks.delete(stalled[0]);
+    time.time = 100;
+    player.pause();
+    expect(player.resume()).toBe(true);
+    expect(time.nextDelay()).toBe(0);
+
+    time.time = 10_100;
+    expect(player.pause()).toBe(true);
+    expect(time.tasks.size).toBe(0);
+    expect(player.resume()).toBe(true);
+    expect(calls.filter((call) => call.startsWith("on:"))).toHaveLength(600);
+    expect(time.nextDelay()).toBe(900);
   });
 
   it("does not replay an event when a note callback pauses re-entrantly", () => {

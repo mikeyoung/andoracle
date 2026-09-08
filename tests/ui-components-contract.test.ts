@@ -21,6 +21,34 @@ describe("dialog source contracts", () => {
     expect(source.match(/<Keyboard/g)).toHaveLength(1);
   });
 
+  it("describes the active cutoff or trailing delay route without stale signal-flow copy", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const signalStart = source.indexOf('<div className="signal-flow"');
+    const signalEnd = source.indexOf("</div>", signalStart);
+    const signalFlow = source.slice(signalStart, signalEnd);
+    const trailsBranch = signalFlow.indexOf("params.delayTrails > 0.5");
+    const trailingFilter = signalFlow.indexOf("<span>VCF</span>", trailsBranch);
+    const trailingVca = signalFlow.indexOf("<span>VCA / drive</span>", trailingFilter);
+    const trailingDelay = signalFlow.indexOf("<span>delay trails</span>", trailingVca);
+    const cutoffBranch = signalFlow.indexOf("<span>keyboard-cut delay</span>", trailingDelay);
+    const cutoffFilter = signalFlow.indexOf("<span>VCF</span>", cutoffBranch);
+    const cutoffVca = signalFlow.indexOf("<span>VCA / drive</span>", cutoffFilter);
+
+    expect(signalStart).toBeGreaterThanOrEqual(0);
+    expect(trailsBranch).toBeGreaterThanOrEqual(0);
+    expect(trailingFilter).toBeGreaterThan(trailsBranch);
+    expect(trailingVca).toBeGreaterThan(trailingFilter);
+    expect(trailingDelay).toBeGreaterThan(trailingVca);
+    expect(cutoffBranch).toBeGreaterThan(trailingDelay);
+    expect(cutoffFilter).toBeGreaterThan(cutoffBranch);
+    expect(cutoffVca).toBeGreaterThan(cutoffFilter);
+    expect(source).toContain("paramsRef.current.delayTrails > 0.5");
+    expect(source).toContain("Trails delay follows the VCA and drive.");
+    expect(source).toContain("keyboard-cut delay before the VCF.");
+    expect(source).toContain("Delay Trails on: repeats continue after keyboard release.");
+    expect(source).toContain("Delay Trails off: repeats cut at keyboard release and the next phrase starts clean.");
+  });
+
   it("marks every panel containing routed faders for aligned selector spacing", () => {
     const source = readFileSync(resolve("src/components/SynthPanel.tsx"), "utf8");
 

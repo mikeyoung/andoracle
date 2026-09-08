@@ -97,7 +97,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
   },
   {
     id: "delay",
-    eyebrow: "Post mixer → pre filter",
+    eyebrow: "Keyboard cut · optional trails",
     title: "Stereo Delay",
     accent: "#6a6a6a",
     items: [
@@ -108,6 +108,7 @@ export const PANEL_SECTIONS: readonly PanelSectionDefinition[] = [
       { kind: "range", param: "delayTone" },
       { kind: "range", param: "delaySpread" },
       { kind: "toggle", param: "delayPingPong" },
+      { kind: "toggle", param: "delayTrails" },
     ],
   },
   {

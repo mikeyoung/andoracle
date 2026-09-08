@@ -35,6 +35,7 @@ const DELAY_WET_MAKEUP = 1.3;
 const DELAY_PING_PONG_POWER_MAKEUP = Math.SQRT2;
 const DELAY_MAX_CLEAN_TAP_BLEND = 0.36;
 const DELAY_PRESENTATION_SMOOTHING_SECONDS = 0.02;
+const DELAY_MIX_SMOOTHING_SECONDS = 0.006;
 // Below -140 dBFS, a completely overwritten delay ring is inaudible even
 // after the maximum presentation makeup. Retiring it avoids doing two ring
 // reads, two filters, two nonlinear writes, and feedback routing forever
@@ -517,10 +518,14 @@ class StereoDelay {
   private wetMakeup = DELAY_WET_MAKEUP;
   private presentationInitialized = false;
   private readonly presentationSmoothing: number;
+  private readonly mixSmoothing: number;
   private readonly timeSmoothing: number;
   private mixValue = Number.NaN;
   private dryGain = 1;
   private wetGain = 0;
+  private targetDryGain = 1;
+  private targetWetGain = 0;
+  private mixInitialized = false;
   private initialized = false;
   private targetDelayLeft = 1;
   private targetDelayRight = 1;
@@ -528,8 +533,13 @@ class StereoDelay {
   private enabled = DEFAULT_PARAMS.delayEnabled > 0.5;
   private pingPong = DEFAULT_PARAMS.delayPingPong > 0.5;
   private targetWetMakeup = DELAY_WET_MAKEUP;
-  private bypassDrainPeak = 0;
-  private bypassDrainSamples = 0;
+  private silenceWindowPeak = 0;
+  private silenceWindowSamples = 0;
+  // The backing arrays are retained for the lifetime of the DSP. Logical
+  // history makes reset O(1): samples older than the latest reset are never
+  // readable, so keyboard and route changes cannot force a large fill inside
+  // the real-time callback.
+  private historySamples = 0;
   // A never-enabled/reset delay contains only zeroes. Its bypass can advance
   // time smoothing without reading, filtering, and rewriting two empty rings
   // at audio rate. Once enabled, the normal path keeps draining tails while
@@ -545,14 +555,14 @@ class StereoDelay {
     this.presentationSmoothing = 1 - Math.exp(
       -1 / (DELAY_PRESENTATION_SMOOTHING_SECONDS * rate),
     );
+    this.mixSmoothing = 1 - Math.exp(-1 / (DELAY_MIX_SMOOTHING_SECONDS * rate));
     this.timeSmoothing = 1 - Math.exp(-1 / (0.055 * rate));
     this.setParams(DEFAULT_PARAMS);
   }
 
   reset(): void {
-    this.left.fill(0);
-    this.right.fill(0);
     this.writeIndex = 0;
+    this.historySamples = 0;
     this.delayLeft = 1;
     this.delayRight = 1;
     this.toneLeft = 0;
@@ -562,8 +572,8 @@ class StereoDelay {
     this.presentationInitialized = false;
     this.initialized = false;
     this.pristine = true;
-    this.bypassDrainPeak = 0;
-    this.bypassDrainSamples = 0;
+    this.silenceWindowPeak = 0;
+    this.silenceWindowSamples = 0;
     this.outputLeft = 0;
     this.outputRight = 0;
   }
@@ -590,11 +600,19 @@ class StereoDelay {
     const mix = clamp(params.delayMix, 0, 1);
     if (mix !== this.mixValue) {
       this.mixValue = mix;
-      this.dryGain = Math.cos(mix * Math.PI * 0.5);
-      this.wetGain = Math.sin(mix * Math.PI * 0.5);
+      this.targetDryGain = Math.cos(mix * Math.PI * 0.5);
+      this.targetWetGain = Math.sin(mix * Math.PI * 0.5);
     }
     this.feedback = params.delayFeedback;
-    this.enabled = params.delayEnabled > 0.5;
+    const nextEnabled = params.delayEnabled > 0.5;
+    if (this.enabled && !nextEnabled) {
+      // Begin the bypass-retirement proof at the transition itself. Peaks
+      // heard earlier while Delay was active do not describe the ring window
+      // that will be overwritten while bypassed.
+      this.silenceWindowPeak = 0;
+      this.silenceWindowSamples = 0;
+    }
+    this.enabled = nextEnabled;
     this.pingPong = params.delayPingPong > 0.5;
     this.targetWetMakeup = DELAY_WET_MAKEUP * (
       this.pingPong ? DELAY_PING_PONG_POWER_MAKEUP : 1
@@ -607,10 +625,81 @@ class StereoDelay {
     const indexA = Math.floor(position);
     const indexB = indexA + 1 === buffer.length ? 0 : indexA + 1;
     const fraction = position - indexA;
-    return buffer[indexA] * (1 - fraction) + buffer[indexB] * fraction;
+    if (this.historySamples >= buffer.length) {
+      return buffer[indexA] * (1 - fraction) + buffer[indexB] * fraction;
+    }
+
+    // During the first ring traversal after a logical reset, interpolation
+    // can straddle the new-history boundary. Treat each unwritten endpoint as
+    // zero rather than consulting retained samples from the previous phrase.
+    const wholeDelay = Math.floor(delaySamples);
+    const olderAge = fraction === 0 ? wholeDelay : wholeDelay + 1;
+    const sampleA = this.historySamples >= olderAge ? buffer[indexA] : 0;
+    const sampleB = fraction > 0 && this.historySamples >= wholeDelay ? buffer[indexB] : 0;
+    return sampleA * (1 - fraction) + sampleB * fraction;
   }
 
-  process(input: number): void {
+  private retireTail(): void {
+    this.historySamples = 0;
+    this.toneLeft = 0;
+    this.toneRight = 0;
+    this.pristine = true;
+    this.silenceWindowPeak = 0;
+    this.silenceWindowSamples = 0;
+  }
+
+  private tailCanRetire(
+    captures: boolean,
+    inputLeft: number,
+    inputRight: number,
+    storedLeft: number,
+    storedRight: number,
+  ): boolean {
+    if (
+      captures
+      && (
+        Math.abs(inputLeft) > DELAY_TAIL_RETIRE_THRESHOLD
+        || Math.abs(inputRight) > DELAY_TAIL_RETIRE_THRESHOLD
+      )
+    ) {
+      this.silenceWindowPeak = 0;
+      this.silenceWindowSamples = 0;
+      return false;
+    }
+    this.silenceWindowPeak = Math.max(
+      this.silenceWindowPeak,
+      Math.abs(storedLeft),
+      Math.abs(storedRight),
+      Math.abs(this.toneLeft),
+      Math.abs(this.toneRight),
+    );
+    this.silenceWindowSamples += 1;
+    if (this.silenceWindowSamples < this.left.length) return false;
+    const canRetire = this.silenceWindowPeak <= DELAY_TAIL_RETIRE_THRESHOLD;
+    this.silenceWindowPeak = 0;
+    this.silenceWindowSamples = 0;
+    return canRetire;
+  }
+
+  process(inputLeft: number, inputRight = inputLeft, captureInput = true): void {
+    const captures = this.enabled && captureInput;
+    if (
+      this.pristine
+      && (!captures || (inputLeft === 0 && inputRight === 0))
+    ) {
+      // With no readable tail and no captured sample, there is nothing to
+      // interpolate or filter. Snap inaudible targets so the default bypass
+      // and a closed keyboard VCA do constant work regardless of buffer size.
+      this.delayLeft = this.targetDelayLeft;
+      this.delayRight = this.targetDelayRight;
+      this.initialized = true;
+      this.dryGain = this.targetDryGain;
+      this.wetGain = this.targetWetGain;
+      this.mixInitialized = true;
+      this.outputLeft = this.enabled ? inputLeft * this.dryGain : inputLeft;
+      this.outputRight = this.enabled ? inputRight * this.dryGain : inputRight;
+      return;
+    }
     if (!this.initialized) {
       this.delayLeft = this.targetDelayLeft;
       this.delayRight = this.targetDelayRight;
@@ -618,63 +707,50 @@ class StereoDelay {
     }
     this.delayLeft += (this.targetDelayLeft - this.delayLeft) * this.timeSmoothing;
     this.delayRight += (this.targetDelayRight - this.delayRight) * this.timeSmoothing;
+    if (!this.mixInitialized) {
+      this.dryGain = this.targetDryGain;
+      this.wetGain = this.targetWetGain;
+      this.mixInitialized = true;
+    } else {
+      this.dryGain += (this.targetDryGain - this.dryGain) * this.mixSmoothing;
+      this.wetGain += (this.targetWetGain - this.wetGain) * this.mixSmoothing;
+    }
 
-    if (!this.enabled && this.pristine) {
-      this.outputLeft = input;
-      this.outputRight = input;
-      return;
-    }
-    if (this.enabled) {
-      this.pristine = false;
-      this.bypassDrainPeak = 0;
-      this.bypassDrainSamples = 0;
-    }
+    if (this.enabled) this.pristine = false;
 
     const wetLeft = this.read(this.left, this.delayLeft);
     const wetRight = this.read(this.right, this.delayRight);
     this.toneLeft += this.toneCoefficient * (wetLeft - this.toneLeft);
     this.toneRight += this.toneCoefficient * (wetRight - this.toneRight);
 
-    const injectedInput = this.enabled ? input : 0;
+    const injectedLeft = captures ? inputLeft : 0;
+    const injectedRight = captures ? inputRight : 0;
+    const pingPongInput = captures ? (inputLeft + inputRight) * 0.5 : 0;
     const writeLeft = this.pingPong
-      ? injectedInput + this.toneRight * this.feedback
-      : injectedInput + this.toneLeft * this.feedback;
+      ? pingPongInput + this.toneRight * this.feedback
+      : injectedLeft + this.toneLeft * this.feedback;
     const writeRight = this.pingPong
       ? this.toneLeft * this.feedback
-      : injectedInput + this.toneRight * this.feedback;
+      : injectedRight + this.toneRight * this.feedback;
     const storedLeft = softClip(writeLeft);
     const storedRight = softClip(writeRight);
     this.left[this.writeIndex] = storedLeft;
     this.right[this.writeIndex] = storedRight;
     this.writeIndex += 1;
     if (this.writeIndex === this.left.length) this.writeIndex = 0;
+    if (this.historySamples < this.left.length) this.historySamples += 1;
+    const retireAfterOutput = this.tailCanRetire(
+      captures,
+      inputLeft,
+      inputRight,
+      storedLeft,
+      storedRight,
+    );
 
     if (!this.enabled) {
-      this.bypassDrainPeak = Math.max(
-        this.bypassDrainPeak,
-        Math.abs(storedLeft),
-        Math.abs(storedRight),
-        Math.abs(this.toneLeft),
-        Math.abs(this.toneRight),
-      );
-      this.bypassDrainSamples += 1;
-      if (this.bypassDrainSamples >= this.left.length) {
-        if (this.bypassDrainPeak <= DELAY_TAIL_RETIRE_THRESHOLD) {
-          // Every slot was overwritten during this measurement window, so no
-          // older high-level sample can reappear if Time changes or Delay is
-          // enabled again. Clear sub-threshold residue once, then take the
-          // existing zero-cost pristine bypass on subsequent samples.
-          this.left.fill(0);
-          this.right.fill(0);
-          this.toneLeft = 0;
-          this.toneRight = 0;
-          this.pristine = true;
-        }
-        this.bypassDrainPeak = 0;
-        this.bypassDrainSamples = 0;
-      }
-      this.outputLeft = input;
-      this.outputRight = input;
+      this.outputLeft = inputLeft;
+      this.outputRight = inputRight;
+      if (retireAfterOutput) this.retireTail();
       return;
     }
     // Keep the feedback loop fully tone-filtered, while retaining more attack
@@ -698,8 +774,9 @@ class StereoDelay {
     // the same two-channel power as the ordinary stereo delay. Makeup is
     // outside the delay's 0.92-bounded internal loop; the separate downstream
     // output-return path remains protected by its nonlinear stages.
-    this.outputLeft = input * this.dryGain + audibleWetLeft * this.wetGain * this.wetMakeup;
-    this.outputRight = input * this.dryGain + audibleWetRight * this.wetGain * this.wetMakeup;
+    this.outputLeft = inputLeft * this.dryGain + audibleWetLeft * this.wetGain * this.wetMakeup;
+    this.outputRight = inputRight * this.dryGain + audibleWetRight * this.wetGain * this.wetMakeup;
+    if (retireAfterOutput) this.retireTail();
   }
 
   get tailIsRetired(): boolean {
@@ -728,6 +805,7 @@ export interface PerformanceState {
 
 interface KeyboardArticulationEvent {
   gate: boolean;
+  gateTransition: boolean;
   lowNote: number;
   highNote: number;
   trigger: boolean;
@@ -879,6 +957,7 @@ export class OdysseyDSP {
     const previousGate = this.requestedKeyboardGate;
     const previousAuto = this.params.autoRun;
     let delayParamsChanged = false;
+    let delayRouteChanged = false;
     let allocationParamsChanged = false;
     for (const rawKey in changes) {
       if (!Object.hasOwn(changes, rawKey)) continue;
@@ -897,8 +976,10 @@ export class OdysseyDSP {
         || key === "delaySpread"
         || key === "delayPingPong"
       ) delayParamsChanged = true;
+      if (key === "delayTrails") delayRouteChanged = true;
       if (key === "autoRun" || key === "autoNote") allocationParamsChanged = true;
     }
+    if (delayRouteChanged) this.delay.reset();
     if (delayParamsChanged) this.delay.setParams(this.params);
     if (!allocationParamsChanged) return;
     const nextGate = this.keys.size > 0 || this.params.autoRun > 0.5;
@@ -1066,7 +1147,8 @@ export class OdysseyDSP {
     }
     else if (autoGate) lowNote = highNote = Math.round(this.params.autoNote);
     else if (collapseInterval) highNote = lowNote;
-    const changed = gate !== this.requestedKeyboardGate
+    const gateTransition = gate !== this.requestedKeyboardGate;
+    const changed = gateTransition
       || lowNote !== this.requestedLowNote
       || highNote !== this.requestedHighNote;
     this.requestedKeyboardGate = gate;
@@ -1078,11 +1160,18 @@ export class OdysseyDSP {
         const reusable = this.articulationQueue[insertionIndex];
         if (reusable) {
           reusable.gate = gate;
+          reusable.gateTransition = gateTransition;
           reusable.lowNote = lowNote;
           reusable.highNote = highNote;
           reusable.trigger = trigger;
         } else {
-          this.articulationQueue[insertionIndex] = { gate, lowNote, highNote, trigger };
+          this.articulationQueue[insertionIndex] = {
+            gate,
+            gateTransition,
+            lowNote,
+            highNote,
+            trigger,
+          };
         }
         this.articulationCount += 1;
       } else {
@@ -1092,6 +1181,10 @@ export class OdysseyDSP {
         const tail = this.articulationQueue[tailIndex];
         if (!tail) return;
         tail.gate = gate;
+        // An off/on phrase boundary can collapse back to the tail's original
+        // gate while a suspended worklet queue is full. Preserve that a
+        // boundary occurred so non-trailing delay memory still resets.
+        tail.gateTransition ||= gateTransition;
         tail.lowNote = lowNote;
         tail.highNote = highNote;
         tail.trigger ||= trigger;
@@ -1538,6 +1631,16 @@ export class OdysseyDSP {
     // Prepare parameter-only coefficients once per block instead of comparing
     // the same values for every 2x-oversampled frame.
     const filterType = this.selectFilterType();
+    const delayTrails = this.params.delayTrails > 0.5;
+    const vcaEnvelopeUsesKeyboard = this.params.vcaEnvelopeSource < 0.5
+      ? this.params.arSource < 0.5
+      : this.params.adsrSource < 0.5;
+    const delayCanReachVca = this.params.vcaInitialGain > 0
+      || this.params.vcaEnvelopeAmount > 0;
+    const delayCapturesWithoutKeyboard = delayCanReachVca && (
+      this.params.vcaInitialGain > 0
+      || !vcaEnvelopeUsesKeyboard
+    );
     this.updateFilterResonanceCoefficients(this.params.filterResonance);
     if (this.params.hpfCutoff !== this.highPassCutoffValue) {
       this.highPassCutoffValue = this.params.hpfCutoff;
@@ -1550,10 +1653,15 @@ export class OdysseyDSP {
     for (let frame = 0; frame < left.length; frame += 1) {
       let decimatedLeft = 0;
       let decimatedRight = 0;
-      const externalSample = externalInput?.[frame] ?? 0;
+      const rawExternalSample = externalInput?.[frame] ?? 0;
+      // A malformed or disconnected source must not poison recursive delay
+      // and filter state permanently. Web Audio should supply finite samples,
+      // but sanitizing this boundary is cheap and makes the DSP fail closed.
+      const externalSample = Number.isFinite(rawExternalSample) ? rawExternalSample : 0;
       for (let pass = 0; pass < this.oversample; pass += 1) {
         const articulation = this.shiftArticulation();
         if (articulation) {
+          if (articulation.gateTransition && !delayTrails) this.delay.reset();
           this.keyboardGate = articulation.gate;
           this.lowNote = articulation.lowNote;
           this.highNote = articulation.highNote;
@@ -1571,16 +1679,37 @@ export class OdysseyDSP {
         const interpolatedExternal = this.previousExternalSample
           + (externalSample - this.previousExternalSample) * interpolation;
         const mixed = this.processMixer(selectedNoise, interpolatedExternal);
-        this.delay.process(mixed);
-        this.processFinalFilterAndVca(
-          this.delay.outputLeft,
-          this.delay.outputRight,
-          selectedNoise,
-          this.lfoTriangle,
-          this.arValue,
-          this.adsrValue,
-          filterType,
-        );
+        if (delayTrails) {
+          // Trails place the delay after the final synth VCA. Its input is
+          // therefore already keyboard-shaped, while stored repeats remain
+          // audible after release without exposing free-running oscillators.
+          this.processFinalFilterAndVca(
+            mixed,
+            mixed,
+            selectedNoise,
+            this.lfoTriangle,
+            this.arValue,
+            this.adsrValue,
+            filterType,
+          );
+          this.delay.process(this.finalLeft, this.finalRight);
+          this.finalLeft = this.delay.outputLeft;
+          this.finalRight = this.delay.outputRight;
+        } else {
+          const captureDelayInput = delayCanReachVca && (
+            this.keyboardGate || delayCapturesWithoutKeyboard
+          );
+          this.delay.process(mixed, mixed, captureDelayInput);
+          this.processFinalFilterAndVca(
+            this.delay.outputLeft,
+            this.delay.outputRight,
+            selectedNoise,
+            this.lfoTriangle,
+            this.arValue,
+            this.adsrValue,
+            filterType,
+          );
+        }
         this.masterLevel += (this.params.masterVolume - this.masterLevel) * this.masterLevelSmoothing;
         const limitedLeft = softClip(this.finalLeft * this.masterLevel * 0.82);
         const limitedRight = softClip(this.finalRight * this.masterLevel * 0.82);

@@ -47,6 +47,7 @@ html {
   width: 100%;
   max-width: 100%;
   min-height: 100%;
+  overflow-x: hidden;
   overflow-x: clip;
   background: #292929;
 }
@@ -56,6 +57,7 @@ body {
   max-width: 100%;
   min-height: 100vh;
   margin: 0;
+  overflow-x: hidden;
   overflow-x: clip;
   color: var(--paper);
   background-color: #383838;
@@ -91,6 +93,7 @@ input:focus-visible,
 .app-shell {
   max-width: 100%;
   min-height: 100vh;
+  overflow-x: hidden;
   overflow-x: clip;
   border-right: 7px solid rgba(24, 24, 24, 0.92);
   border-left: 7px solid rgba(24, 24, 24, 0.92);
@@ -609,9 +612,12 @@ input:focus-visible,
   position: fixed;
   z-index: 60;
   bottom: calc(18px + env(safe-area-inset-bottom));
-  left: 50%;
+  right: calc(12px + env(safe-area-inset-right));
+  left: calc(12px + env(safe-area-inset-left));
   width: max-content;
   max-width: calc(100vw - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+  margin-right: auto;
+  margin-left: auto;
   padding: 11px 17px;
   border: 2px solid #a8a8a8;
   border-radius: 2px;
@@ -628,7 +634,6 @@ input:focus-visible,
   overflow-wrap: normal;
   word-break: normal;
   hyphens: none;
-  transform: translateX(-50%);
   pointer-events: none;
 }
 
@@ -844,7 +849,7 @@ main {
 
 .control-bank {
   display: flex;
-  min-height: 282px;
+  min-height: 184px;
   align-items: stretch;
   align-content: stretch;
   flex-wrap: wrap;
@@ -896,8 +901,8 @@ main {
   hyphens: none;
 }
 
-.control-bank--routed .parameter--range .fader-shell {
-  flex: 0 0 196px;
+.control-bank--routed .parameter--range .dial-shell {
+  flex: 0 0 68px;
 }
 
 .control-bank--routed .parameter--range output {
@@ -911,6 +916,7 @@ main {
   margin-top: auto;
   overflow: visible;
   padding-top: 6px;
+  color: #343434;
   color: color-mix(in srgb, var(--accent), #171717 58%);
   font-family: "Courier New", Courier, monospace;
   font-size: 10px;
@@ -922,51 +928,98 @@ main {
   hyphens: none;
 }
 
-.fader-shell {
+.dial-shell {
   position: relative;
   display: grid;
-  width: 52px;
-  height: 196px;
-  flex: 1 0 196px;
+  width: 68px;
+  height: 68px;
+  flex: 0 0 68px;
   place-items: center;
 }
 
-.fader-shell::before {
+.dial-scale {
   position: absolute;
-  z-index: 0;
-  width: 7px;
-  height: 170px;
-  border: 1px solid #555555;
-  border-radius: 1px;
-  background: linear-gradient(90deg, #242424, #090909 43% 57%, #242424);
-  box-shadow: inset 0 0 5px #050505, 0 0 0 2px #a8a8a8, 0 0 0 3px #5b5b5b;
-  content: "";
-}
-
-.fader-scale {
-  position: absolute;
-  display: flex;
-  width: 38px;
-  height: 170px;
-  flex-direction: column;
-  justify-content: space-between;
+  inset: 0;
+  z-index: 1;
+  display: block;
   pointer-events: none;
 }
 
-.fader-scale i {
+.dial-scale i {
+  --tick-angle: 0deg;
+
+  position: absolute;
+  top: 1px;
+  left: calc(50% - 1px);
   display: block;
-  width: 100%;
-  height: 1px;
-  background: linear-gradient(90deg, #4d4d4d 0 27%, transparent 27% 73%, #4d4d4d 73%);
-  opacity: 0.9;
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background: #555555;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transform: rotate(var(--tick-angle));
+  transform-origin: 1px 33px;
 }
 
-.fader-shell input[type="range"] {
-  position: relative;
+.dial-scale i:nth-child(1) { --tick-angle: -135deg; }
+.dial-scale i:nth-child(2) { --tick-angle: -101.25deg; }
+.dial-scale i:nth-child(3) { --tick-angle: -67.5deg; }
+.dial-scale i:nth-child(4) { --tick-angle: -33.75deg; }
+.dial-scale i:nth-child(5) { --tick-angle: 0deg; }
+.dial-scale i:nth-child(6) { --tick-angle: 33.75deg; }
+.dial-scale i:nth-child(7) { --tick-angle: 67.5deg; }
+.dial-scale i:nth-child(8) { --tick-angle: 101.25deg; }
+.dial-scale i:nth-child(9) { --tick-angle: 135deg; }
+
+.dial-scale i:first-child,
+.dial-scale i:last-child {
+  height: 8px;
+  background: #343434;
+}
+
+.dial-face {
+  position: absolute;
+  inset: 7px;
   z-index: 2;
-  width: 48px;
-  height: 178px;
+  display: block;
+  width: 54px;
+  height: 54px;
+  border: 2px solid #050505;
+  border-radius: 50%;
+  background: #111111;
+  background:
+    radial-gradient(circle, transparent 0 35%, rgba(255, 255, 255, 0.055) 36% 39%, transparent 40%),
+    repeating-conic-gradient(#1d1d1d 0deg 7deg, #090909 7deg 11deg);
+  box-shadow:
+    inset 0 0 0 2px #2d2d2d,
+    inset 0 -5px 8px rgba(0, 0, 0, 0.72),
+    0 2px 3px rgba(0, 0, 0, 0.62),
+    0 0 0 2px #777777;
+  pointer-events: none;
+  transform: rotate(var(--dial-angle));
+  transition: transform 45ms linear, filter 100ms ease;
+}
+
+.dial-face i {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  display: block;
+  width: 3px;
+  height: 17px;
+  border-radius: 2px;
+  background: #f7f7f7;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85), 0 0 2px rgba(255, 255, 255, 0.5);
+  transform: translateX(-50%);
+}
+
+.dial-shell input[type="range"] {
+  position: relative;
+  z-index: 3;
+  width: 68px;
+  height: 68px;
   margin: 0;
+  opacity: 0;
   appearance: none;
   background: transparent;
   cursor: ns-resize;
@@ -975,43 +1028,19 @@ main {
   writing-mode: vertical-lr;
 }
 
-.fader-shell input[type="range"]::-webkit-slider-runnable-track {
-  width: 6px;
-  border-radius: 4px;
-  background: transparent;
+.dial-shell input[type="range"]:focus-visible {
+  outline: 0;
+  box-shadow: none;
 }
 
-.fader-shell input[type="range"]::-webkit-slider-thumb {
-  width: 34px;
-  height: 15px;
-  border: 1px solid #151515;
-  border-radius: 1px;
-  appearance: none;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 25%, transparent 60%, color-mix(in srgb, var(--accent), #000 22%) 60% 78%, #151515 78%),
-    repeating-linear-gradient(90deg, #2f2f2f 0 4px, #202020 4px 6px);
-  box-shadow: 0 3px 5px rgba(21, 21, 21, 0.62), inset 0 0 0 1px rgba(229, 229, 229, 0.16);
-  /* Blink/WebKit places a custom vertical thumb's left edge on the track.
-     Offset half the 34px thumb minus the 6px track to share one centerline. */
-  transform: translateX(-14px);
+.dial-shell input[type="range"]:focus-visible ~ .dial-face {
+  outline: 3px solid #c9c9c9;
+  outline-offset: 4px;
+  box-shadow: inset 0 0 0 2px #2d2d2d, 0 0 0 2px #282828;
 }
 
-.fader-shell input[type="range"]::-moz-range-track {
-  width: 6px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-}
-
-.fader-shell input[type="range"]::-moz-range-thumb {
-  width: 34px;
-  height: 15px;
-  border: 1px solid #151515;
-  border-radius: 1px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 25%, transparent 60%, color-mix(in srgb, var(--accent), #000 22%) 60% 78%, #151515 78%),
-    repeating-linear-gradient(90deg, #2f2f2f 0 4px, #202020 4px 6px);
-  box-shadow: 0 2px 5px rgba(21, 21, 21, 0.62), inset 0 0 0 1px rgba(229, 229, 229, 0.16);
+.dial-shell input[type="range"]:active ~ .dial-face {
+  filter: brightness(1.2);
 }
 
 .parameter--choice {
@@ -1024,7 +1053,7 @@ main {
 .choice-button {
   width: 100%;
   height: auto;
-  min-height: 0;
+  min-height: 44px;
   margin-top: 20px;
   padding: 7px 24px 7px 8px;
   border: 2px solid #575757;
@@ -1065,7 +1094,8 @@ main {
   width: 0;
   height: 0;
   flex: 0 0 auto;
-  border-top: 5px solid color-mix(in srgb, var(--accent), #111 18%);
+  border-top: 5px solid #333333;
+  border-top-color: color-mix(in srgb, var(--accent), #111 18%);
   border-right: 4px solid transparent;
   border-left: 4px solid transparent;
 }
@@ -1125,7 +1155,9 @@ main {
 }
 
 .toggle-switch[aria-checked="true"] {
+  border-color: #555555;
   border-color: color-mix(in srgb, var(--toggle-accent), #111 28%);
+  color: #303030;
   color: color-mix(in srgb, var(--toggle-accent), #111 55%);
 }
 
@@ -1160,7 +1192,7 @@ main {
 
 .power-switch {
   width: 122px;
-  min-height: 38px;
+  min-height: 44px;
   flex-direction: row;
   gap: 7px;
   margin-top: 0;
@@ -1238,13 +1270,14 @@ main {
 
 .route-control .parameter--choice label {
   min-height: 11px;
+  color: #383838;
   color: color-mix(in srgb, var(--accent), #171717 55%);
   font-size: 9px;
 }
 
 .route-control .parameter--choice select,
 .route-control .choice-button {
-  min-height: 0;
+  min-height: 44px;
   margin-top: 0;
   font-size: 12px;
   line-height: 1.2;
@@ -1326,6 +1359,7 @@ main {
 }
 
 .external-input-button.is-enabled {
+  border-color: #555555;
   border-color: color-mix(in srgb, var(--module-accent), #111 28%);
   color: #232323;
   background: linear-gradient(180deg, #d4d4d4, #a1a1a1);
@@ -1389,6 +1423,7 @@ main {
 }
 
 .ppc-pad span {
+  color: #dedede;
   color: color-mix(in srgb, var(--accent), #fff 25%);
   font-size: 28px;
   line-height: 1;
@@ -1404,6 +1439,7 @@ main {
 .ppc-pad.is-pressed {
   color: var(--cream);
   background: #2a2a2a;
+  box-shadow: inset 0 0 0 4px #0d0d0d;
   box-shadow: inset 0 0 0 4px #0d0d0d, inset 0 0 24px color-mix(in srgb, var(--accent), transparent 65%);
   transform: translateY(2px);
 }
@@ -1861,6 +1897,7 @@ footer span {
 
 .patch-library-list {
   display: grid;
+  max-height: min(310px, 42vh);
   max-height: min(310px, 42dvh);
   gap: 7px;
   margin: 22px 0 8px;
@@ -2237,7 +2274,7 @@ footer span {
   .module--amplifier { order: 9; }
 
   .control-bank {
-    min-height: 296px;
+    min-height: 184px;
   }
 
   .midi-strip {
@@ -2623,9 +2660,18 @@ footer span {
     width: min(450px, calc(100vw - 40px - env(safe-area-inset-left) - env(safe-area-inset-right)));
     max-width: calc(100vw - 40px - env(safe-area-inset-left) - env(safe-area-inset-right));
   }
+
+  .help-dialog {
+    width: min(620px, calc(100vw - 40px - env(safe-area-inset-left) - env(safe-area-inset-right)));
+    max-width: calc(100vw - 40px - env(safe-area-inset-left) - env(safe-area-inset-right));
+  }
 }
 
 @media (hover: hover) {
+  .dial-shell input:hover ~ .dial-face {
+    filter: brightness(1.12);
+  }
+
   .choice-button:hover,
   .external-input-button:hover {
     border-color: color-mix(in srgb, var(--accent, var(--orange)), var(--cream) 30%);
@@ -2667,6 +2713,23 @@ footer span {
     border-color: Highlight;
     box-shadow: none;
   }
+
+  .dial-face {
+    border-color: CanvasText;
+    background: Canvas;
+    box-shadow: none;
+  }
+
+  .dial-face i,
+  .dial-scale i {
+    background: CanvasText;
+    box-shadow: none;
+  }
+
+  .dial-shell input[type="range"]:focus-visible ~ .dial-face {
+    outline-color: Highlight;
+    box-shadow: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2679,6 +2742,6 @@ footer span {
 
   .power-switch[aria-checked="false"]:not(:disabled),
   .power-switch[aria-checked="false"]:not(:disabled) span::after {
-    animation-duration: 3.2s;
+    animation: none;
   }
 }

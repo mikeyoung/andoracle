@@ -425,7 +425,7 @@ function App() {
 
     if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
     // localStorage is synchronous. Sharing one trailing timer with URL updates
-    // prevents a touch-drag from blocking the main thread on every fader event.
+    // prevents a touch-drag from blocking the main thread on every dial event.
     urlSyncTimerRef.current = window.setTimeout(() => persistPatchState(true), 120);
     return () => {
       if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
@@ -1112,6 +1112,11 @@ function App() {
     setParams(next);
     engine.setParams({ [key]: normalizedValue } as Partial<SynthParams>);
     if (key === "ppcBendRange" || key === "ppcVibratoRange") syncPerformance(next);
+    if (key === "delayTrails") {
+      setNotice(normalizedValue > 0.5
+        ? "Delay Trails on: repeats continue after keyboard release."
+        : "Delay Trails off: repeats cut at keyboard release and the next phrase starts clean.");
+    }
   }, [engine, syncPerformance]);
 
   const openDirectEditor = useCallback((
@@ -1769,7 +1774,9 @@ function App() {
       externalInputEnabledRef.current = true;
       setExternalInputEnabled(true);
       setExternalInputError(null);
-      setNotice("Live external input is feeding the mixer, then the delay, before the VCF.");
+      setNotice(paramsRef.current.delayTrails > 0.5
+        ? "Live external input is feeding the mixer and synth path; Trails delay follows the VCA and drive."
+        : "Live external input is feeding the mixer, then the keyboard-cut delay before the VCF.");
     } catch (error) {
       audioKeepAliveRef.current?.setCaptureActive(false);
       engine.disableExternalInput();
@@ -2308,8 +2315,17 @@ function App() {
           <span role="status" aria-live="polite" aria-atomic="true">{notice}</span>
           <span><b>Tip:</b> right-click or long-press any parameter to enter its exact value and see its valid range.</span>
         </div>
-        <div className="signal-flow" role="group" aria-label="Synthesizer signal flow">
-          <span>VCO 1 / VCO 2 / noise / ring</span><i>→</i><span>mixer</span><i>→</i><span>delay</span><i>→</i><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA</span><i>→</i><span>output</span>
+        <div className="signal-flow"
+          role="group"
+          aria-label={`Synthesizer signal flow; delay Trails ${params.delayTrails > 0.5 ? "on" : "off"}`}
+        >
+          <span>VCO 1 / VCO 2 / noise / ring</span><i>→</i><span>mixer</span><i>→</i>
+          {params.delayTrails > 0.5 ? (
+            <><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA / drive</span><i>→</i><span>delay trails</span></>
+          ) : (
+            <><span>keyboard-cut delay</span><i>→</i><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA / drive</span></>
+          )}
+          <i>→</i><span>output</span>
         </div>
         <div className="panel-grid">
           {PANEL_SECTIONS.map((section) => (

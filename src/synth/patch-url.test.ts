@@ -13,11 +13,16 @@ import {
   PATCH_URL_PARAM,
   PATCH_V1_PARAM_KEYS,
   PATCH_V1_VALUE_SPECS,
+  PATCH_V2_PARAM_KEYS,
+  PATCH_V2_VALUE_SPECS,
   decodePatch,
   encodePatch,
   readPatchFromUrl,
   urlWithPatch,
 } from "./patch-url";
+
+const ARCHIVED_DEFAULT_V1_TOKEN = "v1.7FE4PwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEIAAABBAACAPwAAAAAAAAAAAACAP-zRgkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD8AAAAAAAAAAAAAAADs0YJCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_AAAAAAAAAADNzExAAAAAAAAAAADNzAw_AAAAAM3MTD8AAAAAAAAAAAAAAAAAAAAAAAAAAOxROD8AAAAAKVwPPzMzMz8AAAAAAABAQAAAgD8AQINF7FE4PgAAAAAAAIA-AACAPwAAAAAAAAAArkdhPgAAgEEAAAAAmpkZQAAAAAAAAIA_ZmZmPwAAAAAAAAAACtcjPJqZmT4AAAAAj8J1PFyPwj5SuB4_ZmbmPgAAAAAAAKBDXI_CPs3MTD4AwMFFMzOzPgAAgD-d_A";
+const ARCHIVED_NONDEFAULT_V1_TOKEN = "v1.HVqkPgAAFMIAAAAAAAAAAAAAAAAAAMBBAAAAAAAAQEIAAABBAACAPwAAAAAAAAAAAACAP-zRgkIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD8AAAAAAAAAAAAAAADs0YJCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA_AAAAAAAAAADNzExAAAAAAAAAAADNzAw_AAAAAM3MTD8AAAAAAAAAAAAAAAAAAAAAAAAAAOxROD8AAAAAKVwPPzMzMz8AAAAAAABAQAAAgD8AQINF7FE4PgAAAAAAAIA-AACAPwAAAAAAAAAArkdhPgAAgEEAAAAAmpkZQAAAAAAAAIA_ZmZmPwAAAAAAAAAACtcjPJqZmT4AAAAAj8J1PFyPwj5SuB4_ZmbmPgAAgD8AQEJE0SI7P83MTD4AwMFFMzOzPgAAAAC6YA";
 
 const fingerprint = (schema: unknown): string => {
   let hash = 0x811c9dc5;
@@ -28,8 +33,8 @@ const fingerprint = (schema: unknown): string => {
   return hash.toString(16).padStart(8, "0");
 };
 
-const liveSchemaFingerprint = (): string => fingerprint(
-  PATCH_V1_PARAM_KEYS.map((key) => {
+const liveSchemaFingerprint = (keys: readonly ParamKey[]): string => fingerprint(
+  keys.map((key) => {
     const spec = PARAM_SPECS[key];
     return [
       key,
@@ -42,9 +47,16 @@ const liveSchemaFingerprint = (): string => fingerprint(
   }),
 );
 
-const frozenSchemaFingerprint = (): string => fingerprint(
+const frozenV1SchemaFingerprint = (): string => fingerprint(
   PATCH_V1_PARAM_KEYS.map((key) => {
     const spec = PATCH_V1_VALUE_SPECS[key];
+    return [key, spec.min, spec.max, spec.step, spec.defaultValue, spec.options ?? null];
+  }),
+);
+
+const frozenV2SchemaFingerprint = (): string => fingerprint(
+  PATCH_V2_PARAM_KEYS.map((key) => {
+    const spec = PATCH_V2_VALUE_SPECS[key];
     return [key, spec.min, spec.max, spec.step, spec.defaultValue, spec.options ?? null];
   }),
 );
@@ -77,16 +89,40 @@ const tokenWithFirstStoredValue = (token: string, value: number): string => {
 };
 
 describe("shareable patch URL codec", () => {
-  it("freezes a V1 wire order containing every persistent parameter exactly once", () => {
+  it("keeps V1 frozen and extends it once for the complete V2 parameter set", () => {
     expect(new Set(PATCH_V1_PARAM_KEYS).size).toBe(PATCH_V1_PARAM_KEYS.length);
-    expect([...PATCH_V1_PARAM_KEYS].sort()).toEqual([...PARAM_KEYS].sort());
+    expect(PATCH_V2_PARAM_KEYS.slice(0, PATCH_V1_PARAM_KEYS.length)).toEqual(PATCH_V1_PARAM_KEYS);
+    expect(PATCH_V2_PARAM_KEYS.at(-1)).toBe("delayTrails");
+    expect(new Set(PATCH_V2_PARAM_KEYS).size).toBe(PATCH_V2_PARAM_KEYS.length);
+    expect([...PATCH_V2_PARAM_KEYS].sort()).toEqual([...PARAM_KEYS].sort());
   });
 
-  it("pins the complete V1 numeric schema", () => {
+  it("pins the complete V1 and V2 numeric schemas", () => {
     // Changing this fixture requires a new codec version. It covers every
     // min/max/step/default and selector option value used by the wire format.
-    expect(frozenSchemaFingerprint()).toBe("1da6a2f4");
-    expect(liveSchemaFingerprint()).toBe("1da6a2f4");
+    expect(frozenV1SchemaFingerprint()).toBe("1da6a2f4");
+    expect(liveSchemaFingerprint(PATCH_V1_PARAM_KEYS)).toBe("1da6a2f4");
+    expect(frozenV2SchemaFingerprint()).toBe("e9dc335b");
+    expect(liveSchemaFingerprint(PATCH_V2_PARAM_KEYS)).toBe("e9dc335b");
+  });
+
+  it("decodes an archived V1 patch with V2-only controls at their current defaults", () => {
+    const decoded = decodePatch(ARCHIVED_DEFAULT_V1_TOKEN);
+    expect(decoded).toEqual(DEFAULT_PARAMS);
+    expect(decoded?.delayTrails).toBe(0);
+  });
+
+  it("preserves non-default values from an archived V1 patch", () => {
+    expect(decodePatch(ARCHIVED_NONDEFAULT_V1_TOKEN)).toMatchObject({
+      masterVolume: 0.321,
+      masterTune: -37,
+      transpose: 24,
+      delayEnabled: 1,
+      delayTime: 777,
+      delayFeedback: 0.731,
+      delayPingPong: 0,
+      delayTrails: 0,
+    });
   });
 
   it("round-trips the default and every factory patch exactly", () => {
@@ -117,7 +153,7 @@ describe("shareable patch URL codec", () => {
     }
   });
 
-  it("uses frozen V1 range, step, and option semantics instead of the live schema", () => {
+  it("uses frozen wire range, step, and option semantics instead of the live schema", () => {
     const originalPatch = { ...DEFAULT_PARAMS, masterVolume: 0.321, transpose: 24 };
     const token = encodePatch(originalPatch);
     const originalVolumeSpec = PARAM_SPECS.masterVolume;
@@ -150,7 +186,6 @@ describe("shareable patch URL codec", () => {
   });
 
   it("fills a parameter added after V1 from the current default", () => {
-    const token = encodePatch(DEFAULT_PARAMS);
     const futureKey = "futureCompatibilityProbe" as ParamKey;
     const futureSpec: ParamSpec = {
       label: "Future compatibility probe",
@@ -166,7 +201,7 @@ describe("shareable patch URL codec", () => {
     (PARAM_SPECS as Record<string, ParamSpec>)[futureKey] = futureSpec;
     (DEFAULT_PARAMS as Record<string, number>)[futureKey] = futureSpec.default;
     try {
-      const decoded = decodePatch(token) as SynthParams & Record<string, number>;
+      const decoded = decodePatch(ARCHIVED_DEFAULT_V1_TOKEN) as SynthParams & Record<string, number>;
       expect(decoded[futureKey]).toBe(0.375);
     } finally {
       PARAM_KEYS.splice(PARAM_KEYS.indexOf(futureKey), 1);
@@ -179,8 +214,8 @@ describe("shareable patch URL codec", () => {
     const first = encodePatch(DEFAULT_PARAMS);
     expect(encodePatch({ ...DEFAULT_PARAMS })).toBe(first);
     expect(first.startsWith(`${PATCH_CODEC_VERSION}.`)).toBe(true);
-    expect(first).toMatch(/^v1\.[A-Za-z0-9_-]+$/);
-    expect(first).toHaveLength(433);
+    expect(first).toMatch(/^v2\.[A-Za-z0-9_-]+$/);
+    expect(first).toHaveLength(438);
   });
 
   it("rejects invalid runtime patch values", () => {
@@ -193,6 +228,7 @@ describe("shareable patch URL codec", () => {
     "",
     "v1",
     "v2.AAAA",
+    "v3.AAAA",
     "v1.",
     "v1.not+url/safe",
     "v1.A",
@@ -226,16 +262,18 @@ describe("shareable patch URL codec", () => {
 
     const validUrl = `https://example.test/andoracle/#${PATCH_URL_PARAM}=${encodePatch(DEFAULT_PARAMS)}`;
     expect(readPatchFromUrl(validUrl)).toEqual({ status: "valid", params: DEFAULT_PARAMS });
+    expect(readPatchFromUrl(`https://example.test/andoracle/#patch=${ARCHIVED_DEFAULT_V1_TOKEN}`))
+      .toEqual({ status: "valid", params: DEFAULT_PARAMS });
     expect(readPatchFromUrl("https://example.test/andoracle/#patch=broken")).toEqual({ status: "invalid" });
-    expect(readPatchFromUrl("https://example.test/andoracle/#patch=v2.AAAA")).toEqual({
+    expect(readPatchFromUrl("https://example.test/andoracle/#patch=v3.AAAA")).toEqual({
       status: "unsupported",
-      version: "v2",
+      version: "v3",
     });
-    expect(readPatchFromUrl(`https://example.test/andoracle/#patch=v2.${"A".repeat(1_000)}`)).toEqual({
+    expect(readPatchFromUrl(`https://example.test/andoracle/#patch=v3.${"A".repeat(1_000)}`)).toEqual({
       status: "unsupported",
-      version: "v2",
+      version: "v3",
     });
-    expect(readPatchFromUrl("https://example.test/andoracle/#patch=v2.not+url/safe")).toEqual({ status: "invalid" });
+    expect(readPatchFromUrl("https://example.test/andoracle/#patch=v3.not+url/safe")).toEqual({ status: "invalid" });
     expect(readPatchFromUrl(`${validUrl}&patch=${encodePatch(DEFAULT_PARAMS)}`)).toEqual({ status: "invalid" });
     expect(readPatchFromUrl(`https://example.test/#patch=v1.${"A".repeat(513)}`)).toEqual({ status: "invalid" });
     expect(readPatchFromUrl("not a URL")).toEqual({ status: "invalid" });
