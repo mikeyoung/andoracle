@@ -3,6 +3,7 @@ import { DEFAULT_PARAMS } from "../synth/params";
 import {
   AUDIO_CONTEXT_CLOSE_TIMEOUT_MS,
   AUDIO_CONTEXT_TRANSITION_TIMEOUT_MS,
+  MAX_QUARANTINED_AUDIO_CONTEXT_CLOSES,
   OdysseyAudioEngine,
 } from "./engine";
 
@@ -256,7 +257,7 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
-  it("quarantines a failed worklet processor and builds a fresh graph on restart", async () => {
+  it("quarantines a failed worklet processor and automatically rebuilds while Power stays on", async () => {
     installAudioFakes({}, {});
     const engine = new OdysseyAudioEngine();
     const statuses: string[] = [];
@@ -279,9 +280,34 @@ describe("OdysseyAudioEngine lifecycle", () => {
     engine.noteOn(60);
     expect(failedNode.port.postMessage).not.toHaveBeenCalled();
 
-    await engine.powerOn(DEFAULT_PARAMS);
+    await Promise.resolve();
+    await expect(engine.ensureRunning()).resolves.toBe("recreated");
     expect(contexts).toHaveLength(2);
     expect(workletNodes).toHaveLength(2);
+    await engine.dispose();
+  });
+
+  it("waits for a delayed retired-context close during immediate processor recovery", async () => {
+    const closing = deferred<void>();
+    installAudioFakes({
+      close: async (context) => {
+        await closing.promise;
+        context.state = "closed";
+        context.onstatechange?.(new Event("statechange"));
+      },
+    }, {});
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+
+    workletNodes[0].dispatchEvent(new Event("processorerror"));
+    const recovering = engine.ensureRunning();
+    await Promise.resolve();
+    expect(contexts).toHaveLength(1);
+
+    closing.resolve();
+    await expect(recovering).resolves.toBe("recreated");
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1].state).toBe("running");
     await engine.dispose();
   });
 
@@ -306,13 +332,13 @@ describe("OdysseyAudioEngine lifecycle", () => {
     expect(failedContext.close).toHaveBeenCalledTimes(1);
     expect(statuses.at(-1)).toEqual({
       state: "closed",
-      error: "The audio processor stopped unexpectedly. Press Power on to restart it.",
+      error: "The audio processor stopped unexpectedly. Andoracle is rebuilding its audio graph.",
     });
 
     // Let the retired context's raw close release its single-flight record,
-    // then prove the next user gesture receives an entirely fresh graph.
+    // then prove the powered recovery receives an entirely fresh graph.
     await Promise.resolve();
-    await engine.powerOn(DEFAULT_PARAMS);
+    await expect(engine.ensureRunning()).resolves.toBe("recreated");
     expect(contexts).toHaveLength(2);
     expect(workletNodes).toHaveLength(2);
     expect(contexts[1].state).toBe("running");
@@ -331,6 +357,155 @@ describe("OdysseyAudioEngine lifecycle", () => {
     expect(contexts[0].resume).toHaveBeenCalledTimes(2);
     expect(contexts[0].state).toBe("running");
     await engine.dispose();
+  });
+
+  it("reports an already-running graph without resetting processor state", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const port = workletNodes[0].port;
+    port.postMessage.mockClear();
+
+    await expect(engine.ensureRunning()).resolves.toBe("already-running");
+    expect(contexts[0].resume).toHaveBeenCalledTimes(1);
+    expect(port.postMessage).not.toHaveBeenCalled();
+    await engine.dispose();
+  });
+
+  it.each(["suspended", "interrupted"] as const)(
+    "recovers a powered %s context in place and reports that notes need restoring",
+    async (state) => {
+      const engine = new OdysseyAudioEngine();
+      await engine.powerOn(DEFAULT_PARAMS);
+      contexts[0].transition(state);
+
+      await expect(engine.ensureRunning()).resolves.toBe("resumed");
+      expect(contexts).toHaveLength(1);
+      expect(contexts[0].resume).toHaveBeenCalledTimes(2);
+      expect(contexts[0].state).toBe("running");
+      expect(workletNodes[0].port.postMessage).toHaveBeenCalledWith({ type: "all-notes-off" });
+      await engine.dispose();
+    },
+  );
+
+  it("recreates an unexpectedly closed context while logical power remains on", async () => {
+    installAudioFakes({}, {});
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const closedNode = workletNodes[0];
+    contexts[0].transition("closed");
+
+    await expect(engine.ensureRunning()).resolves.toBe("recreated");
+    expect(contexts).toHaveLength(2);
+    expect(workletNodes).toHaveLength(2);
+    expect(closedNode.port.onmessage).toBeNull();
+    expect(closedNode.port.close).toHaveBeenCalledTimes(1);
+    expect(contexts[1].state).toBe("running");
+    await engine.dispose();
+  });
+
+  it("shares one recovery across concurrent lifecycle watchdog events", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const resumed = deferred<void>();
+    contexts[0].setup.resume = async (context) => {
+      await resumed.promise;
+      if (context.state === "closed") return;
+      context.state = "running";
+      context.onstatechange?.(new Event("statechange"));
+    };
+    contexts[0].transition("suspended");
+
+    const first = engine.ensureRunning();
+    const second = engine.ensureRunning();
+    expect(second).toBe(first);
+    await vi.waitFor(() => expect(contexts[0].resume).toHaveBeenCalledTimes(2));
+    resumed.resolve();
+    await expect(Promise.all([first, second])).resolves.toEqual(["resumed", "resumed"]);
+    expect(contexts[0].resume).toHaveBeenCalledTimes(2);
+    await engine.dispose();
+  });
+
+  it("retains logical power after a transient recovery failure so a later event can retry", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    let attempt = 0;
+    contexts[0].setup.resume = async (context) => {
+      attempt += 1;
+      if (attempt === 1) throw new Error("temporarily interrupted");
+      context.state = "running";
+      context.onstatechange?.(new Event("statechange"));
+    };
+    contexts[0].transition("suspended");
+
+    await expect(engine.ensureRunning()).rejects.toThrow("temporarily interrupted");
+    await expect(engine.ensureRunning()).resolves.toBe("resumed");
+    expect(contexts[0].resume).toHaveBeenCalledTimes(3);
+    await engine.dispose();
+  });
+
+  it("clears a transient recovery error when the host resumes spontaneously", async () => {
+    const engine = new OdysseyAudioEngine();
+    const statuses: Array<{ state: AudioContextState | "uninitialized"; error: string | null }> = [];
+    engine.onStatus((status) => statuses.push({ state: status.state, error: status.error }));
+    await engine.powerOn(DEFAULT_PARAMS);
+    contexts[0].setup.resume = async () => {
+      throw new Error("temporary host refusal");
+    };
+    contexts[0].transition("interrupted");
+
+    await expect(engine.ensureRunning()).rejects.toThrow("temporary host refusal");
+    expect(statuses.at(-1)?.error).toBe("temporary host refusal");
+    contexts[0].transition("running");
+    expect(statuses.at(-1)).toMatchObject({ state: "running", error: null });
+    await expect(engine.ensureRunning()).resolves.toBe("already-running");
+    await engine.dispose();
+  });
+
+  it("cancels a pending recovery on explicit power-off and never resurrects it", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const resumed = deferred<void>();
+    contexts[0].setup.resume = async (context) => {
+      await resumed.promise;
+      if (context.state === "closed") return;
+      context.state = "running";
+      context.onstatechange?.(new Event("statechange"));
+    };
+    contexts[0].transition("suspended");
+    const recovering = engine.ensureRunning();
+    await vi.waitFor(() => expect(contexts[0].resume).toHaveBeenCalledTimes(2));
+
+    await expect(engine.powerOff()).resolves.toBeUndefined();
+    await expect(recovering).resolves.toBe("off");
+    resumed.resolve();
+    await Promise.resolve();
+    await expect(engine.ensureRunning()).resolves.toBe("off");
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].state).toBe("closed");
+    await engine.dispose();
+  });
+
+  it("cancels a pending recovery on disposal and never recreates a graph", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const resumed = deferred<void>();
+    contexts[0].setup.resume = async (context) => {
+      await resumed.promise;
+      if (context.state === "closed") return;
+      context.state = "running";
+      context.onstatechange?.(new Event("statechange"));
+    };
+    contexts[0].transition("interrupted");
+    const recovering = engine.ensureRunning();
+    await vi.waitFor(() => expect(contexts[0].resume).toHaveBeenCalledTimes(2));
+
+    await engine.dispose();
+    await expect(recovering).resolves.toBe("off");
+    resumed.resolve();
+    await Promise.resolve();
+    await expect(engine.ensureRunning()).resolves.toBe("off");
+    expect(contexts).toHaveLength(1);
+    expect(workletNodes).toHaveLength(1);
   });
 
   it("promptly rejects a superseded power-on while sharing its pending initialization", async () => {
@@ -534,6 +709,38 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
+  it("uses one bounded fallback context after a raw resume outlives its timeout", async () => {
+    vi.useFakeTimers();
+    const staleResume = deferred<void>();
+    installAudioFakes({
+      resume: async (context) => {
+        await staleResume.promise;
+        context.state = "running";
+        context.onstatechange?.(new Event("statechange"));
+      },
+    }, {});
+    const engine = new OdysseyAudioEngine();
+    const firstStart = engine.powerOn(DEFAULT_PARAMS);
+    const firstOutcome = firstStart.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_TRANSITION_TIMEOUT_MS);
+    await expect(firstOutcome).resolves.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(contexts[0].close).toHaveBeenCalledTimes(1);
+
+    await expect(engine.powerOn(DEFAULT_PARAMS)).resolves.toBeUndefined();
+    expect(contexts).toHaveLength(2);
+    expect(contexts[1].state).toBe("running");
+
+    // Settle the quarantined host call so this module-wide test gate cannot
+    // affect a later case. Its stale context is closed again, never restored.
+    staleResume.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(contexts[0].close).toHaveBeenCalledTimes(2);
+    await engine.dispose();
+  });
+
   it("closes a resume that completes after power-off cancelled it", async () => {
     const resuming = deferred<void>();
     installAudioFakes({
@@ -649,6 +856,63 @@ describe("OdysseyAudioEngine lifecycle", () => {
     expect(workletNodes[0].port.close).toHaveBeenCalledTimes(1);
     expect(workletNodes[0].disconnect).toHaveBeenCalled();
     expect(contexts[0].gainNode.disconnect).toHaveBeenCalled();
+  });
+
+  it("allows a fresh graph after a retired context close exceeds its deadline", async () => {
+    vi.useFakeTimers();
+    installAudioFakes(
+      { close: () => new Promise<never>(() => undefined) },
+      {},
+    );
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const retiredContext = contexts[0];
+
+    workletNodes[0].dispatchEvent(new Event("processorerror"));
+    expect(retiredContext.close).toHaveBeenCalledTimes(1);
+    await expect(engine.powerOn(DEFAULT_PARAMS)).rejects.toThrow("still shutting down");
+
+    await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
+    await expect(engine.powerOn(DEFAULT_PARAMS)).resolves.toBeUndefined();
+    expect(contexts).toHaveLength(2);
+    expect(retiredContext.close).toHaveBeenCalledTimes(1);
+    expect(engine.isPowerRequested).toBe(true);
+    await engine.dispose();
+  });
+
+  it("caps automatic replacements when the browser never releases retired contexts", async () => {
+    vi.useFakeTimers();
+    const neverCloses = (): Promise<never> => new Promise<never>(() => undefined);
+    installAudioFakes(
+      { close: neverCloses },
+      { close: neverCloses },
+    );
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+
+    workletNodes[0].dispatchEvent(new Event("processorerror"));
+    const firstRecovery = engine.ensureRunning();
+    await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
+    await expect(firstRecovery).resolves.toBe("recreated");
+    expect(contexts).toHaveLength(2);
+
+    workletNodes[1].dispatchEvent(new Event("processorerror"));
+    const blockedRecovery = engine.ensureRunning();
+    const blockedOutcome = blockedRecovery.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
+    await expect(blockedOutcome).resolves.toMatchObject({
+      message: expect.stringContaining("browser still owns multiple unclosed audio contexts"),
+    });
+    expect(MAX_QUARANTINED_AUDIO_CONTEXT_CLOSES).toBe(2);
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await expect(engine.ensureRunning()).rejects.toThrow(
+        "browser still owns multiple unclosed audio contexts",
+      );
+    }
+    expect(contexts).toHaveLength(2);
+    await engine.dispose();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("cancels a never-settling media prompt promptly and stops a late stream", async () => {
@@ -919,6 +1183,7 @@ describe("OdysseyAudioEngine lifecycle", () => {
     engine.keyboardTrigger();
     engine.allNotesOff();
     engine.allSoundOff();
+    engine.resumeSound();
     expect(port.postMessage).not.toHaveBeenCalled();
 
     await engine.powerOn({ ...DEFAULT_PARAMS, vco1Fine: 0.25 });
@@ -931,6 +1196,39 @@ describe("OdysseyAudioEngine lifecycle", () => {
       type: "performance",
       performance: { bendSemitones: 3, vibratoSemitones: 0 },
     });
+    await engine.dispose();
+  });
+
+  it("exposes synchronous graph readiness without starting host work", async () => {
+    vi.useFakeTimers();
+    const engine = new OdysseyAudioEngine();
+    expect(engine.isAudioReady).toBe(false);
+
+    await engine.powerOn(DEFAULT_PARAMS);
+    expect(engine.isAudioReady).toBe(true);
+
+    const stopping = engine.powerOff();
+    await vi.advanceTimersByTimeAsync(40);
+    await stopping;
+    expect(engine.isAudioReady).toBe(false);
+    await engine.dispose();
+  });
+
+  it("deduplicates unchanged high-rate performance reports", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const port = workletNodes[0].port;
+    port.postMessage.mockClear();
+
+    engine.setPerformance({ bendSemitones: 3 });
+    engine.setPerformance({ bendSemitones: 3 });
+    engine.setPerformance({ bendSemitones: 3, vibratoSemitones: 0 });
+    expect(port.postMessage.mock.calls.filter(([message]) => message.type === "performance"))
+      .toEqual([[{ type: "performance", performance: { bendSemitones: 3 } }]]);
+
+    engine.setPerformance({ vibratoSemitones: 2 });
+    expect(port.postMessage.mock.calls.filter(([message]) => message.type === "performance"))
+      .toHaveLength(2);
     await engine.dispose();
   });
 
@@ -1034,6 +1332,8 @@ describe("OdysseyAudioEngine lifecycle", () => {
     expect(workletNodes[0].port.postMessage).toHaveBeenCalledWith({ type: "resume-sound" });
     engine.allSoundOff();
     expect(workletNodes[0].port.postMessage).toHaveBeenLastCalledWith({ type: "all-sound-off" });
+    engine.resumeSound();
+    expect(workletNodes[0].port.postMessage).toHaveBeenLastCalledWith({ type: "resume-sound" });
 
     await engine.dispose();
     expect(stream.track.stop).toHaveBeenCalled();

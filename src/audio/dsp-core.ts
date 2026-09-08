@@ -35,6 +35,11 @@ const DELAY_WET_MAKEUP = 1.3;
 const DELAY_PING_PONG_POWER_MAKEUP = Math.SQRT2;
 const DELAY_MAX_CLEAN_TAP_BLEND = 0.36;
 const DELAY_PRESENTATION_SMOOTHING_SECONDS = 0.02;
+// Below -140 dBFS, a completely overwritten delay ring is inaudible even
+// after the maximum presentation makeup. Retiring it avoids doing two ring
+// reads, two filters, two nonlinear writes, and feedback routing forever
+// after a bypassed tail has genuinely drained.
+const DELAY_TAIL_RETIRE_THRESHOLD = 1e-7;
 const SAMPLE_HOLD_SATURATION = Math.tanh(0.8);
 // Web MIDI and pointer events can continue arriving while an AudioContext is
 // suspended. Keep enough chronology for many complete 37-key gestures without
@@ -392,10 +397,17 @@ class FirDecimator {
 
   read(): number {
     let output = 0;
-    let historyIndex = this.index === 0 ? this.history.length - 1 : this.index - 1;
-    for (let tap = 0; tap < this.coefficients.length; tap += 1) {
+    let tap = 0;
+    // Split the circular traversal at its single wrap point. This preserves
+    // coefficient/sample order exactly while removing a branch from every
+    // FIR tap in the audio-rate hot path.
+    for (let historyIndex = this.index - 1; historyIndex >= 0; historyIndex -= 1) {
       output += this.history[historyIndex] * this.coefficients[tap];
-      historyIndex = historyIndex === 0 ? this.history.length - 1 : historyIndex - 1;
+      tap += 1;
+    }
+    for (let historyIndex = this.history.length - 1; tap < this.coefficients.length; historyIndex -= 1) {
+      output += this.history[historyIndex] * this.coefficients[tap];
+      tap += 1;
     }
     return output;
   }
@@ -422,10 +434,16 @@ class FourTimesInterpolator {
 
   read(phase: number): number {
     let output = 0;
-    let historyIndex = this.index === 0 ? this.history.length - 1 : this.index - 1;
-    for (let tap = phase; tap < this.coefficients.length; tap += DRIVE_OVERSAMPLE) {
+    let tap = phase;
+    // As above, two linear spans are cheaper than testing for a circular wrap
+    // on every polyphase tap, and retain the original accumulation order.
+    for (let historyIndex = this.index - 1; historyIndex >= 0 && tap < this.coefficients.length; historyIndex -= 1) {
       output += this.history[historyIndex] * this.coefficients[tap];
-      historyIndex = historyIndex === 0 ? this.history.length - 1 : historyIndex - 1;
+      tap += DRIVE_OVERSAMPLE;
+    }
+    for (let historyIndex = this.history.length - 1; tap < this.coefficients.length; historyIndex -= 1) {
+      output += this.history[historyIndex] * this.coefficients[tap];
+      tap += DRIVE_OVERSAMPLE;
     }
     return output * DRIVE_OVERSAMPLE;
   }
@@ -510,6 +528,8 @@ class StereoDelay {
   private enabled = DEFAULT_PARAMS.delayEnabled > 0.5;
   private pingPong = DEFAULT_PARAMS.delayPingPong > 0.5;
   private targetWetMakeup = DELAY_WET_MAKEUP;
+  private bypassDrainPeak = 0;
+  private bypassDrainSamples = 0;
   // A never-enabled/reset delay contains only zeroes. Its bypass can advance
   // time smoothing without reading, filtering, and rewriting two empty rings
   // at audio rate. Once enabled, the normal path keeps draining tails while
@@ -542,6 +562,8 @@ class StereoDelay {
     this.presentationInitialized = false;
     this.initialized = false;
     this.pristine = true;
+    this.bypassDrainPeak = 0;
+    this.bypassDrainSamples = 0;
     this.outputLeft = 0;
     this.outputRight = 0;
   }
@@ -602,7 +624,11 @@ class StereoDelay {
       this.outputRight = input;
       return;
     }
-    if (this.enabled) this.pristine = false;
+    if (this.enabled) {
+      this.pristine = false;
+      this.bypassDrainPeak = 0;
+      this.bypassDrainSamples = 0;
+    }
 
     const wetLeft = this.read(this.left, this.delayLeft);
     const wetRight = this.read(this.right, this.delayRight);
@@ -616,12 +642,37 @@ class StereoDelay {
     const writeRight = this.pingPong
       ? this.toneLeft * this.feedback
       : injectedInput + this.toneRight * this.feedback;
-    this.left[this.writeIndex] = softClip(writeLeft);
-    this.right[this.writeIndex] = softClip(writeRight);
+    const storedLeft = softClip(writeLeft);
+    const storedRight = softClip(writeRight);
+    this.left[this.writeIndex] = storedLeft;
+    this.right[this.writeIndex] = storedRight;
     this.writeIndex += 1;
     if (this.writeIndex === this.left.length) this.writeIndex = 0;
 
     if (!this.enabled) {
+      this.bypassDrainPeak = Math.max(
+        this.bypassDrainPeak,
+        Math.abs(storedLeft),
+        Math.abs(storedRight),
+        Math.abs(this.toneLeft),
+        Math.abs(this.toneRight),
+      );
+      this.bypassDrainSamples += 1;
+      if (this.bypassDrainSamples >= this.left.length) {
+        if (this.bypassDrainPeak <= DELAY_TAIL_RETIRE_THRESHOLD) {
+          // Every slot was overwritten during this measurement window, so no
+          // older high-level sample can reappear if Time changes or Delay is
+          // enabled again. Clear sub-threshold residue once, then take the
+          // existing zero-cost pristine bypass on subsequent samples.
+          this.left.fill(0);
+          this.right.fill(0);
+          this.toneLeft = 0;
+          this.toneRight = 0;
+          this.pristine = true;
+        }
+        this.bypassDrainPeak = 0;
+        this.bypassDrainSamples = 0;
+      }
       this.outputLeft = input;
       this.outputRight = input;
       return;
@@ -649,6 +700,10 @@ class StereoDelay {
     // output-return path remains protected by its nonlinear stages.
     this.outputLeft = input * this.dryGain + audibleWetLeft * this.wetGain * this.wetMakeup;
     this.outputRight = input * this.dryGain + audibleWetRight * this.wetGain * this.wetMakeup;
+  }
+
+  get tailIsRetired(): boolean {
+    return this.pristine;
   }
 }
 
@@ -694,6 +749,7 @@ export interface OdysseyDiagnostics {
   adsrStage: EnvelopeStage;
   pendingArticulations: number;
   pendingKeyboardTriggers: number;
+  delayTailRetired: boolean;
 }
 
 export class OdysseyDSP {
@@ -775,6 +831,8 @@ export class OdysseyDSP {
   private outputFeedbackReturn = 0;
   private readonly filterCutoffSmoothing: number;
   private readonly masterLevelSmoothing: number;
+  private readonly oscillatorSampleRate: number;
+  private readonly maximumFilterCutoff: number;
   private portamentoCoefficientTime = Number.NaN;
   private portamentoCoefficient = 1;
   private sampleHoldLagTime = Number.NaN;
@@ -800,6 +858,8 @@ export class OdysseyDSP {
     );
     this.filterCutoffSmoothing = 1 - Math.exp(-1 / (0.004 * this.internalSampleRate));
     this.masterLevelSmoothing = 1 - Math.exp(-1 / (0.018 * this.internalSampleRate));
+    this.oscillatorSampleRate = this.internalSampleRate * this.oscillatorOversample;
+    this.maximumFilterCutoff = Math.min(18000, this.internalSampleRate * 0.44);
     this.lastMeter = {
       sampleRate,
       gate: false,
@@ -818,14 +878,29 @@ export class OdysseyDSP {
   setParams(changes: Partial<SynthParams>): void {
     const previousGate = this.requestedKeyboardGate;
     const previousAuto = this.params.autoRun;
+    let delayParamsChanged = false;
+    let allocationParamsChanged = false;
     for (const rawKey in changes) {
       if (!Object.hasOwn(changes, rawKey)) continue;
       const key = rawKey as ParamKey;
       const rawValue = changes[key];
       if (!(key in DEFAULT_PARAMS) || typeof rawValue !== "number") continue;
-      this.params[key] = normalizeParamValue(key, rawValue);
+      const normalizedValue = normalizeParamValue(key, rawValue);
+      if (Object.is(this.params[key], normalizedValue)) continue;
+      this.params[key] = normalizedValue;
+      if (
+        key === "delayEnabled"
+        || key === "delayTime"
+        || key === "delayFeedback"
+        || key === "delayMix"
+        || key === "delayTone"
+        || key === "delaySpread"
+        || key === "delayPingPong"
+      ) delayParamsChanged = true;
+      if (key === "autoRun" || key === "autoNote") allocationParamsChanged = true;
     }
-    this.delay.setParams(this.params);
+    if (delayParamsChanged) this.delay.setParams(this.params);
+    if (!allocationParamsChanged) return;
     const nextGate = this.keys.size > 0 || this.params.autoRun > 0.5;
     const autoStartedGate = previousAuto !== this.params.autoRun && !previousGate && nextGate;
     if (autoStartedGate) this.hardMuted = false;
@@ -934,9 +1009,16 @@ export class OdysseyDSP {
     };
   }
 
-  /** A newly attached non-MIDI source is allowed to sound after MIDI CC120. */
+  /** Restores non-note sources after MIDI CC120 hard-cleared the shared voice. */
   resumeSound(): void {
+    const wasHardMuted = this.hardMuted;
     this.hardMuted = false;
+    // AUTO owns no entry in the App note map, so it cannot be reconstructed by
+    // replaying note-on messages. Rebuild its gate exactly once after CC120.
+    // If another held note already restored sound, avoid a duplicate trigger.
+    if (wasHardMuted && this.params.autoRun > 0.5) {
+      this.refreshAllocation(true, false, true);
+    }
   }
 
   getHeldNotes(): number[] {
@@ -964,6 +1046,7 @@ export class OdysseyDSP {
       adsrStage: this.adsr.stage,
       pendingArticulations: this.articulationCount,
       pendingKeyboardTriggers: this.pendingKeyboardTriggerCount,
+      delayTailRetired: this.delay.tailIsRetired,
     };
   }
 
@@ -1214,9 +1297,8 @@ export class OdysseyDSP {
       0.99,
     );
 
-    const oscillatorRate = this.internalSampleRate * this.oscillatorOversample;
-    const increment1 = this.vco1Frequency / oscillatorRate;
-    const increment2 = this.vco2Frequency / oscillatorRate;
+    const increment1 = this.vco1Frequency / this.oscillatorSampleRate;
+    const increment2 = this.vco2Frequency / this.oscillatorSampleRate;
     for (let pass = 0; pass < this.oscillatorOversample; pass += 1) {
       const previousPhase2 = this.phase2;
       const phase1Total = this.phase1 + increment1;
@@ -1343,6 +1425,7 @@ export class OdysseyDSP {
     lfoTriangle: number,
     ar: number,
     adsr: number,
+    filterType: number,
   ): void {
     const transposeAfterPortamento = this.params.portamentoMode > 0.5
       ? 0
@@ -1366,7 +1449,7 @@ export class OdysseyDSP {
     const modulatedCutoff = clamp(
       this.filterCutoff * Math.pow(2, mod1 + mod2 + mod3),
       16,
-      Math.min(18000, this.internalSampleRate * 0.44),
+      this.maximumFilterCutoff,
     );
     const typeThreePanelRatio = clamp(modulatedCutoff / 16000, 0, 1.125);
     const originalTypeThreeCutoff = modulatedCutoff
@@ -1378,11 +1461,8 @@ export class OdysseyDSP {
       ? typeThreeCutoff
       : modulatedCutoff;
 
-    const resonance = this.params.filterResonance;
-    this.updateFilterResonanceCoefficients(resonance);
     const filterInputLeft = inputLeft + noise * 0.0000003;
     const filterInputRight = inputRight + noise * 0.0000003;
-    const filterType = this.selectFilterType();
     let filteredLeft: number;
     let filteredRight: number;
     if (filterType === 1) {
@@ -1419,13 +1499,6 @@ export class OdysseyDSP {
       }
     }
 
-    if (this.params.hpfCutoff !== this.highPassCutoffValue) {
-      this.highPassCutoffValue = this.params.hpfCutoff;
-      this.highPassPoleCoefficient = tptPoleCoefficient(
-        this.params.hpfCutoff,
-        this.internalSampleRate,
-      );
-    }
     const highPassedLeft = this.highPassLeft.process(filteredLeft, this.highPassPoleCoefficient);
     const highPassedRight = this.highPassRight.process(filteredRight, this.highPassPoleCoefficient);
     const envelope = this.params.vcaEnvelopeSource < 0.5 ? ar : adsr;
@@ -1461,6 +1534,18 @@ export class OdysseyDSP {
     }
     let peak = 0;
     let sumSquares = 0;
+    // Message handlers cannot interleave with one AudioWorklet render quantum.
+    // Prepare parameter-only coefficients once per block instead of comparing
+    // the same values for every 2x-oversampled frame.
+    const filterType = this.selectFilterType();
+    this.updateFilterResonanceCoefficients(this.params.filterResonance);
+    if (this.params.hpfCutoff !== this.highPassCutoffValue) {
+      this.highPassCutoffValue = this.params.hpfCutoff;
+      this.highPassPoleCoefficient = tptPoleCoefficient(
+        this.params.hpfCutoff,
+        this.internalSampleRate,
+      );
+    }
 
     for (let frame = 0; frame < left.length; frame += 1) {
       let decimatedLeft = 0;
@@ -1494,6 +1579,7 @@ export class OdysseyDSP {
           this.lfoTriangle,
           this.arValue,
           this.adsrValue,
+          filterType,
         );
         this.masterLevel += (this.params.masterVolume - this.masterLevel) * this.masterLevelSmoothing;
         const limitedLeft = softClip(this.finalLeft * this.masterLevel * 0.82);

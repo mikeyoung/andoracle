@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ANDORACLE_VERSION } from "../vite.config";
+import { ANDORACLE_VERSION } from "../src/version";
 
 const DESCRIPTION = "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.";
 const SITE_URL = "https://mikeyoung.org/andoracle/";
@@ -31,6 +31,14 @@ describe("Andoracle project metadata", () => {
       "pwa",
       "arp-odyssey",
     ]));
+  });
+
+  it("keeps the release number in application source as the canonical build version", () => {
+    const versionSource = readProjectFile("src/version.ts");
+    const viteConfig = readProjectFile("vite.config.ts");
+
+    expect(versionSource).toContain(`export const ANDORACLE_VERSION = "${ANDORACLE_VERSION}"`);
+    expect(viteConfig).toContain("package.json version must match src/version.ts");
   });
 
   it("provides standard, social, and structured metadata in the document head", () => {

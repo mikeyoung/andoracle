@@ -1,7 +1,12 @@
 {
   "name": "andoracle",
   "private": true,
-  "version": "1.0.15",
+  "version": "1.0.16",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
+  },
   "description": "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.",
   "keywords": [
     "synthesizer",
@@ -16,11 +21,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "prebuild": "npm run generate:icons",
-    "build": "tsc -b && vite build",
-    "postbuild": "node scripts/verify-precache.mjs",
+    "prebuild": "npm run generate:icons && npm run generate:audio-keepalive",
+    "build": "tsc -b && vite build && vite build --mode extension && node scripts/package-extensions.mjs",
+    "postbuild": "node scripts/verify-precache.mjs && node scripts/verify-extension-packages.mjs",
+    "build:extensions": "npm run generate:icons && npm run generate:audio-keepalive && tsc -b && vite build --mode extension && node scripts/package-extensions.mjs && node scripts/verify-extension-packages.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "generate:icons": "node scripts/generate-icons.mjs",
+    "generate:audio-keepalive": "node scripts/generate-audio-keepalive.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm test && npm run build"

@@ -21,6 +21,7 @@ const readRgbPixels = (fileName: string): { width: number; height: number; pixel
   const idat: Buffer[] = [];
   let width = 0;
   let height = 0;
+  let colorType = 0;
   for (let offset = pngSignatureLength; offset + 12 <= png.length;) {
     const length = png.readUInt32BE(offset);
     const type = png.toString("ascii", offset + 4, offset + 8);
@@ -28,15 +29,16 @@ const readRgbPixels = (fileName: string): { width: number; height: number; pixel
     if (type === "IHDR") {
       width = data.readUInt32BE(0);
       height = data.readUInt32BE(4);
+      colorType = data[9];
     } else if (type === "IDAT") idat.push(data);
     offset += length + 12;
     if (type === "IEND") break;
   }
 
-  const channels = 3;
+  const channels = colorType === 0 ? 1 : 3;
   const stride = width * channels;
   const filtered = inflateSync(Buffer.concat(idat));
-  const pixels = new Uint8Array(width * height * channels);
+  const decoded = new Uint8Array(width * height * channels);
   let prior = new Uint8Array(stride);
   for (let y = 0; y < height; y += 1) {
     const filteredOffset = y * (stride + 1);
@@ -58,8 +60,16 @@ const readRgbPixels = (fileName: string): { width: number; height: number; pixel
               : 0;
       row[x] = (encoded + predictor) & 0xff;
     }
-    pixels.set(row, y * stride);
+    decoded.set(row, y * stride);
     prior = row;
+  }
+  if (channels === 3) return { width, height, pixels: decoded };
+  const pixels = new Uint8Array(width * height * 3);
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const luminance = decoded[pixel];
+    pixels[pixel * 3] = luminance;
+    pixels[pixel * 3 + 1] = luminance;
+    pixels[pixel * 3 + 2] = luminance;
   }
   return { width, height, pixels };
 };
@@ -110,7 +120,12 @@ const expectedPngs: Readonly<Record<string, number>> = {
 describe("PWA icon assets", () => {
   it("keeps a 512px opaque master and every derived PNG at its declared square size", () => {
     for (const [fileName, size] of Object.entries(expectedPngs)) {
-      expect(pngInfo(fileName), fileName).toEqual({ width: size, height: size, bitDepth: 8, colorType: 2 });
+      expect(pngInfo(fileName), fileName).toEqual({
+        width: size,
+        height: size,
+        bitDepth: 8,
+        colorType: fileName === "icon-master-512.png" ? 2 : 0,
+      });
     }
     const master = readRgbPixels("icon-master-512.png");
     const icon = readRgbPixels("icon-512.png");

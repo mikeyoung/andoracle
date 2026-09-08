@@ -559,7 +559,7 @@ describe("cancellable device connection controls", () => {
       supported: true,
       unsupportedReason: null,
       enabled: true,
-      busy: true,
+      operation: "refreshing",
       error: null,
       inputs: [],
       onToggle: vi.fn(),
@@ -567,7 +567,7 @@ describe("cancellable device connection controls", () => {
     }));
 
     expect(markup).toContain("Cancel MIDI");
-    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Refresh<\/button>/);
+    expect(markup).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Refresh<\/button>/);
     expect(markup).toMatch(/<button[^>]*>Cancel MIDI<\/button>/);
   });
 });

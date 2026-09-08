@@ -298,6 +298,25 @@ describe("stereo delay feature regressions", () => {
     expect(maximumAbsolute(drainedRight)).toBeLessThan(0.00001);
   });
 
+  it("retires a fully overwritten inaudible delay tail to the pristine bypass path", () => {
+    const dsp = new OdysseyDSP(SAMPLE_RATE);
+    dsp.setParams(transparentExternalPatch({
+      delayTime: 5,
+      delayFeedback: 0,
+    }));
+    processExternal(dsp, impulse(500));
+    expect(dsp.getDiagnostics().delayTailRetired).toBe(false);
+
+    dsp.setParams({ delayEnabled: 0 });
+    // The internal delay ring spans 1.3 seconds. More than one full overwrite
+    // proves that no old position can revive if Time moves after retirement.
+    render(dsp, 70_000);
+    expect(dsp.getDiagnostics().delayTailRetired).toBe(true);
+
+    dsp.setParams({ masterTune: 12, filterCutoff: 4_000 });
+    expect(dsp.getDiagnostics().delayTailRetired).toBe(true);
+  });
+
   it("stays finite and bounded through repeated minimum/maximum delay-time jumps", () => {
     const dsp = new OdysseyDSP(SAMPLE_RATE);
     dsp.setParams(transparentExternalPatch({

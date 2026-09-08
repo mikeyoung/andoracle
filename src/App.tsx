@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import keepAliveAudioUrl from "./assets/audio-keepalive.wav?inline";
 import { OdysseyAudioEngine, type AudioEngineStatus } from "./audio/engine";
+import { AudioKeepAliveController } from "./audio/keepalive";
 import type { PerformanceState } from "./audio/dsp-core";
 import { DirectEntryModal } from "./components/DirectEntryModal";
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog";
 import { HelpDialog } from "./components/HelpDialog";
 import { Keyboard } from "./components/Keyboard";
-import { MidiInputControl } from "./components/MidiInputControl";
+import {
+  MidiInputControl,
+  midiInputListLabel,
+  type MidiInputOperation,
+} from "./components/MidiInputControl";
 import { EngineTelemetry } from "./components/OutputMeter";
 import {
   PatchLibraryDialog,
@@ -20,6 +26,7 @@ import {
 import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
 import { SynthPanel } from "./components/SynthPanel";
 import { OperationCancellationRegistry } from "./cancellable-operation";
+import { blocksComputerKeyboardNotes, reservesComputerKeyboardChord } from "./computer-keyboard";
 import { ExclusiveOperationGuard } from "./exclusive-operation-guard";
 import {
   HOST_OPERATION_UI_TIMEOUT_MS,
@@ -39,6 +46,7 @@ import {
   type MidiInputSummary,
   type MidiPerformanceSources,
 } from "./midi/web-midi";
+import { recoverAfterMidiAllSoundOff } from "./midi/audio-integration";
 import { usePwaRegistration, useServiceWorkerCapability } from "./pwa/use-pwa-registration";
 import {
   DEFAULT_PARAMS,
@@ -96,6 +104,12 @@ const RESERVED_PATCH_NAMES = new Set([
 ]);
 
 type PatchShareResult = "shared" | "copied";
+
+const midiReadyNotice = (inputs: readonly MidiInputSummary[]): string => (
+  inputs.length > 0
+    ? `MIDI ready: ${midiInputListLabel(inputs)}.`
+    : "MIDI access enabled. Connect or switch on a keyboard; it will be detected automatically."
+);
 
 // Web Share and clipboard promises are browser-owned and cannot be aborted.
 // Keep one page-lifetime pipeline so a released UI wait cannot let retries
@@ -234,6 +248,10 @@ function App() {
   const [params, setParams] = useState<SynthParams>(initialPatch.params);
   const paramsRef = useRef(params);
   const [powered, setPowered] = useState(false);
+  const poweredRef = useRef(powered);
+  poweredRef.current = powered;
+  const audioKeepAliveRef = useRef<AudioKeepAliveController | null>(null);
+  const ensureAudioReadyRef = useRef<() => void | Promise<void>>(() => undefined);
   const [powerBusy, setPowerBusy] = useState(false);
   const [externalInputEnabled, setExternalInputEnabled] = useState(false);
   const externalInputEnabledRef = useRef(false);
@@ -241,8 +259,9 @@ function App() {
   const [externalInputError, setExternalInputError] = useState<string | null>(null);
   const midiAvailability = useMemo(getWebMidiAvailability, []);
   const [midiEnabled, setMidiEnabled] = useState(false);
-  const [midiBusy, setMidiBusy] = useState(false);
+  const [midiOperation, setMidiOperation] = useState<MidiInputOperation>(null);
   const [midiError, setMidiError] = useState<string | null>(null);
+  const midiErrorRef = useRef<string | null>(null);
   const [midiInputs, setMidiInputs] = useState<readonly MidiInputSummary[]>([]);
   const [presetName, setPresetName] = useState(() => matchingPresetName(initialPatch.params));
   const [activeUserPatchName, setActiveUserPatchName] = useState<string | null>(null);
@@ -258,6 +277,7 @@ function App() {
   const noteOwnerCounts = useRef(new NoteOwnershipIndex());
   const sequenceRecorderRef = useRef<NoteSequenceRecorder | null>(null);
   const sequencePlayerRef = useRef<NoteSequencePlayer | null>(null);
+  const sequenceLifecyclePausedRef = useRef(false);
   const finishRecordingRef = useRef<(reason: "manual" | "idle") => void>(() => undefined);
   const sequenceOperationRef = useRef(0);
   const activeSequenceTakeRef = useRef<CapturedNoteSequence | null>(null);
@@ -528,17 +548,29 @@ function App() {
     const unsubscribeStatus = engine.onStatus((status) => {
       if (!mountedRef.current) return;
       setAudioStatus(status);
-      if (status.state !== "running") {
-        if (sequencePlayerRef.current?.isActive) {
-          sequenceOperationRef.current += 1;
-          sequencePlayerRef.current.stop(false);
-          setSequencePlaybackState("stopped");
+      if (status.state === "running") {
+        if (engine.isPowerRequested) setPowered(true);
+        else {
+          audioKeepAliveRef.current?.disable();
+          setPowered(false);
         }
+        return;
       }
-      setPowered(status.state === "running");
+      if (engine.isPowerRequested) {
+        if (poweredRef.current) audioKeepAliveRef.current?.notifyAudioInterruption();
+        return;
+      }
+      if (sequencePlayerRef.current?.isActive) {
+        sequenceOperationRef.current += 1;
+        sequencePlayerRef.current.stop(false);
+        setSequencePlaybackState("stopped");
+      }
+      audioKeepAliveRef.current?.disable();
+      setPowered(false);
     });
     const unsubscribeExternalInput = engine.onExternalInputState((connected) => {
       externalInputEnabledRef.current = connected;
+      audioKeepAliveRef.current?.setCaptureActive(connected);
       if (mountedRef.current) setExternalInputEnabled(connected);
     });
     return () => {
@@ -622,6 +654,49 @@ function App() {
       settings.ppcVibratoRange,
     ));
   }, [engine]);
+
+  ensureAudioReadyRef.current = async (): Promise<void> => {
+    if (!mountedRef.current || !poweredRef.current) return;
+    const result = await engine.ensureRunning();
+    if (
+      !mountedRef.current
+      || !poweredRef.current
+      || result === "off"
+      || result === "already-running"
+    ) return;
+
+    // powerOn deliberately clears the worklet's note ownership. Rehydrate
+    // whatever UI, MIDI, AUTO, or sequence sources are logically held now,
+    // not the possibly stale set from when the interruption began.
+    engine.setParams(paramsRef.current);
+    for (const note of new Set(noteSources.current.values())) engine.noteOn(note);
+    syncPerformance();
+  };
+
+  useEffect(() => {
+    let keepAlive: AudioKeepAliveController;
+    try {
+      keepAlive = new AudioKeepAliveController({
+        sourceUrl: keepAliveAudioUrl,
+        isAudioReady: () => engine.isAudioReady,
+        ensureAudioReady: () => ensureAudioReadyRef.current(),
+      });
+    } catch {
+      // Keep Web Audio usable even in a host that omits HTML media support.
+      return;
+    }
+    audioKeepAliveRef.current = keepAlive;
+    if (poweredRef.current) keepAlive.enableFromUserGesture();
+    return () => {
+      if (audioKeepAliveRef.current === keepAlive) audioKeepAliveRef.current = null;
+      keepAlive.dispose();
+    };
+  }, []);
+
+  const updateMidiError = useCallback((message: string | null): void => {
+    midiErrorRef.current = message;
+    setMidiError(message);
+  }, []);
 
   useEffect(() => {
     const loadPatchFromNavigation = (): void => {
@@ -752,13 +827,14 @@ function App() {
   }, [engine, syncActiveNotes, syncPerformance]);
 
   useEffect(() => {
-    const isEditableTarget = (target: EventTarget | null): boolean => {
-      const element = target instanceof HTMLElement ? target : null;
-      return Boolean(element?.closest("input, select, textarea, dialog, [contenteditable='true']"));
-    };
     const down = (event: KeyboardEvent): void => {
       const note = KEYBOARD_MAP[event.code];
-      if (note === undefined || event.repeat || isEditableTarget(event.target)) return;
+      if (
+        note === undefined
+        || event.repeat
+        || reservesComputerKeyboardChord(event)
+        || blocksComputerKeyboardNotes(event.target)
+      ) return;
       event.preventDefault();
       noteOn(`computer:${event.code}`, note);
     };
@@ -820,23 +896,35 @@ function App() {
   }, [noteOff, noteOn]);
 
   useEffect(() => {
-    const stopPlayback = (): void => {
-      const wasActive = sequencePlayerRef.current?.isActive ?? false;
+    const pauseForBackground = (): void => {
+      if (sequenceLifecyclePausedRef.current) return;
+      // Cancel a Play request that is still awaiting audio startup. Main-page
+      // timers are not reliable while a document is frozen or backgrounded.
       sequenceOperationRef.current += 1;
-      sequencePlayerRef.current?.stop(false);
-      if (mountedRef.current) {
-        setSequencePlaybackState("stopped");
-        if (wasActive) setNotice("Sequence playback stopped because the page became inactive.");
-      }
+      const player = sequencePlayerRef.current;
+      if (!player?.pause()) return;
+      sequenceLifecyclePausedRef.current = true;
+      if (mountedRef.current) setSequencePlaybackState("paused");
     };
-    const stopPlaybackWhenHidden = (): void => {
-      if (document.hidden) stopPlayback();
+    const resumeFromBackground = (): void => {
+      if (!sequenceLifecyclePausedRef.current) return;
+      sequenceLifecyclePausedRef.current = false;
+      const player = sequencePlayerRef.current;
+      if (!poweredRef.current || !player?.isPaused) return;
+      if (player.resume() && mountedRef.current) setSequencePlaybackState("playing");
     };
-    window.addEventListener("pagehide", stopPlayback);
-    document.addEventListener("visibilitychange", stopPlaybackWhenHidden);
+    const visibilityChanged = (): void => {
+      if (document.hidden) pauseForBackground();
+      else resumeFromBackground();
+    };
+    document.addEventListener("visibilitychange", visibilityChanged);
+    window.addEventListener("pagehide", pauseForBackground);
+    window.addEventListener("pageshow", resumeFromBackground);
     return () => {
-      window.removeEventListener("pagehide", stopPlayback);
-      document.removeEventListener("visibilitychange", stopPlaybackWhenHidden);
+      sequenceLifecyclePausedRef.current = false;
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      window.removeEventListener("pagehide", pauseForBackground);
+      window.removeEventListener("pageshow", resumeFromBackground);
     };
   }, []);
 
@@ -1457,6 +1545,7 @@ function App() {
       if (powered) return;
       const operation = ++powerOperationRef.current;
       setNotice("Cancelling audio startup…");
+      audioKeepAliveRef.current?.disable();
       try {
         await engine.powerOff();
         if (!mountedRef.current || operation !== powerOperationRef.current) return;
@@ -1476,6 +1565,7 @@ function App() {
     setPowerBusy(true);
     try {
       if (powered) {
+        audioKeepAliveRef.current?.disable();
         sequenceOperationRef.current += 1;
         sequencePlayerRef.current?.stop(false);
         setSequencePlaybackState("stopped");
@@ -1488,6 +1578,7 @@ function App() {
         setPowered(false);
         setNotice("Audio suspended. Your patch is still here.");
       } else {
+        audioKeepAliveRef.current?.enableFromUserGesture();
         await engine.powerOn(paramsRef.current);
         if (!mountedRef.current || operation !== powerOperationRef.current) return;
         for (const note of new Set(noteSources.current.values())) engine.noteOn(note);
@@ -1497,6 +1588,7 @@ function App() {
       }
     } catch (error) {
       if (!mountedRef.current || operation !== powerOperationRef.current) return;
+      audioKeepAliveRef.current?.disable();
       setPowered(false);
       setNotice(error instanceof Error && error.name === "AbortError"
         ? "Audio operation cancelled."
@@ -1547,6 +1639,7 @@ function App() {
     if (!powered) {
       const powerOperation = ++powerOperationRef.current;
       setPowerBusy(true);
+      audioKeepAliveRef.current?.enableFromUserGesture();
       try {
         await engine.powerOn(paramsRef.current);
         if (!mountedRef.current || powerOperation !== powerOperationRef.current) return;
@@ -1559,6 +1652,7 @@ function App() {
         if (sequenceOperation !== sequenceOperationRef.current) return;
       } catch (error) {
         if (!mountedRef.current || powerOperation !== powerOperationRef.current) return;
+        audioKeepAliveRef.current?.disable();
         setPowered(false);
         setNotice(error instanceof Error && error.name === "AbortError"
           ? "Sequence playback was cancelled."
@@ -1616,8 +1710,10 @@ function App() {
       externalInputStartedPowerRef.current = false;
       try {
         engine.disableExternalInput();
+        audioKeepAliveRef.current?.setCaptureActive(false);
         externalInputEnabledRef.current = false;
         if (shouldPowerOff) {
+          audioKeepAliveRef.current?.disable();
           try {
             await engine.powerOff();
           } catch (error) {
@@ -1642,6 +1738,7 @@ function App() {
       externalInputOperationRef.current += 1;
       externalInputStartedPowerRef.current = false;
       engine.disableExternalInput();
+      audioKeepAliveRef.current?.setCaptureActive(false);
       externalInputEnabledRef.current = false;
       setExternalInputEnabled(false);
       setExternalInputError(null);
@@ -1655,12 +1752,14 @@ function App() {
     setExternalInputError(null);
     try {
       if (startedPower) {
+        audioKeepAliveRef.current?.enableFromUserGesture();
         await engine.powerOn(paramsRef.current);
         if (!mountedRef.current || operation !== externalInputOperationRef.current) return;
         for (const note of new Set(noteSources.current.values())) engine.noteOn(note);
         syncPerformance();
         setPowered(true);
       }
+      audioKeepAliveRef.current?.setCaptureActive(true);
       await engine.enableExternalInput();
       if (!mountedRef.current || operation !== externalInputOperationRef.current) {
         engine.disableExternalInput();
@@ -1672,10 +1771,12 @@ function App() {
       setExternalInputError(null);
       setNotice("Live external input is feeding the mixer, then the delay, before the VCF.");
     } catch (error) {
+      audioKeepAliveRef.current?.setCaptureActive(false);
       engine.disableExternalInput();
       externalInputEnabledRef.current = false;
       if (!mountedRef.current || operation !== externalInputOperationRef.current) return;
       if (startedPower) {
+        audioKeepAliveRef.current?.disable();
         try {
           await engine.powerOff();
         } catch {
@@ -1754,7 +1855,11 @@ function App() {
       return;
     }
 
-    const shareUrl = window.location.href;
+    // Extension origins contain a browser- and installation-specific ID, so
+    // share the equivalent public HTTPS patch URL from packaged builds.
+    const shareUrl = import.meta.env.VITE_EXTENSION_BUILD === "true"
+      ? urlWithPatch(import.meta.env.VITE_PUBLIC_APP_URL, paramsRef.current)
+      : window.location.href;
     const hostOperation = patchShareOperationGate.run(
       shareUrl,
       () => performPatchShare(shareUrl),
@@ -1821,9 +1926,11 @@ function App() {
     // Odyssey voice path. Hard-clear its envelope/delay state, then restore
     // notes owned by other channels or interfaces after WebMidiSession has
     // synchronously released the addressed channel.
-    if (paramsRef.current.autoRun > 0.5 || externalInputEnabledRef.current) return;
-    engine.allSoundOff();
-    for (const note of new Set(noteSources.current.values())) engine.noteOn(note);
+    recoverAfterMidiAllSoundOff(
+      engine,
+      noteSources.current.values(),
+      paramsRef.current.autoRun > 0.5 || externalInputEnabledRef.current,
+    );
   }, [engine]);
 
   if (!midiSessionRef.current) {
@@ -1840,59 +1947,72 @@ function App() {
       modulation: midiModulation,
       allSoundOff: midiAllSoundOff,
       inputsChanged: (inputs) => {
+        const previousError = midiErrorRef.current;
         setMidiInputs(inputs);
-        if (inputs.length > 0) setMidiError(null);
+        // WebMidiSession publishes the complete topology before any errors for
+        // that synchronization pass. Clear an older failure even when recovery
+        // leaves a healthy, empty input list; a current failure is reapplied
+        // immediately afterward by the error callback.
+        updateMidiError(null);
+        if (previousError !== null) {
+          const recoveryNotice = midiReadyNotice(inputs);
+          setNotice((current) => current === previousError ? recoveryNotice : current);
+        }
       },
       error: (message) => {
         const detail = `MIDI input error: ${message}`;
-        setMidiError(detail);
+        updateMidiError(detail);
         setNotice(detail);
       },
     });
     return () => session.setHandlers(NOOP_MIDI_HANDLERS);
-  }, [midiAllSoundOff, midiModulation, midiPitchBend, noteOff, noteOn]);
+  }, [midiAllSoundOff, midiModulation, midiPitchBend, noteOff, noteOn, updateMidiError]);
 
   const toggleMidi = useCallback(async (): Promise<void> => {
     if (!midiAvailability.supported) return;
-    if (midiBusy) {
+    if (midiOperation !== null) {
+      if (midiOperation === "disconnecting" || midiOperation === "cancelling") return;
       // Closing a native MIDI port can take seconds. Do not allow another
       // cancel tap to finish early and expose Connect over that pending close.
       const cancellationLease = midiCancellationGuard.acquire();
       if (cancellationLease === null) return;
       const operation = ++midiOperationRef.current;
+      setMidiOperation("cancelling");
       setNotice("Cancelling MIDI operation…");
       try {
         await midiSessionRef.current?.disconnect();
         if (!mountedRef.current || operation !== midiOperationRef.current) return;
         setMidiEnabled(false);
-        setMidiError(null);
+        updateMidiError(null);
         setNotice("MIDI operation cancelled and inputs disconnected.");
       } catch (error) {
         if (!mountedRef.current || operation !== midiOperationRef.current) return;
-        setMidiError(error instanceof Error ? error.message : "MIDI operation could not be cancelled.");
+        const message = error instanceof Error ? error.message : "MIDI operation could not be cancelled.";
+        updateMidiError(message);
+        setNotice(message);
       } finally {
         midiCancellationGuard.release(cancellationLease);
-        if (mountedRef.current && operation === midiOperationRef.current) setMidiBusy(false);
+        if (mountedRef.current && operation === midiOperationRef.current) setMidiOperation(null);
       }
       return;
     }
     const operation = ++midiOperationRef.current;
-    setMidiBusy(true);
-    setMidiError(null);
+    setMidiOperation(midiEnabled ? "disconnecting" : "connecting");
+    updateMidiError(null);
     try {
       if (midiEnabled) {
         await midiSessionRef.current?.disconnect();
         if (!mountedRef.current || operation !== midiOperationRef.current) return;
         setMidiEnabled(false);
-        setMidiError(null);
+        updateMidiError(null);
         setNotice("MIDI input disconnected. Touch and computer keys remain available.");
       } else {
         const inputs = await midiSessionRef.current?.connect() ?? [];
         if (!mountedRef.current || operation !== midiOperationRef.current) return;
         setMidiEnabled(true);
-        setNotice(inputs.length > 0
-          ? `MIDI ready: ${inputs.map((input) => input.name).join(", ")}.`
-          : "MIDI access enabled. Connect or switch on a keyboard; it will be detected automatically.");
+        if (midiErrorRef.current === null) {
+          setNotice(midiReadyNotice(inputs));
+        }
       }
     } catch (error) {
       if (!mountedRef.current || operation !== midiOperationRef.current) return;
@@ -1902,33 +2022,35 @@ function App() {
       const message = denied
         ? "MIDI access was not granted. Touch and computer keys still work."
         : error instanceof Error ? error.message : "MIDI could not connect.";
-      setMidiError(message);
+      updateMidiError(message);
       setNotice(message);
     } finally {
-      if (mountedRef.current && operation === midiOperationRef.current) setMidiBusy(false);
+      if (mountedRef.current && operation === midiOperationRef.current) setMidiOperation(null);
     }
-  }, [midiAvailability.supported, midiBusy, midiCancellationGuard, midiEnabled]);
+  }, [midiAvailability.supported, midiCancellationGuard, midiEnabled, midiOperation, updateMidiError]);
 
   const refreshMidi = useCallback(async (): Promise<void> => {
-    if (midiBusy) return;
+    if (midiOperation !== null) return;
     const operation = ++midiOperationRef.current;
-    setMidiBusy(true);
-    setMidiError(null);
+    setMidiOperation("refreshing");
+    updateMidiError(null);
     try {
       const inputs = await midiSessionRef.current?.refresh() ?? [];
       if (!mountedRef.current || operation !== midiOperationRef.current) return;
-      setNotice(inputs.length > 0
-        ? `MIDI inputs refreshed: ${inputs.map((input) => input.name).join(", ")}.`
-        : "No MIDI input is currently detected.");
+      if (midiErrorRef.current === null) {
+        setNotice(inputs.length > 0
+          ? `MIDI inputs refreshed: ${midiInputListLabel(inputs)}.`
+          : "No MIDI input is currently detected.");
+      }
     } catch (error) {
       if (!mountedRef.current || operation !== midiOperationRef.current) return;
       const message = error instanceof Error ? error.message : "MIDI inputs could not be refreshed.";
-      setMidiError(message);
+      updateMidiError(message);
       setNotice(message);
     } finally {
-      if (mountedRef.current && operation === midiOperationRef.current) setMidiBusy(false);
+      if (mountedRef.current && operation === midiOperationRef.current) setMidiOperation(null);
     }
-  }, [midiBusy]);
+  }, [midiOperation, updateMidiError]);
 
   const install = async (): Promise<void> => {
     if (!installPrompt) return;
@@ -2212,7 +2334,7 @@ function App() {
           supported={midiAvailability.supported}
           unsupportedReason={midiAvailability.reason}
           enabled={midiEnabled}
-          busy={midiBusy}
+          operation={midiOperation}
           error={midiError}
           inputs={midiInputs}
           onToggle={toggleMidi}

@@ -173,6 +173,35 @@ const encodeRgbPng = (size, pixels, compressionLevel = 9) => {
   ]);
 };
 
+const encodeGrayscalePng = (size, rgbPixels, compressionLevel = 9) => {
+  // All generated runtime artwork is grayscale by project definition. PNG
+  // color type 0 stores one luminance byte instead of three identical RGB
+  // bytes per pixel, reducing install/precache and extension package size
+  // without changing a displayed pixel.
+  const stride = size;
+  const raw = Buffer.alloc((stride + 1) * size);
+  for (let y = 0; y < size; y += 1) {
+    const rowOffset = y * (stride + 1);
+    raw[rowOffset] = 1;
+    for (let x = 0; x < stride; x += 1) {
+      const luminance = rgbPixels[(y * size + x) * 3];
+      const left = x > 0 ? rgbPixels[(y * size + x - 1) * 3] : 0;
+      raw[rowOffset + 1 + x] = (luminance - left + 256) & 0xff;
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header[8] = 8;
+  header[9] = 0;
+  return Buffer.concat([
+    pngSignature,
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(raw, { level: compressionLevel })),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+};
+
 const encodeMasterPng = (size, pixels) => {
   const png = encodeRgbPng(size, pixels);
   const iendOffset = png.length - 12;
@@ -216,7 +245,7 @@ const pngs = new Map(sizes.map((size) => [
   // The host's upload scanner rejects the canonical master byte stream at a
   // runtime URL. Runtime encoding changes only PNG packaging, not a displayed
   // pixel, and omits the canonical master's descriptive metadata.
-  encodeRgbPng(size, resizeRgb(master, size), size === 512 ? 8 : 9),
+  encodeGrayscalePng(size, resizeRgb(master, size), size === 512 ? 8 : 9),
 ]));
 
 for (const size of [16, 32, 48]) writeFileSync(resolve(outputDirectory, `favicon-${size}.png`), pngs.get(size));

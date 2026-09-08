@@ -12,6 +12,7 @@ const registrationStore = new PwaRegistrationStore((callbacks) => registerSW({
   ...callbacks,
 }));
 const serviceWorkerCapabilityStore = new ServiceWorkerCapabilityStore();
+const extensionBuild = import.meta.env.VITE_EXTENSION_BUILD === "true";
 
 export const usePwaRegistration = () => {
   const snapshot = useSyncExternalStore(
@@ -39,11 +40,14 @@ export const useServiceWorkerCapability = (): boolean => {
   );
 
   useEffect(() => {
+    if (extensionBuild) return;
     if (!("serviceWorker" in navigator)) return;
     serviceWorkerCapabilityStore.start(
       navigator.serviceWorker as unknown as ServiceWorkerCapabilityTarget,
     );
   }, []);
 
-  return capable;
+  // Packaged extension resources are local to the browser and remain
+  // available without the hosted PWA's Workbox service worker.
+  return extensionBuild || capable;
 };

@@ -10,6 +10,13 @@ export interface AudioEngineStatus {
   error: string | null;
 }
 
+/**
+ * Describes what an audio-readiness check changed. Callers only need to
+ * restore held notes after a resume/rebuild because power-on deliberately
+ * clears the processor's note state before restoring its controls.
+ */
+export type AudioRecoveryResult = "off" | "already-running" | "resumed" | "recreated";
+
 type MeterListener = (meter: OdysseyMeter) => void;
 type StatusListener = (status: AudioEngineStatus) => void;
 type ExternalInputListener = (connected: boolean) => void;
@@ -30,6 +37,7 @@ interface PendingExternalPermission {
 
 export const AUDIO_CONTEXT_TRANSITION_TIMEOUT_MS = 2_000;
 export const AUDIO_CONTEXT_CLOSE_TIMEOUT_MS = 2_000;
+export const MAX_QUARANTINED_AUDIO_CONTEXT_CLOSES = 2;
 
 // Media permission prompts are host-owned and cannot be aborted. Keep a
 // module-wide gate so component remounts cannot stack prompts after the old
@@ -43,6 +51,11 @@ let pendingRawExternalPermissionId: number | null = null;
 // reactions. A retry is allowed once the raw request actually settles.
 const audioWorkletModuleLoadGate = new KeyedHostOperationGate<string, void>();
 const audioContextTransitionGate = new KeyedHostOperationGate<ContextTransitionKind, void>();
+// A host can leave one raw resume/suspend promise pending forever. After the
+// engine's bounded transition has actually timed out, permit one quarantined
+// replacement transition without allowing unbounded AudioContext stacking.
+const audioContextFallbackTransitionGate = new KeyedHostOperationGate<ContextTransitionKind, void>();
+let audioContextFallbackAuthorized = false;
 
 const cancellationError = (message: string): Error => {
   const error = new Error(message);
@@ -97,10 +110,13 @@ export class OdysseyAudioEngine {
   private params: SynthParams | null = null;
   private performance: PerformanceState = { bendSemitones: 0, vibratoSemitones: 0 };
   private startPromise: Promise<void> | null = null;
+  private recoveryPromise: Promise<AudioRecoveryResult> | null = null;
   private disposePromise: Promise<void> | null = null;
   private cancelInitialization: (() => void) | null = null;
   private cancelPowerOperation: (() => void) | null = null;
   private readonly closingContexts = new Map<AudioContext, { id: number; promise: Promise<void> }>();
+  private readonly quarantinedClosingContexts = new WeakSet<AudioContext>();
+  private quarantinedContextCloseCount = 0;
   private contextTransition: ContextTransition | null = null;
   private pendingExternalPermission: PendingExternalPermission | null = null;
   private powerSequence = 0;
@@ -109,6 +125,7 @@ export class OdysseyAudioEngine {
   private contextTransitionSequence = 0;
   private contextCloseSequence = 0;
   private shouldRun = false;
+  private runIntentEstablished = false;
   private disposed = false;
   private externalInputConnected = false;
   private meterRequestOutstanding = false;
@@ -128,6 +145,20 @@ export class OdysseyAudioEngine {
     return () => {
       if (this.meterListener === listener) this.meterListener = null;
     };
+  }
+
+  /** Logical position of the synth's Power switch, independent of host state. */
+  get isPowerRequested(): boolean {
+    return this.shouldRun && !this.disposed;
+  }
+
+  /** Cheap readiness check for high-frequency lifecycle/user-input probes. */
+  get isAudioReady(): boolean {
+    return this.shouldRun
+      && !this.disposed
+      && this.context?.state === "running"
+      && this.node !== null
+      && this.output !== null;
   }
 
   onStatus(listener: StatusListener): () => void {
@@ -242,11 +273,14 @@ export class OdysseyAudioEngine {
     this.cancelPowerOperation = null;
     this.powerSequence += 1;
     cancelPowerOperation?.();
-    this.shouldRun = false;
+    const shouldRecover = this.shouldRun && this.runIntentEstablished;
+    this.shouldRun = shouldRecover;
     this.retireContext(context);
     this.emitStatus({
       state: "closed",
-      error: "The audio processor stopped unexpectedly. Press Power on to restart it.",
+      error: shouldRecover
+        ? "The audio processor stopped unexpectedly. Andoracle is rebuilding its audio graph."
+        : "The audio processor stopped unexpectedly. Press Power on to restart it.",
     });
   }
 
@@ -254,10 +288,13 @@ export class OdysseyAudioEngine {
     if (this.disposed || this.context !== context) return;
     const state = context.state;
     if (state === "closed") {
-      this.shouldRun = false;
+      // An active context can be closed by the browser or operating system.
+      // Preserve the logical Power intent so ensureRunning() can construct a
+      // replacement graph. App-owned shutdown paths detach this callback
+      // before closing and set shouldRun=false themselves.
       this.clearGraph(context);
     }
-    this.emitStatus({ state });
+    this.emitStatus(state === "running" ? { state, error: null } : { state });
     if (state === "running") this.requestMeter();
   }
 
@@ -266,6 +303,7 @@ export class OdysseyAudioEngine {
     const existing = this.closingContexts.get(context);
     if (existing) return existing.promise;
     if (contextIsClosed(context)) {
+      this.releaseContextCloseQuarantine(context);
       return Promise.resolve();
     }
 
@@ -273,6 +311,7 @@ export class OdysseyAudioEngine {
     try {
       rawClose = Promise.resolve(context.close());
     } catch {
+      if (!contextIsClosed(context)) this.quarantineContextClose(context);
       return Promise.resolve();
     }
 
@@ -287,30 +326,48 @@ export class OdysseyAudioEngine {
         finished = true;
         if (timeout !== null) clearTimeout(timeout);
         timeout = null;
+        const engine = owner.deref();
+        const closedContext = contextReference.deref();
+        if (closedContext && engine?.closingContexts.get(closedContext)?.id === id) {
+          engine.closingContexts.delete(closedContext);
+        }
         resolve();
       };
-      timeout = setTimeout(finish, AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
+      const rawFinished = (): void => {
+        const engine = owner.deref();
+        const closedContext = contextReference.deref();
+        if (engine && closedContext) {
+          if (contextIsClosed(closedContext)) engine.releaseContextCloseQuarantine(closedContext);
+          else engine.quarantineContextClose(closedContext);
+        }
+        finish();
+      };
+      timeout = setTimeout(() => {
+        const engine = owner.deref();
+        const closingContext = contextReference.deref();
+        if (engine && closingContext && !contextIsClosed(closingContext)) {
+          engine.quarantineContextClose(closingContext);
+        }
+        finish();
+      }, AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
       void rawClose.then(
-        () => {
-          const engine = owner.deref();
-          const closedContext = contextReference.deref();
-          if (closedContext && engine?.closingContexts.get(closedContext)?.id === id) {
-            engine.closingContexts.delete(closedContext);
-          }
-          finish();
-        },
-        () => {
-          const engine = owner.deref();
-          const closedContext = contextReference.deref();
-          if (closedContext && engine?.closingContexts.get(closedContext)?.id === id) {
-            engine.closingContexts.delete(closedContext);
-          }
-          finish();
-        },
+        rawFinished,
+        rawFinished,
       );
     });
     this.closingContexts.set(context, { id, promise: closing });
     return closing;
+  }
+
+  private quarantineContextClose(context: AudioContext): void {
+    if (this.quarantinedClosingContexts.has(context)) return;
+    this.quarantinedClosingContexts.add(context);
+    this.quarantinedContextCloseCount += 1;
+  }
+
+  private releaseContextCloseQuarantine(context: AudioContext): void {
+    if (!this.quarantinedClosingContexts.delete(context)) return;
+    this.quarantinedContextCloseCount = Math.max(0, this.quarantinedContextCloseCount - 1);
   }
 
   private retireContext(context: AudioContext): void {
@@ -326,14 +383,27 @@ export class OdysseyAudioEngine {
       return Promise.reject(cancellationError("An earlier audio-context transition is still pending."));
     }
 
-    const hostTransition = audioContextTransitionGate.run(
+    let usesFallbackGate = false;
+    let hostTransition = audioContextTransitionGate.run(
       kind,
       () => kind === "resume" ? context.resume() : context.suspend(),
     );
     if (hostTransition.status === "busy") {
-      return Promise.reject(
-        new Error("A previous audio context transition is still finishing. Try again shortly."),
+      if (!audioContextFallbackAuthorized) {
+        return Promise.reject(
+          new Error("A previous audio context transition is still finishing. Try again shortly."),
+        );
+      }
+      usesFallbackGate = true;
+      hostTransition = audioContextFallbackTransitionGate.run(
+        kind,
+        () => kind === "resume" ? context.resume() : context.suspend(),
       );
+      if (hostTransition.status === "busy") {
+        return Promise.reject(
+          new Error("Two audio context transitions are still finishing. Try again shortly."),
+        );
+      }
     }
     const rawTransition = hostTransition.promise;
 
@@ -352,12 +422,14 @@ export class OdysseyAudioEngine {
         else reject(error);
       };
       timeout = setTimeout(() => {
+        if (!usesFallbackGate) audioContextFallbackAuthorized = true;
         const error = new Error(`The audio context did not ${kind} in time.`);
         error.name = "TimeoutError";
         finish(error);
       }, AUDIO_CONTEXT_TRANSITION_TIMEOUT_MS);
       void rawTransition.then(
         () => {
+          if (!usesFallbackGate) audioContextFallbackAuthorized = false;
           const engine = owner.deref();
           const transitionedContext = contextReference.deref();
           if (!transitionedContext) {
@@ -376,6 +448,7 @@ export class OdysseyAudioEngine {
           finish();
         },
         (error) => {
+          if (!usesFallbackGate) audioContextFallbackAuthorized = false;
           const engine = owner.deref();
           if (engine?.contextTransition?.id === id) engine.contextTransition = null;
           finish(error);
@@ -392,10 +465,18 @@ export class OdysseyAudioEngine {
     if (this.closingContexts.size > 0) {
       throw new Error("The previous audio context is still shutting down. Try again after it closes.");
     }
+    if (this.quarantinedContextCloseCount >= MAX_QUARANTINED_AUDIO_CONTEXT_CLOSES) {
+      throw new Error(
+        "The browser still owns multiple unclosed audio contexts. Reload Andoracle to restore audio safely.",
+      );
+    }
     if (audioWorkletModuleLoadGate.isPending) {
       throw new Error("A previous audio processor load is still finishing. Try again shortly.");
     }
-    if (audioContextTransitionGate.isPending) {
+    if (
+      audioContextTransitionGate.isPending
+      && (!audioContextFallbackAuthorized || audioContextFallbackTransitionGate.isPending)
+    ) {
       throw new Error("A previous audio context transition is still finishing. Try again shortly.");
     }
     const AudioContextConstructor = window.AudioContext
@@ -525,6 +606,13 @@ export class OdysseyAudioEngine {
   }
 
   async powerOn(params: SynthParams): Promise<void> {
+    await this.startPowerOn(params, false);
+  }
+
+  private async startPowerOn(
+    params: SynthParams,
+    preserveRunIntentOnFailure: boolean,
+  ): Promise<void> {
     if (this.disposed) throw new Error("The audio engine is no longer available.");
     this.shouldRun = true;
     // The UI owns its immutable React state object. Keep one engine-owned
@@ -578,6 +666,7 @@ export class OdysseyAudioEngine {
       ) {
         throw new Error("The audio processor stopped before it could accept the current controls.");
       }
+      this.runIntentEstablished = true;
       this.emitStatus({ state: context.state, error: null });
       this.requestMeter();
     } catch (error) {
@@ -586,7 +675,10 @@ export class OdysseyAudioEngine {
         && sequence === this.powerSequence
         && (!(error instanceof Error) || error.name !== "AbortError")
       ) {
-        this.shouldRun = false;
+        if (!preserveRunIntentOnFailure) {
+          this.shouldRun = false;
+          this.runIntentEstablished = false;
+        }
       }
       if (
         !this.disposed
@@ -594,7 +686,10 @@ export class OdysseyAudioEngine {
         && error instanceof Error
         && ["TimeoutError", "InvalidStateError"].includes(error.name)
       ) {
-        this.shouldRun = false;
+        if (!preserveRunIntentOnFailure) {
+          this.shouldRun = false;
+          this.runIntentEstablished = false;
+        }
         const context = this.context;
         if (context) this.retireContext(context);
       }
@@ -608,8 +703,66 @@ export class OdysseyAudioEngine {
     }
   }
 
+  /**
+   * Best-effort recovery for browser/OS audio interruptions while the synth's
+   * logical Power switch remains on. Concurrent watchdog, focus, and
+   * visibility events share one operation. A user power-off or disposal
+   * cancels that operation through the ordinary power-operation sequence and
+   * is reported as `off`, so a late host promise can never resurrect audio.
+   */
+  ensureRunning(): Promise<AudioRecoveryResult> {
+    if (this.disposed || !this.shouldRun) return Promise.resolve("off");
+    const context = this.context;
+    if (context?.state === "running" && this.node && this.output) {
+      if (this.status.error !== null) this.emitStatus({ state: "running", error: null });
+      return Promise.resolve("already-running");
+    }
+    if (this.recoveryPromise) return this.recoveryPromise;
+
+    const previousContext = context;
+    let recovery: Promise<AudioRecoveryResult>;
+    recovery = this.recoverRunning(previousContext).finally(() => {
+      if (this.recoveryPromise === recovery) this.recoveryPromise = null;
+    });
+    this.recoveryPromise = recovery;
+    return recovery;
+  }
+
+  private async recoverRunning(previousContext: AudioContext | null): Promise<AudioRecoveryResult> {
+    if (this.disposed || !this.shouldRun) return "off";
+    const params = this.params;
+    if (!params) return "off";
+
+    try {
+      // Processor errors retire their graph before the status listener asks
+      // for recovery. A real AudioContext can take longer than a microtask to
+      // close, so let the already timeout-bounded close operations finish
+      // instead of failing this recovery and waiting for the next watchdog.
+      const pendingClosures = [...this.closingContexts.values()].map(({ promise }) => promise);
+      if (pendingClosures.length > 0) await Promise.allSettled(pendingClosures);
+      if (this.disposed || !this.shouldRun) return "off";
+
+      // This follows the same checked, timeout-bounded graph lifecycle as a
+      // normal power-on. Unlike an initial user request, a transient recovery
+      // failure retains the Power intent so a later lifecycle/watchdog event
+      // can retry it.
+      await this.startPowerOn(params, true);
+    } catch (error) {
+      if (this.disposed || !this.shouldRun) return "off";
+      throw error;
+    }
+
+    if (this.disposed || !this.shouldRun) return "off";
+    const recoveredContext = this.context;
+    if (!recoveredContext || recoveredContext.state !== "running") {
+      throw new Error("The audio context did not remain running after recovery.");
+    }
+    return previousContext && recoveredContext === previousContext ? "resumed" : "recreated";
+  }
+
   async powerOff(): Promise<void> {
     this.shouldRun = false;
+    this.runIntentEstablished = false;
     const cancelPrevious = this.cancelPowerOperation;
     const sequence = ++this.powerSequence;
     let cancelCurrent: (() => void) | null = null;
@@ -902,11 +1055,24 @@ export class OdysseyAudioEngine {
     this.postToProcessor({ type: "all-sound-off" });
   }
 
+  resumeSound(): void {
+    this.postToProcessor({ type: "resume-sound" });
+  }
+
   setPerformance(performance: Partial<PerformanceState>): void {
     // PPC and MIDI wheels can emit at pointer/device-report frequency. This
     // object is engine-owned, so update it in place instead of allocating an
     // otherwise identical two-field snapshot for every report.
+    const previousBend = this.performance.bendSemitones;
+    const previousVibrato = this.performance.vibratoSemitones;
     Object.assign(this.performance, performance);
+    // Many controllers resend their last wheel value on every device report.
+    // Avoid crossing the main/audio-thread boundary when the effective pair
+    // is unchanged; startup still sends the complete cached pair explicitly.
+    if (
+      Object.is(previousBend, this.performance.bendSemitones)
+      && Object.is(previousVibrato, this.performance.vibratoSemitones)
+    ) return;
     this.postToProcessor({ type: "performance", performance });
   }
 
@@ -914,6 +1080,7 @@ export class OdysseyAudioEngine {
     if (this.disposePromise) return this.disposePromise;
     this.disposed = true;
     this.shouldRun = false;
+    this.runIntentEstablished = false;
     this.lifecycleSequence += 1;
     const cancelInitialization = this.cancelInitialization;
     this.cancelInitialization = null;
@@ -961,10 +1128,9 @@ export class OdysseyAudioEngine {
     const contexts = [...new Set([context, initializingContext, ...this.closingContexts.keys()].filter(
       (candidate): candidate is AudioContext => candidate !== null,
     ))];
-    // Keep unresolved raw-close ownership records on the disposed instance.
-    // They are bounded by the number of contexts this engine created and keep
-    // a late resume/suspend completion from issuing a duplicate close(). The
-    // whole map remains collectible with the disposed engine.
+    // Only close requests still inside their bounded wait remain enumerable.
+    // Timed-out requests are removed from the strong map so a broken browser
+    // promise cannot retain every retired AudioContext for the page lifetime.
     this.disposePromise = Promise.allSettled(contexts.map((candidate) => this.closeContext(candidate)))
       .then(() => undefined);
     return this.disposePromise;

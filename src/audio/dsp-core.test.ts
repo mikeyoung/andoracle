@@ -224,6 +224,78 @@ describe("OdysseyDSP", () => {
     expect(resumedLeft.some((sample) => Math.abs(sample) > 1e-4)).toBe(true);
   });
 
+  it("does not revive a pre-CC120 delay tail when an external source resumes", () => {
+    const dsp = new OdysseyDSP(44100);
+    dsp.setParams({
+      mixer1Level: 0,
+      mixer2Level: 0,
+      mixer3Level: 0,
+      externalLevel: 1,
+      delayEnabled: 1,
+      delayTime: 20,
+      delayFeedback: 0.95,
+      delayMix: 1,
+      filterType: 1,
+      filterCutoff: 16000,
+      filterResonance: 0,
+      filterMod1Amount: 0,
+      filterMod2Amount: 0,
+      filterMod3Amount: 0,
+      hpfCutoff: 16,
+      vcaInitialGain: 1,
+      vcaEnvelopeAmount: 0,
+      masterVolume: 1,
+    });
+    const impulse = new Float32Array(4096);
+    impulse[0] = 0.8;
+    const before = new Float32Array(impulse.length);
+    dsp.process(before, new Float32Array(impulse.length), impulse);
+    expect(before.some((sample) => Math.abs(sample) > 1e-4)).toBe(true);
+
+    dsp.allSoundOff();
+    dsp.resumeSound();
+    const after = new Float32Array(4096);
+    dsp.process(after, new Float32Array(after.length), new Float32Array(after.length));
+
+    expect(Math.max(...after.map((sample) => Math.abs(sample)))).toBeLessThan(1e-6);
+  });
+
+  it("reconstructs the AUTO gate after MIDI all-sound-off", () => {
+    const dsp = new OdysseyDSP(44100);
+    dsp.setParams({
+      autoRun: 1,
+      vcaInitialGain: 1,
+      vcaEnvelopeAmount: 0,
+      masterVolume: 1,
+    });
+    const [sounding] = render(dsp, 4096);
+    expect(sounding.some((sample) => Math.abs(sample) > 1e-4)).toBe(true);
+
+    dsp.allSoundOff();
+    const [muted] = render(dsp, 4096);
+    expect(muted.every((sample) => sample === 0)).toBe(true);
+    expect(dsp.getMeter().gate).toBe(false);
+
+    dsp.resumeSound();
+    const [resumed] = render(dsp, 4096);
+    expect(resumed.some((sample) => Math.abs(sample) > 1e-4)).toBe(true);
+    expect(dsp.getMeter().gate).toBe(true);
+  });
+
+  it("does not duplicate AUTO articulation after a surviving note was restored", () => {
+    const dsp = new OdysseyDSP(44100);
+    dsp.setParams({ autoRun: 1 });
+    dsp.allSoundOff();
+    dsp.noteOn(60);
+    const pendingAfterNote = dsp.getDiagnostics().pendingArticulations;
+
+    dsp.resumeSound();
+
+    expect(pendingAfterNote).toBeGreaterThan(0);
+    expect(dsp.getDiagnostics().pendingArticulations).toBe(pendingAfterNote);
+    expect(dsp.getHeldNotes()).toEqual([60]);
+  });
+
   it("keeps a zero-mix delay exactly on the dry path", () => {
     const dry = new OdysseyDSP(44100);
     const bypassed = new OdysseyDSP(44100);

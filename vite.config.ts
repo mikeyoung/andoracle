@@ -2,12 +2,16 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import packageMetadata from "./package.json";
+import { ANDORACLE_VERSION } from "./src/version";
+
+export { ANDORACLE_VERSION };
 
 if (typeof packageMetadata.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(packageMetadata.version)) {
   throw new Error("package.json must contain a valid semantic version for the Andoracle HTML metadata.");
 }
-
-export const ANDORACLE_VERSION = packageMetadata.version;
+if (packageMetadata.version !== ANDORACLE_VERSION) {
+  throw new Error("package.json version must match src/version.ts.");
+}
 
 export const PWA_INCLUDE_ASSETS = [
   "favicon.ico",
@@ -33,18 +37,11 @@ export const PWA_MANIFEST_ICONS = [
   { src: "maskable-icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
 ] as const;
 
-export default defineConfig({
-  // Relative production URLs keep the same build valid at / and at any
-  // directory-style subpath (for example, /andoracle/).
-  base: "./",
-  // Vite applies import.meta.env.* definitions to both client modules and
-  // %VITE_APP_VERSION% placeholders in index.html.
-  define: {
-    "import.meta.env.VITE_APP_VERSION": JSON.stringify(ANDORACLE_VERSION),
-  },
-  plugins: [
-    react(),
-    VitePWA({
+const PUBLIC_APP_URL = "https://mikeyoung.org/andoracle/";
+const EXTENSION_BUILD_DIRECTORY = "node_modules/.tmp/andoracle-extension";
+const EXTENSION_REGISTER_MODULE_ID = "\0andoracle-extension-register-sw";
+
+const pwaPlugin = () => VitePWA({
       registerType: "prompt",
       // Root install artwork is supplied here or by manifest.icons. Keeping
       // root images out of Workbox's glob prevents duplicate precache URLs.
@@ -75,11 +72,60 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: false
       }
-    })
-  ],
-  worker: { format: "es" },
-  test: {
-    environment: "node",
-    include: ["src/**/*.test.ts", "tests/**/*.test.ts"]
-  }
+    });
+
+const extensionHtmlPlugin = {
+  name: "andoracle-extension-html",
+  enforce: "pre" as const,
+  transformIndexHtml(html: string): string {
+    return html
+      .replace(/\s*<script type="application\/ld\+json">[\s\S]*?<\/script>/i, "")
+      .replace(/\s*<link rel="(?:icon|apple-touch-icon)"[^>]*>/gi, "")
+      .replace(
+        "    <title>",
+        '    <link rel="icon" type="image/png" sizes="32x32" href="./icons/icon-32.png" />\n    <title>',
+      );
+  },
+};
+
+const extensionRegisterPlugin = {
+  name: "andoracle-extension-registration",
+  enforce: "pre" as const,
+  resolveId(source: string): string | null {
+    return source === "virtual:pwa-register" ? EXTENSION_REGISTER_MODULE_ID : null;
+  },
+  load(id: string): string | null {
+    if (id !== EXTENSION_REGISTER_MODULE_ID) return null;
+    return "export const registerSW = () => async () => undefined;";
+  },
+};
+
+export default defineConfig(({ mode }) => {
+  const extensionBuild = mode === "extension";
+  return {
+    // Relative production URLs keep both the hosted PWA and packaged
+    // extension pages valid without knowing their final origin in advance.
+    base: "./",
+    publicDir: extensionBuild ? false : "public",
+    build: extensionBuild ? {
+      outDir: EXTENSION_BUILD_DIRECTORY,
+      emptyOutDir: true,
+    } : undefined,
+    // Vite applies import.meta.env.* definitions to both client modules and
+    // %VITE_APP_VERSION% placeholders in index.html.
+    define: {
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(ANDORACLE_VERSION),
+      "import.meta.env.VITE_EXTENSION_BUILD": JSON.stringify(extensionBuild ? "true" : "false"),
+      "import.meta.env.VITE_PUBLIC_APP_URL": JSON.stringify(PUBLIC_APP_URL),
+    },
+    plugins: [
+      react(),
+      ...(extensionBuild ? [extensionRegisterPlugin, extensionHtmlPlugin] : [pwaPlugin()]),
+    ],
+    worker: { format: "es" },
+    test: {
+      environment: "node",
+      include: ["src/**/*.test.ts", "tests/**/*.test.ts"]
+    }
+  };
 });

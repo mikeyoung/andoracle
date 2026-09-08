@@ -67,6 +67,16 @@ interface RawMidiInputOperation {
   readonly publicPromise?: Promise<void>;
 }
 
+interface RawMidiInputLease {
+  readonly operationId: number;
+  readonly operation: WeakRef<RawMidiInputOperation>;
+}
+
+interface LiveMidiInputOwner {
+  readonly input: WeakRef<MIDIInput>;
+  readonly session: WeakRef<WebMidiSession>;
+}
+
 const clamp = (value: number, minimum: number, maximum: number): number =>
   Math.min(maximum, Math.max(minimum, value));
 
@@ -85,10 +95,88 @@ export const MIDI_INPUT_CLOSE_TIMEOUT_MS = 2_000;
 // stacking more native promises onto the same port while one is unresolved.
 const rawOpeningInputs = new WeakMap<MIDIInput, RawMidiInputOperation>();
 const rawClosingInputs = new WeakMap<MIDIInput, RawMidiInputOperation>();
-const liveInputOwners = new WeakMap<MIDIInput, WeakRef<WebMidiSession>>();
+// requestMIDIAccess() vends a new MIDIAccess (and therefore new MIDIPort
+// wrappers) on each call. A port ID, rather than wrapper identity, is the Web
+// MIDI equality key. Keep weak logical-port leases as well as weak wrapper
+// gates so overlapping sessions cannot double-open or double-handle one
+// physical input through distinct wrapper objects.
+const rawOpeningInputIds = new Map<string, RawMidiInputLease>();
+const rawClosingInputIds = new Map<string, RawMidiInputLease>();
+const liveInputOwners = new Map<string, LiveMidiInputOwner>();
 let rawInputOperationSequence = 0;
 let rawMidiAccessRequestSequence = 0;
 let pendingRawMidiAccessRequestId: number | null = null;
+
+const rawInputOperation = (
+  wrappers: WeakMap<MIDIInput, RawMidiInputOperation>,
+  ids: Map<string, RawMidiInputLease>,
+  input: MIDIInput,
+): RawMidiInputOperation | undefined => {
+  const wrapperOperation = wrappers.get(input);
+  if (wrapperOperation) return wrapperOperation;
+  const lease = ids.get(input.id);
+  if (!lease) return undefined;
+  const operation = lease.operation.deref();
+  if (!operation) ids.delete(input.id);
+  return operation;
+};
+
+const registerRawInputOperation = (
+  wrappers: WeakMap<MIDIInput, RawMidiInputOperation>,
+  ids: Map<string, RawMidiInputLease>,
+  input: MIDIInput,
+  operation: RawMidiInputOperation,
+): void => {
+  for (const [inputId, lease] of ids) {
+    if (!lease.operation.deref()) ids.delete(inputId);
+  }
+  wrappers.set(input, operation);
+  // The host promise reactions retain an active operation; the ID index does
+  // not. Once a host drops an unreachable never-settling promise, later port
+  // activity can prune the weak lease instead of leaking every transient ID.
+  ids.set(input.id, {
+    operationId: operation.id,
+    operation: new WeakRef(operation),
+  });
+};
+
+const releaseRawInputOperation = (
+  wrappers: WeakMap<MIDIInput, RawMidiInputOperation>,
+  ids: Map<string, RawMidiInputLease>,
+  input: MIDIInput | undefined,
+  inputId: string,
+  operationId: number,
+): void => {
+  if (input && wrappers.get(input)?.id === operationId) wrappers.delete(input);
+  if (ids.get(inputId)?.operationId === operationId) ids.delete(inputId);
+};
+
+const liveInputOwner = (inputId: string): { input: MIDIInput; session: WebMidiSession } | null => {
+  const lease = liveInputOwners.get(inputId);
+  if (!lease) return null;
+  const input = lease.input.deref();
+  const session = lease.session.deref();
+  if (!input || !session) {
+    liveInputOwners.delete(inputId);
+    return null;
+  }
+  return { input, session };
+};
+
+const registerLiveInputOwner = (input: MIDIInput, session: WebMidiSession): void => {
+  for (const [inputId, lease] of liveInputOwners) {
+    if (!lease.input.deref() || !lease.session.deref()) liveInputOwners.delete(inputId);
+  }
+  liveInputOwners.set(input.id, {
+    input: new WeakRef(input),
+    session: new WeakRef(session),
+  });
+};
+
+const releaseLiveInputOwner = (input: MIDIInput, session: WebMidiSession): void => {
+  const owner = liveInputOwner(input.id);
+  if (owner?.input === input && owner.session === session) liveInputOwners.delete(input.id);
+};
 
 const midiCancellationError = (message: string): Error => {
   const error = new Error(message);
@@ -98,44 +186,75 @@ const midiCancellationError = (message: string): Error => {
 
 const closeMidiInput = (input: MIDIInput): Promise<void> => {
   input.onmidimessage = null;
-  const existing = rawClosingInputs.get(input);
+  const existing = rawInputOperation(rawClosingInputs, rawClosingInputIds, input);
   if (existing?.publicPromise) return existing.publicPromise;
+  const inputId = input.id;
+  const id = ++rawInputOperationSequence;
+  let settled = false;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let resolvePublic: (() => void) | null = null;
+  const publicPromise = new Promise<void>((resolve) => {
+    resolvePublic = resolve;
+  });
+  const rawOperation: RawMidiInputOperation = { id, publicPromise };
+  const finish = (): void => {
+    if (settled) return;
+    settled = true;
+    if (timeout !== null) clearTimeout(timeout);
+    timeout = null;
+    resolvePublic?.();
+    resolvePublic = null;
+  };
+  // Reserve the logical port before invoking the host. A conforming close()
+  // queues statechange, but this ordering also makes synchronous host shims
+  // and re-entrant teardown deterministic.
+  registerRawInputOperation(rawClosingInputs, rawClosingInputIds, input, rawOperation);
   let rawClose: Promise<MIDIPort>;
   try {
     rawClose = Promise.resolve(input.close());
   } catch {
-    return Promise.resolve();
-  }
-  const id = ++rawInputOperationSequence;
-  const inputReference = new WeakRef(input);
-  const publicPromise = new Promise<void>((resolve) => {
-    let settled = false;
-    const timeout = setTimeout(() => finish(), MIDI_INPUT_CLOSE_TIMEOUT_MS);
-    const finish = (): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      resolve();
-    };
-    void rawClose.then(
-      () => {
-        const port = inputReference.deref();
-        if (port && rawClosingInputs.get(port)?.id === id) rawClosingInputs.delete(port);
-        finish();
-      },
-      () => {
-        const port = inputReference.deref();
-        if (port && rawClosingInputs.get(port)?.id === id) rawClosingInputs.delete(port);
-        finish();
-      },
+    releaseRawInputOperation(
+      rawClosingInputs,
+      rawClosingInputIds,
+      input,
+      inputId,
+      id,
     );
-  });
-  rawClosingInputs.set(input, { id, publicPromise });
+    finish();
+    return publicPromise;
+  }
+  const inputReference = new WeakRef(input);
+  timeout = setTimeout(finish, MIDI_INPUT_CLOSE_TIMEOUT_MS);
+  void rawClose.then(
+    () => {
+      releaseRawInputOperation(
+        rawClosingInputs,
+        rawClosingInputIds,
+        inputReference.deref(),
+        inputId,
+        rawOperation.id,
+      );
+      finish();
+    },
+    () => {
+      releaseRawInputOperation(
+        rawClosingInputs,
+        rawClosingInputIds,
+        inputReference.deref(),
+        inputId,
+        rawOperation.id,
+      );
+      finish();
+    },
+  );
   return publicPromise;
 };
 
 export function decodeMidiMessage(data: ArrayLike<number> | null | undefined): DecodedMidiMessage {
-  if (!data || data.length < 1) return null;
+  // Web MIDI delivers one complete message per event and never uses running
+  // status. Every channel message handled below is exactly three bytes; do
+  // not execute a valid-looking prefix from a malformed or bundled payload.
+  if (!data || data.length !== 3) return null;
   const status = data[0];
   if (!Number.isInteger(status) || status < 0x80 || status >= 0xf0) return null;
   const command = status & 0xf0;
@@ -163,9 +282,12 @@ export function decodeMidiMessage(data: ArrayLike<number> | null | undefined): D
     const value = data[2];
     if (!validDataByte(controller) || !validDataByte(value)) return null;
     if (controller === 1) return { type: "modulation", channel, normalized: value / 127 };
-    if (controller === 120) return { type: "all-sound-off", channel };
-    if (controller === 121) return { type: "reset-controllers", channel };
-    if (controller >= 123 && controller <= 127) return { type: "all-notes-off", channel };
+    if (controller === 120 && value === 0) return { type: "all-sound-off", channel };
+    if (controller === 121 && value === 0) return { type: "reset-controllers", channel };
+    if (
+      controller === 126
+      || (value === 0 && controller >= 123 && controller <= 127)
+    ) return { type: "all-notes-off", channel };
   }
 
   return null;
@@ -209,6 +331,16 @@ const inputSummary = (input: MIDIInput): MidiInputSummary => ({
   manufacturer: input.manufacturer?.trim() || "",
 });
 
+const NOOP_WEB_MIDI_HANDLERS: WebMidiHandlers = {
+  noteOn: () => undefined,
+  noteOff: () => undefined,
+  pitchBend: () => undefined,
+  modulation: () => undefined,
+  allSoundOff: () => undefined,
+  inputsChanged: () => undefined,
+  error: () => undefined,
+};
+
 export class WebMidiSession {
   private access: MIDIAccess | null = null;
   private handlers: WebMidiHandlers;
@@ -218,6 +350,7 @@ export class WebMidiSession {
   private readonly noteStacks = new Map<string, string[]>();
   private readonly bends = new Map<string, ControllerLaneValue>();
   private readonly modulations = new Map<string, ControllerLaneValue>();
+  private readonly closingInputPromises = new Set<Promise<void>>();
   private serial = 0;
   private controllerOrder = 0;
   private generation = 0;
@@ -229,13 +362,31 @@ export class WebMidiSession {
   private pendingAccessRequest: PendingMidiAccessRequest | null = null;
   private refreshPromise: Promise<readonly MidiInputSummary[]> | null = null;
   private cancelRefresh: (() => void) | null = null;
+  private publishedSyncSignature: string | null = null;
+  private teardownPromise: Promise<void> | null = null;
+  private disposePromise: Promise<void> | null = null;
 
   constructor(handlers: WebMidiHandlers) {
     this.handlers = handlers;
   }
 
   setHandlers(handlers: WebMidiHandlers): void {
+    if (this.disposed) return;
     this.handlers = handlers;
+  }
+
+  private publishSyncResult(
+    inputs: readonly MidiInputSummary[],
+    openingErrors: readonly string[],
+  ): void {
+    // Include failures in the observed state. If a broken port disappears
+    // while the usable input list stays the same, consumers still receive one
+    // healthy result with which to clear the stale error. Identical healthy
+    // refreshes and the statechange queued by open() remain deduplicated.
+    const signature = JSON.stringify([inputs, [...openingErrors].sort()]);
+    if (signature === this.publishedSyncSignature) return;
+    this.publishedSyncSignature = signature;
+    this.handlers.inputsChanged(inputs);
   }
 
   private baseNoteKey(inputId: string, channel: number, note: number): string {
@@ -388,19 +539,55 @@ export class WebMidiSession {
     }
   }
 
-  private async detachInput(inputId: string): Promise<void> {
+  /**
+   * Revoke every app-owned aspect of an input synchronously. Native close()
+   * can take seconds (or never settle), but a disconnected controller must not
+   * keep notes, wheels, or a live message callback during that host wait.
+   */
+  private revokeInput(inputId: string): MIDIInput | null {
     const input = this.inputs.get(inputId);
-    if (!input) return;
+    if (!input) return null;
     input.onmidimessage = null;
     this.inputs.delete(inputId);
-    if (liveInputOwners.get(input)?.deref() === this) liveInputOwners.delete(input);
+    releaseLiveInputOwner(input, this);
     this.releaseMatching((held) => held.inputId === inputId);
     this.removeInputControllers(inputId);
-    await closeMidiInput(input);
+    return input;
+  }
+
+  private closeRevokedInput(input: MIDIInput): Promise<void> {
+    const closing = closeMidiInput(input);
+    if (this.closingInputPromises.has(closing)) return closing;
+    this.closingInputPromises.add(closing);
+    void closing.then(
+      () => this.closingInputPromises.delete(closing),
+      () => this.closingInputPromises.delete(closing),
+    );
+    return closing;
+  }
+
+  private async detachInput(inputId: string): Promise<void> {
+    const input = this.revokeInput(inputId);
+    if (!input) return;
+    await this.closeRevokedInput(input);
   }
 
   private handleStateChange = (): void => {
     const access = this.access;
+    // Do not serialize emergency ownership release behind an unrelated
+    // driver's pending open(). syncInputsOnce() can remain blocked for its
+    // bounded open timeout, while note-off and controller reset must happen as
+    // soon as the browser reports this input gone or no longer open.
+    for (const [inputId, input] of [...this.inputs]) {
+      const current = access?.inputs.get(inputId);
+      if (
+        current === input
+        && input.state === "connected"
+        && input.connection === "open"
+      ) continue;
+      const revoked = this.revokeInput(inputId);
+      if (revoked) void this.closeRevokedInput(revoked);
+    }
     for (const [inputId, opening] of this.openingInputs) {
       const current = access?.inputs.get(inputId);
       if (current !== opening.input || opening.input.state !== "connected") {
@@ -425,9 +612,11 @@ export class WebMidiSession {
 
   private async closeIfUnowned(input: MIDIInput, rawOperation: RawMidiInputOperation): Promise<void> {
     if (this.inputs.get(input.id) === input) return;
-    const liveOwner = liveInputOwners.get(input)?.deref();
-    if (liveOwner && liveOwner !== this) return;
-    if (!liveOwner) liveInputOwners.delete(input);
+    // Do not clear or close the exact wrapper another session owns. A distinct
+    // wrapper with the same logical ID still owns its own explicit open and
+    // must be closed to release that reference without touching the live
+    // wrapper's message handler.
+    if (liveInputOwner(input.id)?.input === input) return;
     const currentOpening = this.openingInputs.get(input.id);
     if (
       currentOpening
@@ -441,6 +630,11 @@ export class WebMidiSession {
     const access = this.access;
     if (!access || this.disposed) return [];
     const syncGeneration = this.generation;
+    const previouslyStartedCloses = [...this.closingInputPromises];
+    if (previouslyStartedCloses.length > 0) {
+      await Promise.allSettled(previouslyStartedCloses);
+    }
+    if (this.disposed || this.generation !== syncGeneration || this.access !== access) return [];
     const available = [...access.inputs.values()].filter((input) => input.state === "connected");
     const availableById = new Map(available.map((input) => [input.id, input]));
 
@@ -455,15 +649,15 @@ export class WebMidiSession {
     if (this.disposed || this.generation !== syncGeneration || this.access !== access) return [];
 
     const opening: Promise<void>[] = [];
+    const openingErrors: string[] = [];
     for (const input of available) {
-      const liveOwner = liveInputOwners.get(input)?.deref();
-      if (!liveOwner) liveInputOwners.delete(input);
+      const owner = liveInputOwner(input.id);
       if (
         this.inputs.has(input.id)
         || this.openingInputs.has(input.id)
-        || (liveOwner !== undefined && liveOwner !== this)
-        || rawOpeningInputs.has(input)
-        || rawClosingInputs.has(input)
+        || (owner !== null && owner.session !== this)
+        || rawInputOperation(rawOpeningInputs, rawOpeningInputIds, input)
+        || rawInputOperation(rawClosingInputs, rawClosingInputIds, input)
       ) continue;
       let rejectCancellation: ((error: Error) => void) | null = null;
       const rawOperation: RawMidiInputOperation = {
@@ -501,25 +695,32 @@ export class WebMidiSession {
         }, MIDI_INPUT_OPEN_TIMEOUT_MS);
       });
       this.openingInputs.set(input.id, attempt);
+      registerRawInputOperation(rawOpeningInputs, rawOpeningInputIds, input, rawOperation);
       let rawOpen: Promise<MIDIPort>;
       try {
         rawOpen = Promise.resolve(input.open());
       } catch (error) {
         rawOpen = Promise.reject(error);
       }
-      rawOpeningInputs.set(input, rawOperation);
       // Promise reactions cannot be detached from a host promise. Keep only a
       // weak session reference so an open() that never settles cannot retain
       // the whole synth, but still close an unowned port that settles late.
       const session = new WeakRef(this);
       const inputReference = new WeakRef(input);
+      const inputId = input.id;
+      let rawSettled = false;
       void rawOpen.then(
         () => {
+          rawSettled = true;
           const port = inputReference.deref();
-          if (port && rawOpeningInputs.get(port)?.id === rawOperation.id) {
-            rawOpeningInputs.delete(port);
-          }
           if (!rawOperation.invalidated || !port) return;
+          releaseRawInputOperation(
+            rawOpeningInputs,
+            rawOpeningInputIds,
+            port,
+            inputId,
+            rawOperation.id,
+          );
           const owner = session.deref();
           if (owner) {
             void owner.closeIfUnowned(port, rawOperation);
@@ -528,10 +729,14 @@ export class WebMidiSession {
           void closeMidiInput(port);
         },
         () => {
-          const port = inputReference.deref();
-          if (port && rawOpeningInputs.get(port)?.id === rawOperation.id) {
-            rawOpeningInputs.delete(port);
-          }
+          rawSettled = true;
+          releaseRawInputOperation(
+            rawOpeningInputs,
+            rawOpeningInputIds,
+            inputReference.deref(),
+            inputId,
+            rawOperation.id,
+          );
         },
       );
       opening.push(Promise.race([rawOpen, cancelled, timedOut])
@@ -555,11 +760,31 @@ export class WebMidiSession {
             await this.closeIfUnowned(input, rawOperation);
             throw new Error(`${input.name?.trim() || "MIDI input"} did not enter the open state.`);
           }
-          const owner = liveInputOwners.get(input)?.deref();
-          if (owner && owner !== this) return;
-          input.onmidimessage = (event) => this.handleMessage(input, event);
+          const owner = liveInputOwner(input.id);
+          if (owner && (owner.session !== this || owner.input !== input)) {
+            await closeMidiInput(input);
+            return;
+          }
           this.inputs.set(input.id, input);
-          liveInputOwners.set(input, new WeakRef(this));
+          registerLiveInputOwner(input, this);
+          const sessionReference = new WeakRef(this);
+          const inputReference = new WeakRef(input);
+          const messageHandler = (event: MIDIMessageEvent): void => {
+            const session = sessionReference.deref();
+            const port = inputReference.deref();
+            if (!session || !port) return;
+            const currentOwner = liveInputOwner(port.id);
+            if (
+              session.disposed
+              || session.generation !== syncGeneration
+              || session.inputs.get(port.id) !== port
+              || port.onmidimessage !== messageHandler
+              || currentOwner?.session !== session
+              || currentOwner.input !== port
+            ) return;
+            session.handleMessage(port, event);
+          };
+          input.onmidimessage = messageHandler;
         })
         .catch((error: unknown) => {
           if (
@@ -570,10 +795,11 @@ export class WebMidiSession {
           ) return;
           input.onmidimessage = null;
           this.inputs.delete(input.id);
+          releaseLiveInputOwner(input, this);
           if (error instanceof Error && error.name === "AbortError") return;
-          if (attempt.timedOut) void closeMidiInput(input);
+          if (attempt.timedOut || input.connection !== "closed") void closeMidiInput(input);
           const detail = error instanceof Error ? error.message : "The MIDI port could not be opened.";
-          this.handlers.error(detail);
+          openingErrors.push(detail);
         })
         .finally(() => {
           if (attempt.timeout !== null) clearTimeout(attempt.timeout);
@@ -581,6 +807,15 @@ export class WebMidiSession {
           attempt.cancel = null;
           rejectCancellation = null;
           if (this.openingInputs.get(input.id) === attempt) this.openingInputs.delete(input.id);
+          if (rawSettled) {
+            releaseRawInputOperation(
+              rawOpeningInputs,
+              rawOpeningInputIds,
+              inputReference.deref(),
+              inputId,
+              rawOperation.id,
+            );
+          }
         }));
     }
 
@@ -590,7 +825,10 @@ export class WebMidiSession {
     const summaries = available
       .filter((input) => this.inputs.get(input.id) === input && input.connection === "open")
       .map(inputSummary);
-    this.handlers.inputsChanged(summaries);
+    // Publish topology before errors so a partial success cannot clear the
+    // failure message in consumers that reset stale errors on input changes.
+    this.publishSyncResult(summaries, openingErrors);
+    for (const detail of openingErrors) this.handlers.error(detail);
     return summaries;
   }
 
@@ -623,6 +861,9 @@ export class WebMidiSession {
       return Promise.reject(new Error(availability.reason ?? "Web MIDI is unavailable."));
     }
     if (this.disposed) return Promise.reject(new Error("The MIDI session is no longer available."));
+    if (this.teardownPromise) {
+      return Promise.reject(midiCancellationError("MIDI inputs are still disconnecting."));
+    }
     if (this.connectPromise) return this.connectPromise;
     if (this.access) return this.refresh();
     if (this.pendingAccessRequest || pendingRawMidiAccessRequestId !== null) {
@@ -651,8 +892,8 @@ export class WebMidiSession {
     this.pendingAccessRequest = pendingRequest;
     pendingRawMidiAccessRequestId = pendingRequest.id;
     // Do not attach the session itself to a permission promise that the host
-    // may leave unresolved. A late grant sees only a weak owner reference and
-    // closes ports unless a newer connection already owns them.
+    // may leave unresolved. A late grant sees only a weak owner reference;
+    // without message handlers it has not implicitly opened any input ports.
     const session = new WeakRef(this);
     void accessRequest.then(
       () => {
@@ -701,6 +942,9 @@ export class WebMidiSession {
 
   refresh(): Promise<readonly MidiInputSummary[]> {
     if (this.disposed) return Promise.reject(new Error("The MIDI session is no longer available."));
+    if (this.teardownPromise) {
+      return Promise.reject(midiCancellationError("MIDI inputs are still disconnecting."));
+    }
     if (this.refreshPromise) return this.refreshPromise;
     let cancelRefresh: (() => void) | null = null;
     const cancelled = new Promise<never>((_resolve, reject) => {
@@ -726,8 +970,9 @@ export class WebMidiSession {
     this.modulations.clear();
   }
 
-  async disconnect(silent = false): Promise<void> {
+  private async performTeardown(silent: boolean, disposing: boolean): Promise<void> {
     this.generation += 1;
+    const activeSync = this.syncPromise;
     const cancelConnect = this.cancelConnect;
     this.cancelConnect = null;
     this.connectPromise = null;
@@ -750,14 +995,14 @@ export class WebMidiSession {
       opening.cancel?.();
     }
     const ownedInputs = inputs.filter((input) => {
-      const owner = liveInputOwners.get(input)?.deref();
-      if (owner && owner !== this) return false;
-      if (owner === this) liveInputOwners.delete(input);
+      const owner = liveInputOwner(input.id);
+      if (owner?.input === input && owner.session !== this) return false;
+      if (owner?.input === input) releaseLiveInputOwner(input, this);
       return true;
     });
     for (const input of ownedInputs) {
       input.onmidimessage = null;
-      if (!silent) this.releaseMatching((held) => held.inputId === input.id);
+      if (!disposing && !silent) this.releaseMatching((held) => held.inputId === input.id);
     }
     this.inputs.clear();
     this.openingInputs.clear();
@@ -765,59 +1010,64 @@ export class WebMidiSession {
     this.heldNotes.clear();
     this.bends.clear();
     this.modulations.clear();
-    if (!silent) {
+    this.publishedSyncSignature = null;
+    if (!disposing && !silent) {
       this.handlers.pitchBend(0);
       this.handlers.modulation(0);
       this.handlers.inputsChanged([]);
     }
-    await Promise.allSettled(ownedInputs.map(closeMidiInput));
+    const settling = new Set<Promise<unknown>>(this.closingInputPromises);
+    for (const input of ownedInputs) settling.add(this.closeRevokedInput(input));
+    // A topology sync may already have removed its input from this.inputs
+    // before awaiting close(). Waiting for that sync keeps disconnect/dispose
+    // from reporting completion while its host resource is still in flight.
+    if (activeSync) settling.add(activeSync);
+    await Promise.allSettled(settling);
   }
 
-  async dispose(): Promise<void> {
-    this.disposed = true;
-    this.generation += 1;
-    const cancelConnect = this.cancelConnect;
-    this.cancelConnect = null;
-    this.connectPromise = null;
-    cancelConnect?.();
-    const cancelRefresh = this.cancelRefresh;
-    this.cancelRefresh = null;
-    this.refreshPromise = null;
-    cancelRefresh?.();
-    this.syncRequested = false;
-    this.syncPromise = null;
-    this.access?.removeEventListener("statechange", this.handleStateChange);
-    this.access = null;
-    const inputs = [...new Set([
-      ...this.inputs.values(),
-      ...[...this.openingInputs.values()].map(({ input }) => input),
-    ])];
-    for (const opening of this.openingInputs.values()) {
-      opening.invalidated = true;
-      opening.cancel?.();
-    }
-    this.handlers = {
-      noteOn: () => undefined,
-      noteOff: () => undefined,
-      pitchBend: () => undefined,
-      modulation: () => undefined,
-      allSoundOff: () => undefined,
-      inputsChanged: () => undefined,
-      error: () => undefined,
-    };
-    const ownedInputs = inputs.filter((input) => {
-      const owner = liveInputOwners.get(input)?.deref();
-      if (owner && owner !== this) return false;
-      if (owner === this) liveInputOwners.delete(input);
-      return true;
+  private beginTeardown(silent: boolean, disposing: boolean): Promise<void> {
+    let resolveTeardown: (() => void) | null = null;
+    let rejectTeardown: ((error: unknown) => void) | null = null;
+    const teardown = new Promise<void>((resolve, reject) => {
+      resolveTeardown = resolve;
+      rejectTeardown = reject;
     });
-    for (const input of ownedInputs) input.onmidimessage = null;
-    this.inputs.clear();
-    this.openingInputs.clear();
-    this.noteStacks.clear();
-    this.heldNotes.clear();
-    this.bends.clear();
-    this.modulations.clear();
-    await Promise.allSettled(ownedInputs.map(closeMidiInput));
+    this.teardownPromise = teardown;
+    if (disposing) this.disposePromise = teardown;
+    void this.performTeardown(silent, disposing).then(
+      () => {
+        if (this.teardownPromise === teardown) this.teardownPromise = null;
+        resolveTeardown?.();
+        resolveTeardown = null;
+        rejectTeardown = null;
+      },
+      (error: unknown) => {
+        if (this.teardownPromise === teardown) this.teardownPromise = null;
+        rejectTeardown?.(error);
+        resolveTeardown = null;
+        rejectTeardown = null;
+      },
+    );
+    return teardown;
+  }
+
+  disconnect(silent = false): Promise<void> {
+    if (this.disposed) return this.disposePromise ?? this.teardownPromise ?? Promise.resolve();
+    if (this.teardownPromise) return this.teardownPromise;
+    return this.beginTeardown(silent, false);
+  }
+
+  dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    this.disposed = true;
+    // Drop callbacks immediately even if an earlier disconnect is still
+    // waiting for a host close promise.
+    this.handlers = NOOP_WEB_MIDI_HANDLERS;
+    if (this.teardownPromise) {
+      this.generation += 1;
+      this.disposePromise = this.teardownPromise;
+      return this.disposePromise;
+    }
+    return this.beginTeardown(true, true);
   }
 }
