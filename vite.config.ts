@@ -23,6 +23,10 @@ export const PWA_WORKBOX_GLOB_PATTERNS = [
   "**/*.{js,css,html,woff2}",
 ] as const;
 
+export const PWA_WORKBOX_IMPORT_SCRIPTS = [
+  "sw-update-bridge-1.0.18.js",
+] as const;
+
 export const PWA_MANIFEST_ICONS = [
   { src: "icon-72.png", sizes: "72x72", type: "image/png" },
   { src: "icon-96.png", sizes: "96x96", type: "image/png" },
@@ -42,7 +46,7 @@ const EXTENSION_BUILD_DIRECTORY = "node_modules/.tmp/andoracle-extension";
 const EXTENSION_REGISTER_MODULE_ID = "\0andoracle-extension-register-sw";
 
 const pwaPlugin = () => VitePWA({
-      registerType: "prompt",
+      registerType: "autoUpdate",
       // Root install artwork is supplied here or by manifest.icons. Keeping
       // root images out of Workbox's glob prevents duplicate precache URLs.
       includeAssets: [...PWA_INCLUDE_ASSETS],
@@ -64,13 +68,14 @@ const pwaPlugin = () => VitePWA({
       },
       workbox: {
         navigateFallback: "index.html",
+        importScripts: [...PWA_WORKBOX_IMPORT_SCRIPTS],
         // Root PWA artwork is contributed through includeAssets and
         // manifest.icons; code and fonts are discovered from the build.
         globPatterns: [...PWA_WORKBOX_GLOB_PATTERNS],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         clientsClaim: true,
-        skipWaiting: false
+        skipWaiting: true
       }
     });
 
