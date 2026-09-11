@@ -4,4 +4,4 @@
  * Bump this source constant for every published release. Build metadata,
  * install manifests, and browser-store packages are verified against it.
  */
-export const ANDORACLE_VERSION = "1.0.19" as const;
+export const ANDORACLE_VERSION = "1.0.20" as const;

@@ -130,6 +130,10 @@ describe("browser-extension store packaging", () => {
     expect(pwaHook).toContain("if (extensionBuild) return;");
     expect(pwaHook).toContain("return extensionBuild || capable;");
     expect(app).toContain("urlWithPatch(import.meta.env.VITE_PUBLIC_APP_URL, paramsRef.current)");
+    expect(readFileSync(resolve("scripts/package-extensions.mjs"), "utf8"))
+      .not.toContain("firefox-source");
+    expect(readFileSync(resolve("scripts/verify-extension-packages.mjs"), "utf8"))
+      .not.toContain("Firefox review source");
   });
 
   it("requires the packaged application document to carry the exact release version", () => {

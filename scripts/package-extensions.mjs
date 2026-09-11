@@ -15,7 +15,6 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     for (const entry of result.packages) {
       console.log(`Created ${entry.target} store package: ${entry.archivePath}`);
     }
-    console.log(`Created Firefox review source package: ${result.sourceArchivePath}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

@@ -51,7 +51,7 @@ The full signal chain runs at 2× rate, oscillator discontinuities run at an add
 npm run check
 ```
 
-This runs deterministic DSP/schema tests and the complete production build. The hosted PWA is written to `dist/`. Every successful `npm run build` also creates validated, deterministic Manifest V3 archives in `store-packages/` for the Chrome Web Store and Firefox Add-ons, alongside unpacked copies for local browser testing. Because Firefox requires readable source for bundled code review, the build also creates a matching Firefox reviewer-source ZIP with the lockfile and exact build instructions. Run `npm run build:extensions` when only the browser-store artifacts are needed.
+This runs deterministic DSP/schema tests and the complete production build. The hosted PWA is written to `dist/`. Every successful `npm run build` also creates validated, deterministic Manifest V3 archives in `store-packages/` for the Chrome Web Store and Firefox Add-ons, alongside unpacked copies for local browser testing. Run `npm run build:extensions` when only the two browser-store artifacts are needed.
 
 The toolbar action opens Andoracle in a full tab so an active audio/MIDI session is not tied to a short-lived popup. Extension packages contain only local executable assets, request no extension or host permissions, and preserve Share Patch by copying the equivalent public HTTPS patch URL rather than an installation-specific extension URL. Chrome and Firefox receive separate background declarations, and the Firefox manifest includes its stable signing ID and explicit no-data-collection declaration. Store signing and submission happen after these unsigned upload archives are produced.
 

@@ -1,5 +1,5 @@
 /**
- * Versioned migration bridge for Andoracle 1.0.19's automatic update path.
+ * Versioned migration bridge for Andoracle 1.0.20's automatic update path.
  * transition. Remove this import and file in a later release once pre-1.0.18
  * prompt workers have been replaced.
  */

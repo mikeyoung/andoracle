@@ -151,41 +151,6 @@ export const directoryEntries = (directory) => listFiles(directory)
   }))
   .sort(compareEntryNames);
 
-export const sourcePackageEntries = (version) => {
-  const entries = [];
-  const packageMetadata = JSON.parse(readFileSync(resolve(PROJECT_ROOT, "package.json"), "utf8"));
-  const nodeRange = packageMetadata.engines?.node ?? "see package.json";
-  const npmRange = packageMetadata.engines?.npm ?? "see package.json";
-  const rootFiles = [
-    ".gitignore",
-    "index.html",
-    "LICENSE",
-    "package-lock.json",
-    "package.json",
-    "README.md",
-    "tsconfig.app.json",
-    "tsconfig.json",
-    "tsconfig.node.json",
-    "vite.config.ts",
-  ];
-  for (const name of rootFiles) entries.push({ name, data: readFileSync(resolve(PROJECT_ROOT, name)) });
-  // Runtime sources and build tooling are sufficient for reviewer rebuilds.
-  // Deliberately omit internal project notes and root-only verification tests.
-  for (const directory of ["public", "scripts", "src"]) {
-    for (const path of listFiles(resolve(PROJECT_ROOT, directory))) {
-      entries.push({
-        name: relative(PROJECT_ROOT, path).replaceAll("\\", "/"),
-        data: readFileSync(path),
-      });
-    }
-  }
-  entries.push({
-    name: "FIREFOX-SOURCE-README.txt",
-    data: Buffer.from(`Andoracle ${version} — Firefox review source\n\nBuild environment\n- Any operating system supported by Node.js\n- Node.js ${nodeRange} (Mozilla's Node 24 reviewer environment is supported)\n- npm ${npmRange}\n- No global tools or web-based build services are required\n\nReproducible build commands\n1. npm ci\n2. npm run build:extensions\n\nThe Firefox submission archive will be written to:\nstore-packages/andoracle-firefox-${version}.zip\n\nThe build uses only the open-source packages locked in package-lock.json. Vite and TypeScript bundle/transpile the application; scripts/extension-package-utils.mjs creates the deterministic store ZIP. No code is obfuscated and no remotely hosted executable code is used.\n`, "utf8"),
-  });
-  return entries.sort(compareEntryNames);
-};
-
 const assertArchiveName = (name) => {
   if (
     typeof name !== "string"
@@ -368,8 +333,5 @@ export const packageExtensions = (packageMetadata) => {
     packages.push({ target, targetDirectory, archivePath });
   }
 
-  const sourceArchivePath = resolve(outputRoot, `andoracle-firefox-source-${version}.zip`);
-  writeFileSync(sourceArchivePath, createZipBuffer(sourcePackageEntries(version)));
-
-  return { version, outputRoot, packages, sourceArchivePath };
+  return { version, outputRoot, packages };
 };

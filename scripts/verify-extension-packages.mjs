@@ -11,7 +11,6 @@ import {
   directoryEntries,
   extensionStoreVersion,
   readZipEntries,
-  sourcePackageEntries,
 } from "./extension-package-utils.mjs";
 
 const FORBIDDEN_RUNTIME_NAMES = /^(?:sw\.js|manifest\.webmanifest|web\.config|workbox-[^/]+\.js)$/i;
@@ -154,31 +153,8 @@ export const verifyExtensionPackage = (target, version, packageRoot = STORE_PACK
 export const verifyExtensionPackages = (packageRoot = STORE_PACKAGE_ROOT) => {
   const packageMetadata = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
   const version = extensionStoreVersion(packageMetadata.version);
-  const sourceArchivePath = resolve(packageRoot, `andoracle-firefox-source-${version}.zip`);
-  assert(existsSync(sourceArchivePath), "Missing Firefox review source ZIP.");
-  const sourceEntries = entryMap(readZipEntries(readFileSync(sourceArchivePath)));
-  const expectedSourceEntries = entryMap(sourcePackageEntries(version));
-  assert(sourceEntries.size === expectedSourceEntries.size, "Firefox source ZIP does not match the current source tree.");
-  for (const [name, data] of expectedSourceEntries) {
-    assert(sourceEntries.get(name)?.equals(data), `Firefox source ZIP is stale or differs from ${name}.`);
-  }
-  for (const required of [
-    "FIREFOX-SOURCE-README.txt",
-    "package.json",
-    "package-lock.json",
-    "vite.config.ts",
-    "scripts/package-extensions.mjs",
-    "src/main.tsx",
-  ]) assert(sourceEntries.has(required), `Firefox source ZIP is missing ${required}.`);
-  const sourceInstructions = sourceEntries.get("FIREFOX-SOURCE-README.txt")?.toString("utf8") ?? "";
-  assert(sourceInstructions.includes("npm ci") && sourceInstructions.includes("npm run build:extensions"), "Firefox source ZIP is missing reproducible build instructions.");
-  for (const name of sourceEntries.keys()) {
-    assert(!/(^|\/)(?:node_modules|dist|store-packages|\.git)(?:\/|$)/.test(name), `Firefox source ZIP contains generated or private files: ${name}`);
-  }
-
   return {
     version,
-    sourceArchivePath,
     packages: [
       verifyExtensionPackage("chrome", version, packageRoot),
       verifyExtensionPackage("firefox", version, packageRoot),
@@ -193,7 +169,6 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
     for (const entry of result.packages) {
       console.log(`Verified ${entry.target} store ZIP (${entry.fileCount} files, ${entry.archiveSize} bytes): ${relative(resolve(), entry.archivePath)}`);
     }
-    console.log(`Verified Firefox review source ZIP: ${relative(resolve(), result.sourceArchivePath)}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;
