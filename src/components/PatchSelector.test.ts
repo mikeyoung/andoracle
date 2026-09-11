@@ -26,6 +26,7 @@ describe("persistent patch selector controls", () => {
       onSelectFactoryPatch: vi.fn(),
     }));
 
+    expect(markup).toContain('<div class="library-select-shell"><select');
     expect(markup).toContain('<optgroup label="Custom Patches">');
     expect(markup).toContain(">Wide Pad</option>");
     expect(markup).toContain(">Acid Lead</option>");
@@ -43,6 +44,7 @@ describe("persistent patch selector controls", () => {
 
     expect(markup).not.toContain('<optgroup label="Custom Patches">');
     expect(markup).toContain('<optgroup label="Factory patches">');
+    expect(markup).toContain('<option value="Custom patch" disabled="">Custom patch</option>');
   });
 
   it("keeps the active user patch selected without hiding its siblings", () => {

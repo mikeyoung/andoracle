@@ -7,9 +7,14 @@ import {
   type MouseEvent,
   type PointerEvent,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { PanelScrews } from "./PanelScrews";
 import { midiNoteName } from "../synth/params";
+import { RasterLabel } from "./RasterLabel";
+import { DeferredSelectFocusRelease, type SelectInteractionModality } from "./select-focus";
+
+export type KeyboardPosition = "top" | "bottom";
 
 interface KeyboardProps {
   activeNotes: ReadonlySet<number>;
@@ -18,6 +23,9 @@ interface KeyboardProps {
   resetEpoch: number;
   onNoteOn: (source: string, note: number) => void;
   onNoteOff: (source: string) => void;
+  position: KeyboardPosition;
+  onPositionChange: (position: KeyboardPosition) => void;
+  headerControl?: ReactNode;
 }
 
 const START_NOTE = 36;
@@ -160,6 +168,9 @@ function KeyboardComponent({
   resetEpoch,
   onNoteOn,
   onNoteOff,
+  position,
+  onPositionChange,
+  headerControl,
 }: KeyboardProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const pointerNotes = useRef(new Map<number, number>());
@@ -167,7 +178,12 @@ function KeyboardComponent({
   const clickSuppressions = useRef(new Set<string>());
   const suppressionTimers = useRef(new Map<string, number>());
   const keyElements = useRef(new Map<number, HTMLButtonElement>());
+  const positionInteractionModality = useRef<SelectInteractionModality>("keyboard");
+  const positionFocusRelease = useRef<DeferredSelectFocusRelease | null>(null);
+  positionFocusRelease.current ??= new DeferredSelectFocusRelease();
   const [focusedNote, setFocusedNote] = useState(START_NOTE);
+
+  useEffect(() => () => positionFocusRelease.current?.dispose(), []);
 
   const releaseAll = (): void => clearKeyboardOwnership(
     pointerNotes.current,
@@ -338,9 +354,53 @@ function KeyboardComponent({
     <section className="keyboard-module" aria-label="37-key keyboard">
       <PanelScrews />
       <div className="keyboard-header">
-        <div>
-          <span className="module-eyebrow">C2–C5 · low/high priority</span>
-          <h2>37-key duophonic keyboard</h2>
+        <div className="keyboard-title-group">
+          <span className="module-eyebrow">
+            <RasterLabel text="C2–C5 · low/high priority" variant="eyebrow" tone="muted" />
+          </span>
+          <h2><RasterLabel text="37-key duophonic keyboard" variant="title" /></h2>
+        </div>
+        <div className="keyboard-header-actions">
+          <div className="library-picker keyboard-position-picker">
+            <label htmlFor="keyboard-position"><RasterLabel text="Position" variant="control" /></label>
+            <div className="library-select-shell keyboard-position-select-shell">
+              <select
+                id="keyboard-position"
+                aria-label="Keyboard position"
+                value={position}
+                onPointerDown={() => {
+                  positionFocusRelease.current?.dispose();
+                  positionInteractionModality.current = "pointer";
+                }}
+                onKeyDown={(event) => {
+                  if (positionFocusRelease.current?.hasPointerFocusReleasePending) return;
+                  if (positionInteractionModality.current === "pointer" && event.key === "Escape") {
+                    positionFocusRelease.current?.finish(event.currentTarget, "pointer");
+                    return;
+                  }
+                  positionFocusRelease.current?.dispose();
+                  positionInteractionModality.current = "keyboard";
+                }}
+                onClick={(event) => {
+                  if (positionInteractionModality.current === "pointer") {
+                    positionFocusRelease.current?.watchPointerPicker(event.currentTarget);
+                  }
+                }}
+                onChange={(event) => {
+                  onPositionChange(event.currentTarget.value === "top" ? "top" : "bottom");
+                  positionFocusRelease.current?.finish(
+                    event.currentTarget,
+                    positionInteractionModality.current,
+                  );
+                  positionInteractionModality.current = "keyboard";
+                }}
+              >
+                <option value="top">Top</option>
+                <option value="bottom">Bottom</option>
+              </select>
+            </div>
+          </div>
+          {headerControl}
         </div>
         <p><kbd>A S D F G H J K L ;</kbd> white · <kbd>W E T Y U O P</kbd> black. Click or tap a piano key, then Space or Enter plays it · drag for glissando.</p>
       </div>
@@ -396,10 +456,6 @@ function KeyboardComponent({
             })}
           </div>
         ))}
-      </div>
-      <div className="allocation-legend" aria-hidden="true">
-        <span><i className="dot dot--low" /> VCO 1 / lowest</span>
-        <span><i className="dot dot--high" /> VCO 2 / highest</span>
       </div>
     </section>
   );

@@ -1,3 +1,5 @@
+import { RasterLabel } from "./RasterLabel";
+
 interface ExternalInputControlProps {
   enabled: boolean;
   busy: boolean;
@@ -9,16 +11,20 @@ interface ExternalInputControlProps {
 export function ExternalInputControl({ enabled, busy, disabled = false, error, onToggle }: ExternalInputControlProps) {
   return (
     <div className="external-input-control">
-      <span className="external-input-title">External audio</span>
+      <span className="external-input-title"><RasterLabel text="External audio" variant="control" /></span>
       <button
         type="button"
         className={`external-input-button${enabled ? " is-enabled" : ""}`}
+        data-switch-variant="power"
         aria-pressed={enabled}
         disabled={disabled}
         onClick={onToggle}
       >
         <i aria-hidden="true" />
-        <b>{busy ? "Cancel connection" : enabled ? "Live input on" : "Use live input"}</b>
+        <b><RasterLabel
+          text={busy ? "Cancel connection" : enabled ? "Live input on" : "Use live input"}
+          variant="micro"
+        /></b>
       </button>
       <small className={error ? "control-error" : undefined} role={error ? "alert" : undefined}>
         {error ?? "Audio interface or microphone → mixer → synth signal path"}

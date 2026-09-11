@@ -548,6 +548,36 @@ describe("Web MIDI decoding", () => {
     await session.disconnect();
   });
 
+  it("publishes an unplug immediately without waiting for a stuck native close", async () => {
+    const input = new FakeMidiInput("slow-close-hotplug", "Slow Close Hotplug");
+    const access = new FakeMidiAccess();
+    access.inputs.set(input.id, input as unknown as MIDIInput);
+    vi.stubGlobal("window", { isSecureContext: true });
+    vi.stubGlobal("navigator", {
+      requestMIDIAccess: vi.fn(async () => access as unknown as MIDIAccess),
+    });
+    const handlers = makeHandlers();
+    const session = new WebMidiSession(handlers);
+    await session.connect();
+
+    let resolveClose: ((input: MIDIInput) => void) | undefined;
+    input.close.mockImplementationOnce(() => new Promise<MIDIInput>((resolve) => {
+      resolveClose = resolve;
+    }));
+    vi.mocked(handlers.inputsChanged).mockClear();
+    input.state = "disconnected";
+    access.inputs.delete(input.id);
+    access.dispatchEvent(new Event("statechange"));
+
+    expect(input.close).toHaveBeenCalledTimes(1);
+    expect(handlers.inputsChanged).toHaveBeenCalledTimes(1);
+    expect(handlers.inputsChanged).toHaveBeenLastCalledWith([]);
+
+    input.connection = "closed";
+    resolveClose?.(input as unknown as MIDIInput);
+    await session.disconnect(true);
+  });
+
   it("releases an unplugged input immediately while another input open is stuck", async () => {
     const active = new FakeMidiInput("active-hotplug", "Active Hotplug Keys");
     const access = new FakeMidiAccess();

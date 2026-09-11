@@ -1,9 +1,11 @@
 import {
   PARAM_KEYS,
+  PARAM_SPECS,
   normalizePatch,
   type ParamKey,
   type SynthParams,
 } from "./params";
+import { decimalPlacesForStep } from "../step-precision";
 
 /** Fragment parameter used for a shareable patch. */
 export const PATCH_URL_PARAM = "patch";
@@ -15,11 +17,8 @@ export const PATCH_URL_PARAM = "patch";
  */
 export const PATCH_CODEC_VERSION = "v2";
 
-/**
- * V1's wire order is frozen. Do not add keys here when adding a parameter;
- * introduce a new codec version instead and keep decoding V1 links.
- */
-export const PATCH_V1_PARAM_KEYS = [
+/** The complete wire order for the only supported patch codec. */
+export const PATCH_PARAM_KEYS = [
   "masterVolume",
   "masterTune",
   "portamento",
@@ -100,9 +99,10 @@ export const PATCH_V1_PARAM_KEYS = [
   "delayTone",
   "delaySpread",
   "delayPingPong",
+  "delayTrails",
 ] as const satisfies readonly ParamKey[];
 
-interface V1ValueSpec {
+interface PatchValueSpec {
   readonly min: number;
   readonly max: number;
   readonly step: number;
@@ -110,11 +110,11 @@ interface V1ValueSpec {
   readonly options?: readonly number[];
 }
 
-const v1Range = (min: number, max: number, step: number, defaultValue: number): V1ValueSpec => (
+const v1Range = (min: number, max: number, step: number, defaultValue: number): PatchValueSpec => (
   Object.freeze({ min, max, step, defaultValue })
 );
 
-const v1Options = (defaultValue: number, ...values: number[]): V1ValueSpec => Object.freeze({
+const v1Options = (defaultValue: number, ...values: number[]): PatchValueSpec => Object.freeze({
   min: Math.min(...values),
   max: Math.max(...values),
   step: 1,
@@ -122,11 +122,8 @@ const v1Options = (defaultValue: number, ...values: number[]): V1ValueSpec => Ob
   options: Object.freeze(values),
 });
 
-/**
- * These are V1 wire semantics, not aliases of the live control schema. They
- * must remain unchanged even after the app introduces V2 controls or ranges.
- */
-export const PATCH_V1_VALUE_SPECS = Object.freeze({
+/** Frozen wire semantics for the current codec, independent of live controls. */
+export const PATCH_VALUE_SPECS = Object.freeze({
   masterVolume: v1Range(0, 1, 0.001, 0.72),
   masterTune: v1Range(-100, 100, 1, 0),
   portamento: v1Range(0, 1.5, 0.001, 0),
@@ -207,18 +204,8 @@ export const PATCH_V1_VALUE_SPECS = Object.freeze({
   delayTone: v1Range(500, 18000, 1, 6200),
   delaySpread: v1Range(0, 1, 0.001, 0.35),
   delayPingPong: v1Options(1, 0, 1),
-}) satisfies Readonly<Record<(typeof PATCH_V1_PARAM_KEYS)[number], V1ValueSpec>>;
-
-/** V2 extends the frozen V1 payload with the delay-trails switch. */
-export const PATCH_V2_PARAM_KEYS = [
-  ...PATCH_V1_PARAM_KEYS,
-  "delayTrails",
-] as const satisfies readonly ParamKey[];
-
-export const PATCH_V2_VALUE_SPECS = Object.freeze({
-  ...PATCH_V1_VALUE_SPECS,
   delayTrails: v1Options(0, 0, 1),
-}) satisfies Readonly<Record<(typeof PATCH_V2_PARAM_KEYS)[number], V1ValueSpec>>;
+}) satisfies Readonly<Record<(typeof PATCH_PARAM_KEYS)[number], PatchValueSpec>>;
 
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const MAX_ENCODED_PAYLOAD_LENGTH = 512;
@@ -229,28 +216,20 @@ const BYTES_PER_VALUE = 4;
 interface PatchWireSchema {
   readonly version: string;
   readonly keys: readonly ParamKey[];
-  readonly specs: Readonly<Partial<Record<ParamKey, V1ValueSpec>>>;
+  readonly specs: Readonly<Partial<Record<ParamKey, PatchValueSpec>>>;
 }
 
-const PATCH_V1_SCHEMA: PatchWireSchema = {
-  version: "v1",
-  keys: PATCH_V1_PARAM_KEYS,
-  specs: PATCH_V1_VALUE_SPECS,
-};
-
-const PATCH_V2_SCHEMA: PatchWireSchema = {
+const PATCH_SCHEMA: PatchWireSchema = {
   version: PATCH_CODEC_VERSION,
-  keys: PATCH_V2_PARAM_KEYS,
-  specs: PATCH_V2_VALUE_SPECS,
+  keys: PATCH_PARAM_KEYS,
+  specs: PATCH_VALUE_SPECS,
 };
 
 const patchSchemaForVersion = (version: string): PatchWireSchema | null => {
-  if (version === PATCH_V1_SCHEMA.version) return PATCH_V1_SCHEMA;
-  if (version === PATCH_V2_SCHEMA.version) return PATCH_V2_SCHEMA;
-  return null;
+  return version === PATCH_SCHEMA.version ? PATCH_SCHEMA : null;
 };
 
-const encodeBase64Url = (bytes: readonly number[]): string => {
+const encodeBase64Url = (bytes: ArrayLike<number>): string => {
   let encoded = "";
   for (let index = 0; index < bytes.length; index += 3) {
     const first = bytes[index];
@@ -265,37 +244,69 @@ const encodeBase64Url = (bytes: readonly number[]): string => {
   return encoded;
 };
 
-const decodeBase64Url = (encoded: string): number[] | null => {
+const base64UrlValues = (() => {
+  const values = new Uint8Array(128);
+  values.fill(255);
+  for (let index = 0; index < BASE64URL_ALPHABET.length; index += 1) {
+    values[BASE64URL_ALPHABET.charCodeAt(index)] = index;
+  }
+  return values;
+})();
+
+const base64UrlValueAt = (encoded: string, index: number): number => {
+  const code = encoded.charCodeAt(index);
+  return code < base64UrlValues.length ? base64UrlValues[code] : 255;
+};
+
+const decodeBase64Url = (encoded: string): Uint8Array | null => {
   if (
     !encoded
     || encoded.length > MAX_ENCODED_PAYLOAD_LENGTH
     || encoded.length % 4 === 1
-    || !/^[A-Za-z0-9_-]+$/.test(encoded)
   ) return null;
 
-  const bytes: number[] = [];
-  let buffer = 0;
-  let bits = 0;
-  for (const character of encoded) {
-    const value = BASE64URL_ALPHABET.indexOf(character);
-    if (value < 0) return null;
-    buffer = (buffer << 6) | value;
-    bits += 6;
-    if (bits >= 8) {
-      bits -= 8;
-      bytes.push((buffer >>> bits) & 0xff);
-      buffer &= (1 << bits) - 1;
-    }
+  // Validate before allocating, then decode directly into the exact output
+  // buffer. Shared-patch navigation is allowed to receive untrusted input.
+  for (let index = 0; index < encoded.length; index += 1) {
+    if (base64UrlValueAt(encoded, index) === 255) return null;
   }
 
-  // Reject non-zero unused bits and alternate/non-canonical encodings.
-  if (buffer !== 0 || encodeBase64Url(bytes) !== encoded) return null;
+  const remainder = encoded.length % 4;
+  const bytes = new Uint8Array(Math.floor(encoded.length * 6 / 8));
+  let outputIndex = 0;
+  let index = 0;
+  while (index + 4 <= encoded.length) {
+    const packed = base64UrlValueAt(encoded, index) * 262_144
+      + base64UrlValueAt(encoded, index + 1) * 4_096
+      + base64UrlValueAt(encoded, index + 2) * 64
+      + base64UrlValueAt(encoded, index + 3);
+    bytes[outputIndex] = Math.floor(packed / 65_536);
+    bytes[outputIndex + 1] = Math.floor(packed / 256) % 256;
+    bytes[outputIndex + 2] = packed % 256;
+    outputIndex += 3;
+    index += 4;
+  }
+
+  if (remainder === 2) {
+    const first = base64UrlValueAt(encoded, index);
+    const second = base64UrlValueAt(encoded, index + 1);
+    if (second % 16 !== 0) return null;
+    bytes[outputIndex] = first * 4 + Math.floor(second / 16);
+  } else if (remainder === 3) {
+    const first = base64UrlValueAt(encoded, index);
+    const second = base64UrlValueAt(encoded, index + 1);
+    const third = base64UrlValueAt(encoded, index + 2);
+    if (third % 4 !== 0) return null;
+    bytes[outputIndex] = first * 4 + Math.floor(second / 16);
+    bytes[outputIndex + 1] = (second % 16) * 16 + Math.floor(third / 4);
+  }
   return bytes;
 };
 
-const crc16 = (bytes: readonly number[]): number => {
+const crc16 = (bytes: ArrayLike<number>): number => {
   let crc = 0xffff;
-  for (const byte of bytes) {
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index];
     crc ^= byte << 8;
     for (let bit = 0; bit < 8; bit += 1) {
       crc = (crc & 0x8000) !== 0 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
@@ -304,13 +315,7 @@ const crc16 = (bytes: readonly number[]): number => {
   return crc;
 };
 
-const decimalsForStep = (step: number): number => {
-  const stringValue = step.toString();
-  if (stringValue.includes("e-")) return Number(stringValue.split("e-")[1]);
-  return stringValue.includes(".") ? stringValue.split(".")[1].length : 0;
-};
-
-const wireValueSpec = (schema: PatchWireSchema, key: ParamKey): V1ValueSpec => {
+const wireValueSpec = (schema: PatchWireSchema, key: ParamKey): PatchValueSpec => {
   const spec = schema.specs[key];
   if (!spec) throw new Error(`Missing ${schema.version} value specification for ${key}.`);
   return spec;
@@ -333,7 +338,7 @@ const normalizeWireValue = (schema: PatchWireSchema, key: ParamKey, value: numbe
   }
   const clamped = Math.min(spec.max, Math.max(spec.min, value));
   const stepped = spec.min + Math.round((clamped - spec.min) / spec.step) * spec.step;
-  return Number(stepped.toFixed(decimalsForStep(spec.step)));
+  return Number(stepped.toFixed(decimalPlacesForStep(spec.step)));
 };
 
 /**
@@ -342,9 +347,10 @@ const normalizeWireValue = (schema: PatchWireSchema, key: ParamKey, value: numbe
  * changing the patch being shared.
  */
 export const encodePatch = (params: SynthParams): string => {
-  const schema = PATCH_V2_SCHEMA;
-  const valueBuffer = new ArrayBuffer(schema.keys.length * BYTES_PER_VALUE);
-  const values = new DataView(valueBuffer);
+  const schema = PATCH_SCHEMA;
+  const valueByteLength = schema.keys.length * BYTES_PER_VALUE;
+  const payload = new Uint8Array(valueByteLength + 2);
+  const values = new DataView(payload.buffer, payload.byteOffset, valueByteLength);
 
   schema.keys.forEach((key, index) => {
     const value = params[key];
@@ -354,9 +360,9 @@ export const encodePatch = (params: SynthParams): string => {
     values.setFloat32(index * BYTES_PER_VALUE, normalizeWireValue(schema, key, value), true);
   });
 
-  const payload = Array.from(new Uint8Array(valueBuffer));
-  const checksum = crc16(payload);
-  payload.push(checksum >>> 8, checksum & 0xff);
+  const checksum = crc16(payload.subarray(0, valueByteLength));
+  payload[valueByteLength] = checksum >>> 8;
+  payload[valueByteLength + 1] = checksum & 0xff;
   return `${PATCH_CODEC_VERSION}.${encodeBase64Url(payload)}`;
 };
 
@@ -377,10 +383,9 @@ export const decodePatch = (token: string): SynthParams | null => {
 
     const dataEnd = bytes.length - 2;
     const expectedChecksum = (bytes[dataEnd] << 8) | bytes[dataEnd + 1];
-    if (crc16(bytes.slice(0, dataEnd)) !== expectedChecksum) return null;
+    if (crc16(bytes.subarray(0, dataEnd)) !== expectedChecksum) return null;
 
-    const valueBytes = Uint8Array.from(bytes.slice(0, dataEnd));
-    const values = new DataView(valueBytes.buffer, valueBytes.byteOffset, valueBytes.byteLength);
+    const values = new DataView(bytes.buffer, bytes.byteOffset, dataEnd);
     const decoded: Partial<Record<ParamKey, number>> = {};
     for (const [index, key] of schema.keys.entries()) {
       const storedValue = values.getFloat32(index * BYTES_PER_VALUE, true);
@@ -394,13 +399,10 @@ export const decodePatch = (token: string): SynthParams | null => {
       decoded[key] = value;
     }
 
-    // Newer app versions may have parameters that V1 never knew about.
-    // normalizePatch supplies their then-current defaults without changing any
-    // absolute V1 value stored in the link.
+    // Start from normalized defaults, then replace every current wire value.
     const result = normalizePatch({});
-    const currentKeys = new Set(PARAM_KEYS);
     for (const key of schema.keys) {
-      if (currentKeys.has(key)) result[key] = decoded[key] as number;
+      if (key in PARAM_SPECS) result[key] = decoded[key] as number;
     }
     return result;
   } catch {
@@ -462,6 +464,6 @@ export const urlWithPatch = (href: string, params: SynthParams): string => {
 
 // Keep accidental changes to the live schema visible during development. The
 // corresponding test provides the hard failure in CI/builds.
-if (import.meta.env.DEV && PATCH_V2_PARAM_KEYS.length !== PARAM_KEYS.length) {
+if (import.meta.env.DEV && PATCH_PARAM_KEYS.length !== PARAM_KEYS.length) {
   console.warn("The patch parameter schema changed; introduce a new URL codec version.");
 }

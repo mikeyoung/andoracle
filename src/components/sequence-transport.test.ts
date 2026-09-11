@@ -34,7 +34,14 @@ describe("SequenceTransport", () => {
   it("always renders labelled Record, Play, Pause, Stop, and Delete controls", () => {
     const markup = renderTransport();
     expect(markup).toContain('role="group" aria-label="Sequence transport"');
-    expect(markup).toContain('<label for="sequence-select">Sequence</label>');
+    expect(markup).toContain('<div class="library-select-shell"><select');
+    expect(markup).toContain('<label for="sequence-select">');
+    expect(markup).toContain(
+      'class="raster-label raster-label--control raster-label--tone-ink"',
+    );
+    expect(markup).toContain('<span class="raster-label__text">Sequence</span>');
+    expect(markup.match(/>Sequence<\/span>/g)).toHaveLength(1);
+    expect(markup).not.toContain("visually-hidden");
     expect(markup).toContain('id="sequence-select"');
     expect(buttonTag(markup, "Start recording")).toContain('aria-pressed="false"');
     expect(buttonTag(markup, "Play loaded sequence")).toContain('aria-pressed="false"');
@@ -102,6 +109,18 @@ describe("SequenceTransport", () => {
     expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
     expect(buttonTag(markup, "Stop sequence and return to beginning")).toContain("disabled");
     expect(buttonTag(markup, "Delete active recording")).not.toContain("disabled");
+  });
+
+  it("offers Stop but not Pause while audio startup is pending", () => {
+    const markup = renderTransport({
+      sequenceNames: ["Take one"],
+      activeName: "Take one",
+      playbackState: "starting",
+    });
+    expect(markup).toContain('role="group" aria-label="Sequence transport" aria-busy="true"');
+    expect(buttonTag(markup, "Starting sequence")).toContain("disabled");
+    expect(buttonTag(markup, "Pause sequence")).toContain("disabled");
+    expect(buttonTag(markup, "Stop sequence and return to beginning")).not.toContain("disabled");
   });
 
   it("keeps separate Pause and Stop actions during playback", () => {

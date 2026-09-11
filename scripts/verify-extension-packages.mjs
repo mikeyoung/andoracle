@@ -29,11 +29,15 @@ const entryMap = (entries) => {
   return result;
 };
 
-const validateHtml = (html, target) => {
+export const validateExtensionHtml = (html, target, version) => {
   assert(!/<script\b(?![^>]*\bsrc=)[^>]*>/i.test(html), `${target} index.html contains an inline script blocked by Manifest V3.`);
   assert(!/<link\b[^>]*\brel=["']manifest["']/i.test(html), `${target} index.html still links the PWA manifest.`);
   assert(!/%(?:BASE_URL|VITE_[A-Z0-9_]+)%/.test(html), `${target} index.html contains an unresolved Vite placeholder.`);
   assert(/<script\b[^>]*\btype=["']module["'][^>]*\bsrc=["']\.\/assets\//i.test(html), `${target} index.html does not load its local application bundle.`);
+  const applicationVersion = html.match(
+    /<meta\s+name=["']application-version["']\s+content=["']([^"']+)["']\s*\/?\s*>/i,
+  )?.[1];
+  assert(applicationVersion === version, `${target} index.html application version does not match package.json.`);
 };
 
 const resolveLocalReference = (owner, reference, target) => {
@@ -131,7 +135,7 @@ export const verifyExtensionPackage = (target, version, packageRoot = STORE_PACK
 
   const manifest = JSON.parse(unpackedFiles.get("manifest.json")?.toString("utf8") ?? "null");
   validateManifest(manifest, target, version);
-  validateHtml(unpackedFiles.get("index.html")?.toString("utf8") ?? "", target);
+  validateExtensionHtml(unpackedFiles.get("index.html")?.toString("utf8") ?? "", target, version);
   validateLocalAssetGraph(unpackedFiles, target);
   assert(unpackedFiles.get("background.js")?.equals(Buffer.from(BACKGROUND_SOURCE, "utf8")), `${target} toolbar action differs from the reviewed full-tab launcher.`);
   for (const icon of Object.values(EXTENSION_ICON_FILES)) assert(unpackedFiles.has(icon), `${target} package is missing ${icon}.`);

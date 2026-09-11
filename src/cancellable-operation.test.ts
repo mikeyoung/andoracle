@@ -66,13 +66,14 @@ describe("createOperationCancellation", () => {
     expect(appSource.match(/createHostOperationDeadline\(/g)).toHaveLength(2);
     expect(appSource).toContain("Patch sharing timed out.");
     expect(appSource).toContain("App update timed out.");
-    expect(appSource).toContain("cancelUpdateWaitRef.current?.();");
-    const laterAction = appSource.indexOf("cancelUpdateWaitRef.current?.();");
+    expect(appSource).not.toContain("cancelUpdateWaitRef");
+    const laterAction = appSource.lastIndexOf("if (updateBusyRef.current) return;");
+    expect(laterAction).toBeGreaterThanOrEqual(0);
     const laterButton = appSource.slice(
       appSource.lastIndexOf("<button", laterAction),
       appSource.indexOf("</button>", laterAction),
     );
-    expect(laterButton).not.toContain("disabled=");
+    expect(laterButton).toContain("disabled={updateBusy}");
     expect(appSource).toContain("browserOperations.cancelAll();");
   });
 });

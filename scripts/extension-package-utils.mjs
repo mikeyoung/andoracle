@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 export const PROJECT_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const EXTENSION_BUILD_ROOT = resolve(PROJECT_ROOT, "node_modules", ".tmp", "andoracle-extension");
 export const STORE_PACKAGE_ROOT = resolve(PROJECT_ROOT, "store-packages");
-export const EXTENSION_DESCRIPTION = "A touch-first duophonic synthesizer inspired by the ARP Odyssey, with MIDI, sequencing, delay, patches, and offline play.";
+export const EXTENSION_DESCRIPTION = "A desktop duophonic synthesizer inspired by the ARP Odyssey, with MIDI, sequencing, delay, patches, and offline play.";
 export const FIREFOX_EXTENSION_ID = "andoracle@mikeyoung.org";
 export const PUBLIC_APP_URL = "https://mikeyoung.org/andoracle/";
 
@@ -135,6 +135,12 @@ export const createExtensionManifest = (target, packageMetadata) => {
 export const listFiles = (directory) => readdirSync(directory, { withFileTypes: true })
   .flatMap((entry) => {
     const path = resolve(directory, entry.name);
+    // Store packages must be self-contained snapshots of reviewed project
+    // files. Following a repository symlink could silently copy data from
+    // outside the project (and makes the archive depend on the build host).
+    if (entry.isSymbolicLink()) {
+      throw new Error(`Refusing symbolic link in extension package input: ${path}`);
+    }
     return entry.isDirectory() ? listFiles(path) : [path];
   });
 

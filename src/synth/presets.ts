@@ -2,7 +2,6 @@ import { DEFAULT_PARAMS, normalizePatch, type SynthParams } from "./params";
 
 export interface FactoryPreset {
   readonly name: string;
-  readonly description: string;
   readonly params: SynthParams;
 }
 
@@ -15,12 +14,10 @@ const patch = (overrides: Partial<SynthParams>): SynthParams => Object.freeze(no
 const factoryPresets: FactoryPreset[] = [
   {
     name: "Init Andoracle",
-    description: "A clear two-saw starting patch.",
     params: patch({}),
   },
   {
     name: "Rubber Bass",
-    description: "Punchy Type II bass with a short filter contour.",
     params: patch({
       vco1Coarse: 32.7,
       vco2Coarse: 32.7,
@@ -42,7 +39,6 @@ const factoryPresets: FactoryPreset[] = [
   },
   {
     name: "Sync Brass",
-    description: "Hard-sync sweep with a bright ARP-style four-pole filter.",
     params: patch({
       vco2Sync: 1,
       vco2Coarse: 246.94,
@@ -63,7 +59,6 @@ const factoryPresets: FactoryPreset[] = [
   },
   {
     name: "Random Voltage",
-    description: "Clocked pink-noise S/H animates pitch and cutoff.",
     params: patch({
       lfoRate: 4.8,
       shInput1Level: 0,
@@ -85,7 +80,6 @@ const factoryPresets: FactoryPreset[] = [
   },
   {
     name: "Metallic XOR",
-    description: "The Odyssey pulse-XOR ring source with a narrow band.",
     params: patch({
       vco1Coarse: 110,
       vco2Coarse: 164.81,
@@ -110,7 +104,6 @@ const factoryPresets: FactoryPreset[] = [
   },
   {
     name: "Auto Drone",
-    description: "Hands-free evolving filter and stereo delay.",
     params: patch({
       autoRun: 1,
       autoNote: 43,
@@ -119,6 +112,8 @@ const factoryPresets: FactoryPreset[] = [
       vco2Fine: 5,
       vco1PwmAmount: 0.58,
       vco2PwmAmount: 0.42,
+      mixer2Source: 1,
+      mixer3Source: 1,
       lfoRate: 0.31,
       filterCutoff: 720,
       filterResonance: 0.58,

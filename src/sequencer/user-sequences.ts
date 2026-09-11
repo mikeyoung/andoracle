@@ -1006,6 +1006,12 @@ export const saveUserSequenceSafely = (
   signal?: AbortSignal,
 ): Promise<SafeSaveUserSequenceResult> => {
   if (signal?.aborted) return Promise.resolve(createUserSequenceBusyReader(storage)());
+  const normalizedName = normalizeUserSequenceName(name);
+  // Reject a name-only failure before walking an intentionally unbounded
+  // recording or asking the browser for write authority.
+  if (!normalizedName || !isUserLibraryNameWithinLimit(normalizedName)) {
+    return Promise.resolve(saveUserSequence(name, input, storage));
+  }
   // Snapshot directly to the compact wire form. A long take no longer leaves
   // a second per-event object graph retained behind a deferred host lock.
   const inputSnapshot = prepareNoteSequence(input);
@@ -1029,6 +1035,13 @@ export const replaceUserSequenceSafely = (
   lockManager: UserSequenceLockManager | null = defaultLockManager(),
   signal?: AbortSignal,
 ): Promise<SafeReplaceUserSequenceResult> => {
+  // A recording can be arbitrarily long. Do not walk and re-encode that
+  // unbounded event graph after its dialog has already revoked this write.
+  if (signal?.aborted) return Promise.resolve(createUserSequenceBusyReader(storage)());
+  const normalizedName = normalizeUserSequenceName(expected.name);
+  if (!normalizedName || !isUserLibraryNameWithinLimit(normalizedName)) {
+    return Promise.resolve(replaceUserSequence(expected, input, storage));
+  }
   const expectedSnapshot = snapshotUserSequence(expected);
   const inputSnapshot = prepareNoteSequence(input);
   return runUserSequenceWriteSafely<SafeReplaceUserSequenceResult>(
@@ -1050,6 +1063,11 @@ export const deleteUserSequenceSafely = (
   lockManager: UserSequenceLockManager | null = defaultLockManager(),
   signal?: AbortSignal,
 ): Promise<SafeDeleteUserSequenceResult> => {
+  if (signal?.aborted) return Promise.resolve(createUserSequenceBusyReader(storage)());
+  const normalizedName = normalizeUserSequenceName(expected.name);
+  if (!normalizedName || !isUserLibraryNameWithinLimit(normalizedName)) {
+    return Promise.resolve(deleteUserSequence(expected, storage));
+  }
   const expectedSnapshot = snapshotUserSequence(expected);
   return runUserSequenceWriteSafely<SafeDeleteUserSequenceResult>(
     () => deleteUserSequence(expectedSnapshot, storage),

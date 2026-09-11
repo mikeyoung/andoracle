@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_PARAMS, PARAM_KEYS } from "./params";
 import { FACTORY_PRESETS } from "./presets";
+import { decodePatch, encodePatch } from "./patch-url";
 import {
   USER_PATCH_NAME_MAX_LENGTH,
   USER_PATCHES_STORAGE_KEY,
@@ -14,6 +15,7 @@ import {
   replaceUserPatchSafely,
   saveUserPatch,
   saveUserPatchSafely,
+  uniqueUserPatchMatchingParams,
   userPatchNameKey,
   userPatchNameCategory,
   type SafeDeleteUserPatchResult,
@@ -74,6 +76,85 @@ const requireStoredPatch = (name: string, storage: UserPatchStorage): UserPatch 
 };
 
 describe("user patch storage", () => {
+  it("does not snapshot replacement or deletion targets after cancellation", async () => {
+    const storage = new MemoryStorage();
+    const lockManager: UserPatchLockManager = { request: vi.fn() };
+    const controller = new AbortController();
+    controller.abort();
+    const inaccessiblePatch = Object.defineProperty({}, "name", {
+      get: () => { throw new Error("cancelled patch was inspected"); },
+    }) as UserPatch;
+    const inaccessibleParams = new Proxy({} as typeof DEFAULT_PARAMS, {
+      get: () => { throw new Error("cancelled controls were inspected"); },
+    });
+
+    await expect(replaceUserPatchSafely(
+      inaccessiblePatch,
+      inaccessibleParams,
+      storage,
+      lockManager,
+      controller.signal,
+    )).resolves.toMatchObject({ status: "busy", patches: [] });
+    await expect(deleteUserPatchSafely(
+      inaccessiblePatch,
+      storage,
+      lockManager,
+      controller.signal,
+    )).resolves.toMatchObject({ status: "busy", patches: [] });
+    expect(lockManager.request).not.toHaveBeenCalled();
+  });
+
+  it("does not inspect controls or acquire a lock for name-only failures", async () => {
+    const storage = new MemoryStorage();
+    const lockManager: UserPatchLockManager = { request: vi.fn() };
+    const inaccessibleParams = new Proxy({} as typeof DEFAULT_PARAMS, {
+      get: () => { throw new Error("irrelevant controls were inspected"); },
+    });
+    const immutablePatch = { name: "Init Andoracle", params: inaccessibleParams };
+    const overlongPatch = { name: "x".repeat(34), params: inaccessibleParams };
+
+    await expect(saveUserPatchSafely(" \n\t ", inaccessibleParams, storage, lockManager))
+      .resolves.toMatchObject({ status: "empty-name" });
+    await expect(saveUserPatchSafely("x".repeat(34), inaccessibleParams, storage, lockManager))
+      .resolves.toMatchObject({ status: "name-too-long" });
+    await expect(saveUserPatchSafely("Init Andoracle", inaccessibleParams, storage, lockManager))
+      .resolves.toMatchObject({ status: "immutable-name" });
+    await expect(replaceUserPatchSafely(
+      immutablePatch,
+      inaccessibleParams,
+      storage,
+      lockManager,
+    )).resolves.toMatchObject({ status: "immutable-name" });
+    await expect(replaceUserPatchSafely(
+      overlongPatch,
+      inaccessibleParams,
+      storage,
+      lockManager,
+    )).resolves.toMatchObject({ status: "not-found" });
+    await expect(deleteUserPatchSafely(immutablePatch, storage, lockManager))
+      .resolves.toMatchObject({ status: "immutable-name" });
+    await expect(deleteUserPatchSafely(overlongPatch, storage, lockManager))
+      .resolves.toMatchObject({ status: "not-found" });
+    expect(lockManager.request).not.toHaveBeenCalled();
+    expect(storage.writes).toBe(0);
+  });
+
+  it("recovers an exact saved identity only when the current sound is unambiguous", () => {
+    const bright = { ...DEFAULT_PARAMS, filterCutoff: 5_000 };
+    const dark = { ...DEFAULT_PARAMS, filterCutoff: 500 };
+    const patches = [patchSnapshot("Bright", bright), patchSnapshot("Dark", dark)];
+    const restoredFromHash = decodePatch(encodePatch(bright));
+
+    expect(uniqueUserPatchMatchingParams(patches, bright)?.name).toBe("Bright");
+    expect(restoredFromHash).not.toBeNull();
+    expect(uniqueUserPatchMatchingParams(patches, restoredFromHash!)?.name).toBe("Bright");
+    expect(uniqueUserPatchMatchingParams(patches, { ...bright, filterCutoff: 5_001 })).toBeNull();
+    expect(uniqueUserPatchMatchingParams(
+      [...patches, patchSnapshot("Bright copy", bright)],
+      bright,
+    )).toBeNull();
+  });
+
   it("categorically distinguishes user names from immutable default and factory names", () => {
     expect(userPatchNameCategory("  CUSTOM PATCH  ")).toBe("default");
     for (const preset of FACTORY_PRESETS) {

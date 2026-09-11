@@ -68,7 +68,14 @@ describe("OdysseyDSP", () => {
     expect(dsp.getMeter().sampleRate).toBe(44100);
     assertFiniteAndBounded(left);
     assertFiniteAndBounded(right);
-    expect(dsp.getMeter().rms).toBeGreaterThan(0.001);
+    const meter = dsp.getMeter();
+    expect(meter.rms).toBeGreaterThan(0.001);
+    expect(meter.leftRms).toBeGreaterThan(0.001);
+    expect(meter.rightRms).toBeGreaterThan(0.001);
+    expect(meter.rms * meter.rms).toBeCloseTo(
+      (meter.leftRms * meter.leftRms + meter.rightRms * meter.rightRms) * 0.5,
+      10,
+    );
   });
 
   it("allocates one note to both oscillators and several notes to the extremes", () => {
@@ -125,6 +132,19 @@ describe("OdysseyDSP", () => {
 
     expect(dsp.params.masterVolume).toBe(0.25);
     expect(dsp.params.autoRun).toBe(DEFAULT_PARAMS.autoRun);
+  });
+
+  it("ignores own prototype-name fields instead of treating them as synth parameters", () => {
+    const dsp = new OdysseyDSP(44100);
+    const changes = Object.create(null) as Record<string, number>;
+    Reflect.set(changes, "toString", 1);
+    Reflect.set(changes, "constructor", 1);
+    changes.masterVolume = 0.25;
+
+    expect(() => dsp.setParams(changes as Partial<SynthParams>)).not.toThrow();
+    expect(dsp.params.masterVolume).toBe(0.25);
+    expect(Object.hasOwn(dsp.params, "toString")).toBe(false);
+    expect(Object.hasOwn(dsp.params, "constructor")).toBe(false);
   });
 
   it("tunes A4 accurately from the default coarse calibration", () => {
@@ -186,7 +206,13 @@ describe("OdysseyDSP", () => {
     expect(mutedLeft.every((sample) => sample === 0)).toBe(true);
     expect(mutedRight.every((sample) => sample === 0)).toBe(true);
     expect(dsp.getHeldNotes()).toEqual([]);
-    expect(dsp.getMeter()).toMatchObject({ gate: false, peak: 0, rms: 0 });
+    expect(dsp.getMeter()).toMatchObject({
+      gate: false,
+      peak: 0,
+      rms: 0,
+      leftRms: 0,
+      rightRms: 0,
+    });
 
     dsp.noteOn(60);
     const [restarted] = render(dsp, 4096);
@@ -1443,5 +1469,70 @@ describe("OdysseyDSP", () => {
 
     expect(peak).toBeGreaterThan(0.01);
     expect(peak).toBeLessThanOrEqual(1);
+  });
+
+  it("preserves right-channel FIR history when a mono render becomes stereo", () => {
+    const optimized = new OdysseyDSP(44100);
+    const alwaysStereo = new OdysseyDSP(44100);
+    const referenceState = alwaysStereo as unknown as {
+      filterChannelsSynchronized: boolean;
+      outputChannelsSynchronized: boolean;
+    };
+    referenceState.filterChannelsSynchronized = false;
+    referenceState.outputChannelsSynchronized = false;
+    const initial = {
+      ...DEFAULT_PARAMS,
+      mixer1Level: 0,
+      mixer2Level: 0,
+      mixer3Level: 0,
+      externalLevel: 1,
+      delayEnabled: 0,
+      filterType: 2,
+      filterCutoff: 3600,
+      filterResonance: 0.2,
+      filterMod1Amount: 0,
+      filterMod2Amount: 0,
+      filterMod3Amount: 0,
+      hpfCutoff: 16,
+      vcaInitialGain: 1,
+      vcaEnvelopeAmount: 0,
+      masterVolume: 1,
+    };
+    optimized.setParams(initial);
+    alwaysStereo.setParams(initial);
+
+    const monoInput = Float32Array.from(
+      { length: 2048 },
+      (_, frame) => Math.sin(frame * Math.PI * 2 * 311 / 44100) * 0.2,
+    );
+    optimized.process(new Float32Array(2048), new Float32Array(2048), monoInput);
+    alwaysStereo.process(new Float32Array(2048), new Float32Array(2048), monoInput);
+
+    const stereoDelay = {
+      delayEnabled: 1,
+      delayTime: 1,
+      delayFeedback: 0.7,
+      delayMix: 0.8,
+      delayTone: 18_000,
+      delaySpread: 1,
+      delayPingPong: 1,
+      delayTrails: 0,
+    };
+    optimized.setParams(stereoDelay);
+    alwaysStereo.setParams(stereoDelay);
+    const transitionInput = Float32Array.from(
+      { length: 4096 },
+      (_, frame) => Math.sin((frame + 2048) * Math.PI * 2 * 311 / 44100) * 0.2,
+    );
+    const optimizedLeft = new Float32Array(4096);
+    const optimizedRight = new Float32Array(4096);
+    const referenceLeft = new Float32Array(4096);
+    const referenceRight = new Float32Array(4096);
+    optimized.process(optimizedLeft, optimizedRight, transitionInput);
+    alwaysStereo.process(referenceLeft, referenceRight, transitionInput);
+
+    expect(optimizedLeft).toEqual(referenceLeft);
+    expect(optimizedRight).toEqual(referenceRight);
+    expect(optimizedLeft).not.toEqual(optimizedRight);
   });
 });

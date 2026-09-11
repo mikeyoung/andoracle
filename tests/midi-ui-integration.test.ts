@@ -29,6 +29,12 @@ const renderMidi = (overrides: Partial<Parameters<typeof MidiInputControl>[0]> =
   }))
 );
 
+const buttonWithVisibleLabel = (markup: string, label: string): string => (
+  (markup.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? [])
+    .find((button) => button.replace(/<[^>]+>/g, "").includes(label))
+  ?? ""
+);
+
 describe("MIDI connection UI", () => {
   it("associates unsupported security guidance with the unavailable action", () => {
     const markup = renderMidi({
@@ -41,8 +47,13 @@ describe("MIDI connection UI", () => {
     expect(markup).toContain('aria-live="polite"');
     expect(markup).toContain('aria-atomic="true"');
     expect(markup).toContain("MIDI requires HTTPS or a localhost address. Touch and computer keys still work.");
-    expect(markup).toMatch(/<button[^>]*aria-describedby="([^"]+)"[^>]*disabled=""[^>]*>Connect MIDI<\/button>/);
-    expect(markup).toMatch(/<small id="([^"]+)"[^>]*role="status"/);
+    const connectButton = buttonWithVisibleLabel(markup, "Connect MIDI");
+    expect(connectButton).not.toBe("");
+    expect(connectButton).toMatch(/aria-describedby="([^"]+)"/);
+    expect(connectButton).toContain('disabled=""');
+    expect(markup).toMatch(/<p id="([^"]+)"[^>]*role="status"/);
+    expect(markup).toContain('class="button button--quiet midi-control__launcher"');
+    expect(markup).toContain('aria-haspopup="dialog"');
   });
 
   it("identifies connected inputs with manufacturer names without redundant duplication", () => {
@@ -85,12 +96,12 @@ describe("MIDI connection UI", () => {
 
       expect(markup).toContain('aria-busy="true"');
       expect(markup).toContain(status);
-      const toggle = markup.match(new RegExp(`<button[^>]*>${label.replace("…", "…")}<\\/button>`))?.[0] ?? "";
+      const toggle = buttonWithVisibleLabel(markup, label);
       expect(toggle).not.toBe("");
       expect(toggle.includes('aria-disabled="true"')).toBe(toggleDisabled);
       expect(toggle).not.toMatch(/\sdisabled=""/);
       if (enabled) {
-        const refresh = markup.match(/<button[^>]*>Refresh<\/button>/)?.[0] ?? "";
+        const refresh = buttonWithVisibleLabel(markup, "Refresh");
         expect(refresh).toContain('aria-disabled="true"');
         expect(refresh).not.toMatch(/\sdisabled=""/);
       }
@@ -190,6 +201,9 @@ describe("MIDI reset and audio-power integration", () => {
     expect(release).toContain("engine.setPerformance({ bendSemitones: 0, vibratoSemitones: 0 })");
     expect(panic).toContain("setInputResetEpoch((epoch) => epoch + 1)");
     expect(panic).toContain("releasePhysicalNotes()");
+    expect(panic).toContain('changeParam("autoRun", 0)');
+    expect(panic).toContain("engine.allSoundOff()");
+    expect(panic).not.toContain("engine.resumeSound()");
   });
 
   it("keeps MIDI connected across power changes and replays held notes after power-on", () => {

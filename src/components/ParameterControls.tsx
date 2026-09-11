@@ -20,6 +20,7 @@ import {
   shouldRestoreDirectEntryOrigin,
   type DirectEntryInteractionModality,
 } from "./direct-entry-focus";
+import { RasterLabel } from "./RasterLabel";
 
 interface SharedControlProps {
   param: ParamKey;
@@ -37,9 +38,9 @@ type DirectHandlers = {
   onKeyDownCapture: () => void;
   onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
   onPointerMoveCapture: (event: ReactPointerEvent<HTMLElement>) => void;
-  onPointerUpCapture: () => void;
-  onPointerCancelCapture: () => void;
-  onLostPointerCaptureCapture: () => void;
+  onPointerUpCapture: (event: ReactPointerEvent<HTMLElement>) => void;
+  onPointerCancelCapture: (event: ReactPointerEvent<HTMLElement>) => void;
+  onLostPointerCaptureCapture: (event: ReactPointerEvent<HTMLElement>) => void;
 };
 
 interface InterruptionEventTarget {
@@ -97,8 +98,93 @@ export const shouldConsumeLongPressClick = (longPressConsumed: boolean, clickDet
 type SetSuppressionTimer = (callback: () => void, delayMs: number) => number;
 type ClearSuppressionTimer = (timerId: number) => void;
 
+export const DIRECT_ENTRY_LONG_PRESS_DELAY_MS = 620;
+
+interface DirectEntryPointerSample {
+  readonly pointerId: number;
+  readonly pointerType: string;
+  readonly button: number;
+  readonly isPrimary: boolean;
+  readonly clientX: number;
+  readonly clientY: number;
+}
+
 /**
- * Owns the one-shot latch used to swallow the click synthesized by a touch
+ * A primary left-button hold is a long press regardless of whether it came
+ * from touch, pen, or a mouse. This keeps the visible “long-press” affordance
+ * truthful on desktop while leaving right click to the context-menu path.
+ */
+export const shouldStartDirectEntryLongPress = (
+  pointer: Pick<DirectEntryPointerSample, "button" | "isPrimary">,
+): boolean => pointer.isPrimary && pointer.button === 0;
+
+const directEntryMovementTolerance = (pointerType: string): number => {
+  if (pointerType === "mouse") return 8;
+  if (pointerType === "pen") return 12;
+  // A finger contact naturally wanders more than a mouse cursor. Eighteen CSS
+  // pixels remains far below an intentional 56px dial drag while avoiding
+  // false cancellation on high-density touchscreens.
+  return 18;
+};
+
+/**
+ * Tracks one primary pointer from press to release. Keeping this state in one
+ * owner avoids unrelated multi-touch events cancelling the active dial hold,
+ * and makes every timer cancellable during unmount or page interruption.
+ */
+export class DirectEntryLongPressTracker {
+  private timer: number | null = null;
+  private pointerId: number | null = null;
+  private startX = 0;
+  private startY = 0;
+  private movementTolerance = 0;
+
+  constructor(
+    private readonly setTimer: SetSuppressionTimer = (callback, delayMs) => (
+      window.setTimeout(callback, delayMs)
+    ),
+    private readonly clearTimer: ClearSuppressionTimer = (timerId) => window.clearTimeout(timerId),
+  ) {}
+
+  begin(pointer: DirectEntryPointerSample, activate: () => void): boolean {
+    if (!shouldStartDirectEntryLongPress(pointer)) return false;
+    this.cancel();
+    this.pointerId = pointer.pointerId;
+    this.startX = pointer.clientX;
+    this.startY = pointer.clientY;
+    this.movementTolerance = directEntryMovementTolerance(pointer.pointerType);
+    this.timer = this.setTimer(() => {
+      this.timer = null;
+      // The pointer can only be cleared by a matching terminal event or an
+      // explicit interruption, so a stale callback can never open the modal.
+      if (this.pointerId === pointer.pointerId) activate();
+    }, DIRECT_ENTRY_LONG_PRESS_DELAY_MS);
+    return true;
+  }
+
+  move(pointerId: number, clientX: number, clientY: number): boolean {
+    if (this.pointerId !== pointerId) return false;
+    const distance = Math.hypot(clientX - this.startX, clientY - this.startY);
+    if (distance <= this.movementTolerance) return true;
+    this.cancel();
+    return false;
+  }
+
+  end(pointerId: number): boolean {
+    if (this.pointerId !== pointerId) return false;
+    this.cancel();
+    return true;
+  }
+
+  cancel(): void {
+    if (this.timer !== null) this.clearTimer(this.timer);
+    this.timer = null;
+    this.pointerId = null;
+  }
+}
+
+/**
+ * Owns the one-shot latch used to swallow the click synthesized by a pointer
  * long press. Pointer cancellation is not guaranteed to produce that click,
  * so terminal pointer events also schedule a task-boundary expiry. This keeps
  * the current gesture protected without letting a stale latch survive into a
@@ -170,17 +256,14 @@ const useDirectEntry = (
   onDirectEdit: SharedControlProps["onDirectEdit"],
   restoreValue?: () => void,
 ): DirectHandlers => {
-  const timer = useRef<number | null>(null);
-  const startPoint = useRef({ x: 0, y: 0 });
-  const origin = useRef<HTMLElement | null>(null);
-  const initialControlValue = useRef<string | null>(null);
   const interactionModality = useRef<DirectEntryInteractionModality>("unknown");
   const clickSuppression = useRef<LongPressClickSuppression | null>(null);
   clickSuppression.current ??= new LongPressClickSuppression();
+  const longPress = useRef<DirectEntryLongPressTracker | null>(null);
+  longPress.current ??= new DirectEntryLongPressTracker();
 
   const cancel = (): void => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = null;
+    longPress.current?.cancel();
   };
 
   const interrupt = (): void => {
@@ -189,8 +272,8 @@ const useDirectEntry = (
     interactionModality.current = "unknown";
   };
 
-  const endPointerGesture = (): void => {
-    cancel();
+  const endPointerGesture = (event: ReactPointerEvent<HTMLElement>): void => {
+    if (!longPress.current?.end(event.pointerId)) return;
     clickSuppression.current?.expireAfterGesture();
   };
 
@@ -225,44 +308,38 @@ const useDirectEntry = (
       interactionModality.current = "keyboard";
     },
     onPointerDownCapture: (event) => {
-      cancel();
+      if (!shouldStartDirectEntryLongPress(event)) return;
       clickSuppression.current?.reset();
       interactionModality.current = "pointer";
-      if (event.pointerType === "mouse") {
-        return;
-      }
-      startPoint.current = { x: event.clientX, y: event.clientY };
       const target = event.target as HTMLElement;
-      origin.current = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
-      initialControlValue.current = origin.current instanceof HTMLInputElement
-        ? origin.current.value
-        : null;
-      timer.current = window.setTimeout(() => {
+      const editOrigin = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
+      const initialValue = editOrigin instanceof HTMLInputElement ? editOrigin.value : null;
+      longPress.current?.begin({
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        button: event.button,
+        isPrimary: event.isPrimary,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      }, () => {
         clickSuppression.current?.arm();
         if (
           restoreValue
-          && origin.current instanceof HTMLInputElement
-          && initialControlValue.current !== null
-          && origin.current.value !== initialControlValue.current
+          && editOrigin instanceof HTMLInputElement
+          && initialValue !== null
+          && editOrigin.value !== initialValue
         ) {
           restoreValue();
         }
-        if (origin.current) {
-          onDirectEdit(
-            param,
-            origin.current,
-            shouldRestoreDirectEntryOrigin(origin.current, "pointer"),
-          );
-        }
-        timer.current = null;
-      }, 620);
+        onDirectEdit(
+          param,
+          editOrigin,
+          shouldRestoreDirectEntryOrigin(editOrigin, "pointer"),
+        );
+      });
     },
     onPointerMoveCapture: (event) => {
-      const distance = Math.hypot(
-        event.clientX - startPoint.current.x,
-        event.clientY - startPoint.current.y,
-      );
-      if (distance > 10) cancel();
+      longPress.current?.move(event.pointerId, event.clientX, event.clientY);
     },
     onPointerUpCapture: endPointerGesture,
     onPointerCancelCapture: endPointerGesture,
@@ -272,6 +349,144 @@ const useDirectEntry = (
 
 export const shouldEmitRangeChange = (current: number, next: number): boolean => !Object.is(current, next);
 
+const renderedRangePosition = (param: ParamKey, value: number): number => (
+  Math.round(paramToNormalized(param, value) * 1000)
+);
+
+/**
+ * Finds the smallest value in the requested direction that produces actual
+ * rotary feedback. Several authentic controls expose much finer synth steps
+ * than the 0-1000 photographed dial or its compact value readout can show.
+ * Advancing only one declared step can therefore make an Arrow key appear to
+ * do nothing and can leave aria-valuetext unchanged. Direct entry retains the
+ * full declared precision; Arrow keys advance to the next perceivable stop.
+ */
+const keyboardArrowRangeValue = (
+  param: ParamKey,
+  value: number,
+  direction: -1 | 1,
+  displayScale: number,
+): number => {
+  const spec = PARAM_SPECS[param];
+  const immediate = normalizeParamValue(param, value + direction * spec.step);
+  if (Object.is(immediate, value)) return value;
+
+  const currentPosition = renderedRangePosition(param, value);
+  const currentText = formatParamValue(param, value * displayScale);
+  const givesCompleteFeedback = (candidate: number): boolean => (
+    renderedRangePosition(param, candidate) !== currentPosition
+    && formatParamValue(param, candidate * displayScale) !== currentText
+  );
+  if (givesCompleteFeedback(immediate)) return immediate;
+
+  let firstVisibleCandidate: number | undefined;
+  for (
+    let position = currentPosition + direction;
+    position >= 0 && position <= 1000;
+    position += direction
+  ) {
+    const candidate = normalizedToParam(param, position / 1000);
+    if (direction > 0 ? candidate <= value : candidate >= value) continue;
+    if (renderedRangePosition(param, candidate) === currentPosition) continue;
+    firstVisibleCandidate ??= candidate;
+    if (formatParamValue(param, candidate * displayScale) !== currentText) return candidate;
+  }
+
+  // At a formatting plateau immediately beside an endpoint, the dial can
+  // still provide visible positional feedback even when its short text cannot.
+  return firstVisibleCandidate ?? immediate;
+};
+
+type RangeArrowDirection = -1 | 1;
+
+const rangeArrowDirection = (key: string): RangeArrowDirection | undefined => {
+  switch (key) {
+    case "ArrowUp":
+    case "ArrowRight":
+      return 1;
+    case "ArrowDown":
+    case "ArrowLeft":
+      return -1;
+    default:
+      return undefined;
+  }
+};
+
+interface RangeKeyboardTransition {
+  readonly from: number;
+  readonly to: number;
+  readonly direction: RangeArrowDirection;
+}
+
+/**
+ * Remembers just the last perceptible Arrow-key transition for one dial. Fine
+ * synth steps often share a display bucket, so independently calculating the
+ * opposite jump can land at the other edge of that bucket (for example
+ * 0% -> 5% -> 4%). Reversing the immediately preceding transition restores
+ * its exact source value while retaining full precision everywhere else.
+ */
+export class ReversibleRangeKeyboardStepper {
+  private transition: RangeKeyboardTransition | null = null;
+
+  adjust(
+    param: ParamKey,
+    value: number,
+    key: string,
+    displayScale = 1,
+  ): number | undefined {
+    const direction = rangeArrowDirection(key);
+    if (direction === undefined) {
+      this.reset();
+      return keyboardAdjustedRangeValue(param, value, key, displayScale);
+    }
+
+    if (
+      this.transition
+      && this.transition.direction === -direction
+      && Object.is(this.transition.to, value)
+    ) {
+      const restored = this.transition.from;
+      this.transition = null;
+      return restored;
+    }
+
+    const next = keyboardAdjustedRangeValue(param, value, key, displayScale);
+    this.transition = next !== undefined && !Object.is(next, value)
+      ? { from: value, to: next, direction }
+      : null;
+    return next;
+  }
+
+  reset(): void {
+    this.transition = null;
+  }
+}
+
+/**
+ * Browser-generated pointer clicks have a positive detail count. Keyboard and
+ * assistive activations report zero, so they retain focus for repeated switch
+ * operation while pointer users return immediately to the performance keys.
+ */
+export const shouldReleaseChoicePointerFocus = (clickDetail: number): boolean => clickDetail > 0;
+
+export interface RangePointerWindowTarget {
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean,
+  ): void;
+  removeEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean,
+  ): void;
+}
+
+const NOOP_RANGE_POINTER_WINDOW: RangePointerWindowTarget = {
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+};
+
 /**
  * Pointer users expect the computer-note keys to become active again as soon
  * as a dial gesture ends. Keyboard users never enter this path, so a dial
@@ -279,16 +494,60 @@ export const shouldEmitRangeChange = (current: number, next: number): boolean =>
  */
 export class DeferredRangePointerFocusRelease {
   private timer: number | null = null;
+  private pointerId: number | null = null;
+  private pointerTarget: Pick<HTMLInputElement, "blur"> | null = null;
+  private readonly windowTarget: RangePointerWindowTarget;
+
+  private readonly finishFromWindow = (event: Event): void => {
+    const eventPointerId = (event as Event & { pointerId?: unknown }).pointerId;
+    if (typeof eventPointerId !== "number") return;
+    this.finishPointerGesture(eventPointerId);
+  };
+
+  private readonly interruptFromWindow = (): void => {
+    const target = this.pointerTarget;
+    this.detachPointerGesture();
+    this.clearBlurTimer();
+    // Window blur/pagehide cannot race a native pointer default that restores
+    // focus, so release synchronously before the document becomes inactive.
+    target?.blur();
+  };
 
   constructor(
     private readonly setTimer: SetSuppressionTimer = (callback, delayMs) => (
       window.setTimeout(callback, delayMs)
     ),
     private readonly clearTimer: ClearSuppressionTimer = (timerId) => window.clearTimeout(timerId),
-  ) {}
+    windowTarget?: RangePointerWindowTarget,
+  ) {
+    this.windowTarget = windowTarget
+      ?? (typeof window === "undefined" ? NOOP_RANGE_POINTER_WINDOW : window);
+  }
+
+  beginPointerGesture(target: Pick<HTMLInputElement, "blur">, pointerId: number): void {
+    this.clearBlurTimer();
+    this.detachPointerGesture();
+    this.pointerTarget = target;
+    this.pointerId = pointerId;
+    // Capture sees an outside release even when another control stops the
+    // bubble phase. Listeners exist only for the active dial gesture.
+    this.windowTarget.addEventListener("pointerup", this.finishFromWindow, true);
+    this.windowTarget.addEventListener("pointercancel", this.finishFromWindow, true);
+    this.windowTarget.addEventListener("blur", this.interruptFromWindow);
+    this.windowTarget.addEventListener("pagehide", this.interruptFromWindow);
+  }
+
+  finishPointerGesture(pointerId: number): boolean {
+    if (this.pointerId !== pointerId || !this.pointerTarget) return false;
+    const target = this.pointerTarget;
+    this.detachPointerGesture();
+    this.schedule(target);
+    return true;
+  }
 
   schedule(target: Pick<HTMLInputElement, "blur">): void {
-    this.dispose();
+    this.clearBlurTimer();
+    this.detachPointerGesture();
     this.timer = this.setTimer(() => {
       this.timer = null;
       target.blur();
@@ -296,9 +555,24 @@ export class DeferredRangePointerFocusRelease {
   }
 
   dispose(): void {
+    this.clearBlurTimer();
+    this.detachPointerGesture();
+  }
+
+  private clearBlurTimer(): void {
     if (this.timer === null) return;
     this.clearTimer(this.timer);
     this.timer = null;
+  }
+
+  private detachPointerGesture(): void {
+    if (this.pointerId === null) return;
+    this.windowTarget.removeEventListener("pointerup", this.finishFromWindow, true);
+    this.windowTarget.removeEventListener("pointercancel", this.finishFromWindow, true);
+    this.windowTarget.removeEventListener("blur", this.interruptFromWindow);
+    this.windowTarget.removeEventListener("pagehide", this.interruptFromWindow);
+    this.pointerId = null;
+    this.pointerTarget = null;
   }
 }
 
@@ -312,15 +586,16 @@ export const keyboardAdjustedRangeValue = (
   param: ParamKey,
   value: number,
   key: string,
+  displayScale = 1,
 ): number | undefined => {
   const spec = PARAM_SPECS[param];
   switch (key) {
     case "ArrowUp":
     case "ArrowRight":
-      return normalizeParamValue(param, value + spec.step);
+      return keyboardArrowRangeValue(param, value, 1, displayScale);
     case "ArrowDown":
     case "ArrowLeft":
-      return normalizeParamValue(param, value - spec.step);
+      return keyboardArrowRangeValue(param, value, -1, displayScale);
     case "Home":
       return spec.min;
     case "End":
@@ -360,6 +635,16 @@ const rangeDescription = (param: ParamKey): string => {
   return description;
 };
 
+const PHOTO_SWITCH_VARIANTS = ["tapes", "synth", "delay"] as const;
+
+export const photoSwitchVariantForParam = (
+  param: ParamKey,
+): (typeof PHOTO_SWITCH_VARIANTS)[number] => {
+  let hash = 0;
+  for (const character of param) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return PHOTO_SWITCH_VARIANTS[hash % PHOTO_SWITCH_VARIANTS.length];
+};
+
 function RangeControlComponent({
   param,
   value,
@@ -371,6 +656,8 @@ function RangeControlComponent({
 }: SharedControlProps) {
   const pointerFocusRelease = useRef<DeferredRangePointerFocusRelease | null>(null);
   pointerFocusRelease.current ??= new DeferredRangePointerFocusRelease();
+  const keyboardStepper = useRef<ReversibleRangeKeyboardStepper | null>(null);
+  keyboardStepper.current ??= new ReversibleRangeKeyboardStepper();
   useEffect(() => () => pointerFocusRelease.current?.dispose(), []);
   const spec = PARAM_SPECS[param];
   const directHandlers = useDirectEntry(param, onDirectEdit, () => onChange(param, value));
@@ -394,7 +681,9 @@ function RangeControlComponent({
       style={accentStyle(accent)}
       {...directHandlers}
     >
-      <label htmlFor={`param-${param}`}>{spec.shortLabel ?? spec.label}</label>
+      <label htmlFor={`param-${param}`}>
+        <RasterLabel text={spec.shortLabel ?? spec.label} variant="control" />
+      </label>
       <div className="dial-shell" style={dialStyle}>
         <input
           id={`param-${param}`}
@@ -407,19 +696,25 @@ function RangeControlComponent({
           aria-orientation="vertical"
           aria-valuetext={formattedValue}
           aria-describedby={`param-${param}-range`}
+          onBlur={() => keyboardStepper.current?.reset()}
           onKeyDown={(event) => {
-            const next = keyboardAdjustedRangeValue(param, value, event.key);
+            const next = keyboardStepper.current?.adjust(param, value, event.key, displayScale);
             if (next === undefined) return;
             event.preventDefault();
             if (shouldEmitRangeChange(value, next)) onChange(param, next);
           }}
           onChange={(event) => {
+            keyboardStepper.current?.reset();
             const next = normalizedToParam(param, Number(event.target.value) / 1000);
             if (shouldEmitRangeChange(value, next)) onChange(param, next);
           }}
-          onPointerUp={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
-          onPointerCancel={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
-          onLostPointerCapture={(event) => pointerFocusRelease.current?.schedule(event.currentTarget)}
+          onPointerDown={(event) => {
+            keyboardStepper.current?.reset();
+            pointerFocusRelease.current?.beginPointerGesture(event.currentTarget, event.pointerId);
+          }}
+          onPointerUp={(event) => pointerFocusRelease.current?.finishPointerGesture(event.pointerId)}
+          onPointerCancel={(event) => pointerFocusRelease.current?.finishPointerGesture(event.pointerId)}
+          onLostPointerCapture={(event) => pointerFocusRelease.current?.finishPointerGesture(event.pointerId)}
         />
         <span className="dial-scale" aria-hidden="true">
           <i /><i /><i /><i /><i /><i /><i /><i /><i />
@@ -444,6 +739,9 @@ function ChoiceControlComponent({
   onDirectEdit,
   compact = false,
 }: SharedControlProps) {
+  const pointerFocusRelease = useRef<DeferredRangePointerFocusRelease | null>(null);
+  pointerFocusRelease.current ??= new DeferredRangePointerFocusRelease();
+  useEffect(() => () => pointerFocusRelease.current?.dispose(), []);
   const spec = PARAM_SPECS[param];
   const directHandlers = useDirectEntry(param, onDirectEdit);
   const selectedLabel = spec.options?.find((option) => option.value === value)?.label ?? String(value);
@@ -454,15 +752,20 @@ function ChoiceControlComponent({
       style={accentStyle(accent)}
       {...directHandlers}
     >
-      <label htmlFor={`param-${param}`}>{compact ? "Source" : spec.shortLabel ?? spec.label}</label>
+      <label htmlFor={`param-${param}`}>
+        <RasterLabel text={compact ? "Source" : spec.shortLabel ?? spec.label} variant="control" />
+      </label>
       <button
         type="button"
         className="choice-button"
         id={`param-${param}`}
         aria-label={`${spec.label}: ${selectedLabel}`}
-        onClick={() => {
+        onClick={(event) => {
           const next = nextChoiceValue(param, value);
           if (next !== undefined) onChange(param, next);
+          if (shouldReleaseChoicePointerFocus(event.detail)) {
+            pointerFocusRelease.current?.schedule(event.currentTarget);
+          }
         }}
       >
         <span>{selectedLabel}</span>
@@ -492,17 +795,20 @@ function ToggleControlComponent({
       style={accentStyle(accent)}
       {...directHandlers}
     >
-      <span className="toggle-label" id={`label-${param}`}>{spec.shortLabel ?? spec.label}</span>
+      <span className="toggle-label" id={`label-${param}`}>
+        <RasterLabel text={spec.shortLabel ?? spec.label} variant="control" />
+      </span>
       <button
         type="button"
         className="toggle-switch"
+        data-switch-variant={photoSwitchVariantForParam(param)}
         role="switch"
         aria-checked={enabled}
         aria-labelledby={`label-${param}`}
         onClick={() => onChange(param, enabled ? 0 : 1)}
       >
         <span aria-hidden="true" />
-        <b>{enabled ? "ON" : "OFF"}</b>
+        <b><RasterLabel text={enabled ? "On" : "Off"} variant="micro" /></b>
       </button>
     </div>
   );

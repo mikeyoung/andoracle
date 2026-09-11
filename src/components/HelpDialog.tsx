@@ -70,7 +70,7 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
           </li>
           <li>
             <strong>MIDI keyboard</strong>
-            <span>Choose Connect MIDI and play; pitch and modulation wheels are recognized.</span>
+            <span>Choose MIDI below the keys, then Connect MIDI; pitch and modulation wheels are recognized.</span>
           </li>
           <li>
             <strong>Live audio</strong>
@@ -83,6 +83,10 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
           <li>
             <strong>Note sequencer</strong>
             <span>Record keyboard notes, save or discard, then Play, Pause/resume, or Stop to rewind. Synth controls stay live.</span>
+          </li>
+          <li>
+            <strong>Exact settings</strong>
+            <span>Right-click or long-press any parameter to enter its exact value and see its valid range.</span>
           </li>
         </ul>
 

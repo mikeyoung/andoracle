@@ -13,6 +13,19 @@ const callbackBody = (start: string, end: string): string => {
 };
 
 describe("App asynchronous teardown ownership", () => {
+  it("latches Workbox offline-ready into the persistent capability store", () => {
+    const source = readFileSync(resolve("src/pwa/use-pwa-registration.ts"), "utf8");
+    const callbackStart = source.indexOf("onOfflineReady: () => {");
+    const callbackEnd = source.indexOf("},", callbackStart);
+    const callback = source.slice(callbackStart, callbackEnd);
+
+    expect(callbackStart).toBeGreaterThanOrEqual(0);
+    expect(callback).toContain("serviceWorkerCapabilityStore.markCapable();");
+    expect(callback).toContain("callbacks.onOfflineReady();");
+    expect(callback.indexOf("markCapable"))
+      .toBeLessThan(callback.indexOf("callbacks.onOfflineReady"));
+  });
+
   it("single-flights external-input cancellation until power teardown settles", () => {
     const source = callbackBody(
       "const toggleExternalInput = useCallback",
@@ -47,5 +60,23 @@ describe("App asynchronous teardown ownership", () => {
 
     expect(source).toContain("externalInputCancellationGuard.invalidate();");
     expect(source).toContain("midiCancellationGuard.invalidate();");
+  });
+
+  it("keeps a manually paused sequence paused across a background lifecycle event", () => {
+    const source = callbackBody(
+      "const pauseForBackground = (): void => {",
+      "const resumeFromBackground = (): void => {",
+    );
+    const alreadyPaused = source.indexOf("if (player?.isPaused)");
+    const attemptPause = source.indexOf("if (!player?.pause())");
+
+    expect(alreadyPaused).toBeGreaterThanOrEqual(0);
+    expect(alreadyPaused).toBeLessThan(attemptPause);
+    expect(source.slice(alreadyPaused, attemptPause)).toContain(
+      'setSequencePlaybackState("paused")',
+    );
+    expect(source.slice(alreadyPaused, attemptPause)).not.toContain(
+      'setSequencePlaybackState("stopped")',
+    );
   });
 });

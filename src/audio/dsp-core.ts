@@ -10,6 +10,7 @@ import {
 const TAU = Math.PI * 2;
 const EPSILON = 0.001;
 const LOG_ENVELOPE_EPSILON = Math.log(EPSILON);
+const UINT32_TO_BIPOLAR = 2 / 0xffffffff;
 const createWindowedSincCoefficients = (length: number, cutoff: number): Float64Array => {
   const midpoint = (length - 1) * 0.5;
   const coefficients = new Float64Array(length);
@@ -41,6 +42,10 @@ const DELAY_MIX_SMOOTHING_SECONDS = 0.006;
 // reads, two filters, two nonlinear writes, and feedback routing forever
 // after a bypassed tail has genuinely drained.
 const DELAY_TAIL_RETIRE_THRESHOLD = 1e-7;
+// A keyboard-cut ring below roughly -46 dB of its VCA control is masked by
+// the output path and should be retired before its hidden feedback can keep
+// the downstream filter state alive into the next phrase.
+const DELAY_KEYBOARD_CUT_VCA_THRESHOLD = 0.005;
 const SAMPLE_HOLD_SATURATION = Math.tanh(0.8);
 // Web MIDI and pointer events can continue arriving while an AudioContext is
 // suspended. Keep enough chronology for many complete 37-key gestures without
@@ -247,6 +252,11 @@ class TptStateVariableFilter {
     this.ic2 = 0;
   }
 
+  copyStateFrom(source: TptStateVariableFilter): void {
+    this.ic1 = source.ic1;
+    this.ic2 = source.ic2;
+  }
+
   process(input: number, g: number, baseK: number): number {
     const stateEnergy = this.ic1 * this.ic1 + this.ic2 * this.ic2;
     const amplitudeDamping = Math.min(0.18, stateEnergy * 0.22);
@@ -270,6 +280,10 @@ class TptOnePole {
     this.state = 0;
   }
 
+  copyStateFrom(source: TptOnePole): void {
+    this.state = source.state;
+  }
+
   process(input: number, coefficient: number): number {
     const delta = (input - this.state) * coefficient;
     const output = delta + this.state;
@@ -282,16 +296,26 @@ class TransistorLadderFilter {
   private stages = [new TptOnePole(), new TptOnePole(), new TptOnePole(), new TptOnePole()];
 
   reset(): void {
-    for (const stage of this.stages) stage.reset();
+    this.stages[0].reset();
+    this.stages[1].reset();
+    this.stages[2].reset();
+    this.stages[3].reset();
+  }
+
+  copyStateFrom(source: TransistorLadderFilter): void {
+    this.stages[0].copyStateFrom(source.stages[0]);
+    this.stages[1].copyStateFrom(source.stages[1]);
+    this.stages[2].copyStateFrom(source.stages[2]);
+    this.stages[3].copyStateFrom(source.stages[3]);
   }
 
   process(input: number, feedback: number, poleCoefficient: number): number {
     const last = this.stages[3].state;
     let value = softSaturate(input - last * feedback, 1.55);
-    for (let index = 0; index < this.stages.length; index += 1) {
-      value = this.stages[index].process(value, poleCoefficient);
-      value = softSaturate(value, 1.22);
-    }
+    value = softSaturate(this.stages[0].process(value, poleCoefficient), 1.22);
+    value = softSaturate(this.stages[1].process(value, poleCoefficient), 1.22);
+    value = softSaturate(this.stages[2].process(value, poleCoefficient), 1.22);
+    value = softSaturate(this.stages[3].process(value, poleCoefficient), 1.22);
     return softSaturate(value, 1.3);
   }
 }
@@ -300,17 +324,27 @@ class NortonCascadeFilter {
   private stages = [new TptOnePole(), new TptOnePole(), new TptOnePole(), new TptOnePole()];
 
   reset(): void {
-    for (const stage of this.stages) stage.reset();
+    this.stages[0].reset();
+    this.stages[1].reset();
+    this.stages[2].reset();
+    this.stages[3].reset();
+  }
+
+  copyStateFrom(source: NortonCascadeFilter): void {
+    this.stages[0].copyStateFrom(source.stages[0]);
+    this.stages[1].copyStateFrom(source.stages[1]);
+    this.stages[2].copyStateFrom(source.stages[2]);
+    this.stages[3].copyStateFrom(source.stages[3]);
   }
 
   process(input: number, feedback: number, poleCoefficient: number): number {
     const last = this.stages[3].state;
     const limitedFeedback = softSaturate(last, 1.8) * feedback;
     let value = softSaturate(input - limitedFeedback, 1.14);
-    for (let index = 0; index < this.stages.length; index += 1) {
-      value = this.stages[index].process(value, poleCoefficient);
-      if (index === 1 || index === 3) value = softSaturate(value, 1.08);
-    }
+    value = this.stages[0].process(value, poleCoefficient);
+    value = softSaturate(this.stages[1].process(value, poleCoefficient), 1.08);
+    value = this.stages[2].process(value, poleCoefficient);
+    value = softSaturate(this.stages[3].process(value, poleCoefficient), 1.08);
     return softSaturate(value, 1.12);
   }
 }
@@ -320,6 +354,10 @@ class OnePoleHighPass {
 
   reset(): void {
     this.low.reset();
+  }
+
+  copyStateFrom(source: OnePoleHighPass): void {
+    this.low.copyStateFrom(source.low);
   }
 
   process(input: number, poleCoefficient: number): number {
@@ -388,6 +426,11 @@ class FirDecimator {
   reset(value = 0): void {
     this.history.fill(value);
     this.index = 0;
+  }
+
+  copyStateFrom(source: FirDecimator): void {
+    this.history.set(source.history);
+    this.index = source.index;
   }
 
   push(sample: number): void {
@@ -622,6 +665,11 @@ class StereoDelay {
   private read(buffer: Float32Array, delaySamples: number): number {
     let position = this.writeIndex - delaySamples;
     while (position < 0) position += buffer.length;
+    // A delay that is infinitesimally above an integer can produce a tiny
+    // negative read position. Adding a large ring length may round that value
+    // to exactly buffer.length, which is outside the typed array and would
+    // poison the delay/filter feedback paths with NaN at the first repeat.
+    if (position >= buffer.length) position = 0;
     const indexA = Math.floor(position);
     const indexB = indexA + 1 === buffer.length ? 0 : indexA + 1;
     const fraction = position - indexA;
@@ -796,6 +844,8 @@ export interface OdysseyMeter {
   sampleHold: number;
   peak: number;
   rms: number;
+  leftRms: number;
+  rightRms: number;
 }
 
 export interface PerformanceState {
@@ -895,6 +945,7 @@ export class OdysseyDSP {
   private finalRight = 0;
   private pinkNoise: PinkNoise;
   private delay: StereoDelay;
+  private keyboardCutDelayResetPending = false;
   private readonly drive = new OversampledStereoDrive();
   private performance: PerformanceState = { bendSemitones: 0, vibratoSemitones: 0 };
   private randomState = 0x6d2b79f5;
@@ -922,6 +973,16 @@ export class OdysseyDSP {
   private typeThreeFeedback = 0;
   private highPassCutoffValue = Number.NaN;
   private highPassPoleCoefficient = 0;
+  private vco1PitchOffset = Number.NaN;
+  private vco1PitchMultiplier = 1;
+  private vco2PitchOffset = Number.NaN;
+  private vco2PitchMultiplier = 1;
+  private stateVariableCutoffValue = Number.NaN;
+  private stateVariableG = 0;
+  private fourPoleAdjustedCutoffValue = Number.NaN;
+  private fourPolePoleCoefficient = 0;
+  private filterChannelsSynchronized = true;
+  private outputChannelsSynchronized = true;
   private lastMeter: OdysseyMeter;
 
   constructor(sampleRate = 44100) {
@@ -950,6 +1011,8 @@ export class OdysseyDSP {
       sampleHold: 0,
       peak: 0,
       rms: 0,
+      leftRms: 0,
+      rightRms: 0,
     };
   }
 
@@ -963,7 +1026,7 @@ export class OdysseyDSP {
       if (!Object.hasOwn(changes, rawKey)) continue;
       const key = rawKey as ParamKey;
       const rawValue = changes[key];
-      if (!(key in DEFAULT_PARAMS) || typeof rawValue !== "number") continue;
+      if (!Object.hasOwn(DEFAULT_PARAMS, key) || typeof rawValue !== "number") continue;
       const normalizedValue = normalizeParamValue(key, rawValue);
       if (Object.is(this.params[key], normalizedValue)) continue;
       this.params[key] = normalizedValue;
@@ -979,7 +1042,10 @@ export class OdysseyDSP {
       if (key === "delayTrails") delayRouteChanged = true;
       if (key === "autoRun" || key === "autoNote") allocationParamsChanged = true;
     }
-    if (delayRouteChanged) this.delay.reset();
+    if (delayRouteChanged) {
+      this.delay.reset();
+      this.keyboardCutDelayResetPending = false;
+    }
     if (delayParamsChanged) this.delay.setParams(this.params);
     if (!allocationParamsChanged) return;
     const nextGate = this.keys.size > 0 || this.params.autoRun > 0.5;
@@ -1062,7 +1128,9 @@ export class OdysseyDSP {
     this.typeThreeRight.reset();
     this.highPassLeft.reset();
     this.highPassRight.reset();
+    this.filterChannelsSynchronized = true;
     this.delay.reset();
+    this.keyboardCutDelayResetPending = false;
     this.drive.reset();
     this.sawOneDecimator.reset();
     this.pulseOneDecimator.reset();
@@ -1071,6 +1139,7 @@ export class OdysseyDSP {
     this.ringDecimator.reset();
     this.leftDecimator.reset();
     this.rightDecimator.reset();
+    this.outputChannelsSynchronized = true;
     this.previousExternalSample = 0;
     this.outputFeedbackReturn = 0;
     this.finalLeft = 0;
@@ -1087,6 +1156,8 @@ export class OdysseyDSP {
       sampleHold: 0,
       peak: 0,
       rms: 0,
+      leftRms: 0,
+      rightRms: 0,
     };
   }
 
@@ -1183,7 +1254,8 @@ export class OdysseyDSP {
         tail.gate = gate;
         // An off/on phrase boundary can collapse back to the tail's original
         // gate while a suspended worklet queue is full. Preserve that a
-        // boundary occurred so non-trailing delay memory still resets.
+        // boundary occurred so the next keyboard phrase can still reset
+        // non-trailing delay memory before it captures the new articulation.
         tail.gateTransition ||= gateTransition;
         tail.lowNote = lowNote;
         tail.highNote = highNote;
@@ -1218,7 +1290,7 @@ export class OdysseyDSP {
     value ^= value >>> 17;
     value ^= value << 5;
     this.randomState = value >>> 0;
-    return (this.randomState / 0xffffffff) * 2 - 1;
+    return this.randomState * UINT32_TO_BIPOLAR - 1;
   }
 
   private updateKeyboardTrigger(shouldSchedule: boolean): boolean {
@@ -1360,19 +1432,35 @@ export class OdysseyDSP {
       ? held * this.params.vco2Fm2Amount * 24
       : adsr * this.params.vco2Fm2Amount * 108;
 
+    let vco1PitchOffset: number;
     if (this.params.vco1Mode < 0.5) {
+      vco1PitchOffset = (this.params.vco1Fine / 100 + vco1Fm1 + vco1Fm2) / 12;
+      if (vco1PitchOffset !== this.vco1PitchOffset) {
+        this.vco1PitchOffset = vco1PitchOffset;
+        this.vco1PitchMultiplier = Math.pow(2, vco1PitchOffset);
+      }
       this.vco1Frequency = this.params.vco1Coarse * 0.01
-        * Math.pow(2, (this.params.vco1Fine / 100 + vco1Fm1 + vco1Fm2) / 12);
+        * this.vco1PitchMultiplier;
     } else {
+      vco1PitchOffset = (this.currentLowNote - 36 + transposition + vibrato
+        + this.params.vco1Fine / 100 + vco1Fm1 + vco1Fm2) / 12;
+      if (vco1PitchOffset !== this.vco1PitchOffset) {
+        this.vco1PitchOffset = vco1PitchOffset;
+        this.vco1PitchMultiplier = Math.pow(2, vco1PitchOffset);
+      }
       this.vco1Frequency = this.params.vco1Coarse
-        * Math.pow(2, (this.currentLowNote - 36 + transposition + vibrato
-          + this.params.vco1Fine / 100 + vco1Fm1 + vco1Fm2) / 12);
+        * this.vco1PitchMultiplier;
     }
 
     const highInterval = this.highNote - this.lowNote;
+    const vco2PitchOffset = (this.currentLowNote + highInterval - 36 + transposition + vibrato
+      + this.params.vco2Fine / 100 + vco2Fm1 + vco2Fm2) / 12;
+    if (vco2PitchOffset !== this.vco2PitchOffset) {
+      this.vco2PitchOffset = vco2PitchOffset;
+      this.vco2PitchMultiplier = Math.pow(2, vco2PitchOffset);
+    }
     this.vco2Frequency = this.params.vco2Coarse
-      * Math.pow(2, (this.currentLowNote + highInterval - 36 + transposition + vibrato
-        + this.params.vco2Fine / 100 + vco2Fm1 + vco2Fm2) / 12);
+      * this.vco2PitchMultiplier;
 
     this.vco1Frequency = clamp(this.vco1Frequency, 0.01, this.sampleRate * 0.45);
     this.vco2Frequency = clamp(this.vco2Frequency, 0.01, this.sampleRate * 0.45);
@@ -1448,7 +1536,7 @@ export class OdysseyDSP {
     this.ring = this.ringDecimator.read();
   }
 
-  private updateSampleHold(white: number, pink: number, shouldSample: boolean): void {
+  private updateSampleHold(pink: number, shouldSample: boolean): void {
     const input1 = this.params.shInput1Source < 0.5 ? this.saw1 : this.pulse1;
     const input2 = this.params.shInput2Source < 0.5 ? pink : this.pulse2;
     const mixed = input1 * this.params.shInput1Level + input2 * this.params.shInput2Level;
@@ -1464,7 +1552,6 @@ export class OdysseyDSP {
       }
       this.laggedSample += (this.heldSample - this.laggedSample) * this.sampleHoldLagCoefficient;
     }
-    void white;
   }
 
   private processMixer(noise: number, externalInput: number): number {
@@ -1539,8 +1626,11 @@ export class OdysseyDSP {
     const mod3Source = this.params.filterMod3Source < 0.5 ? adsr : ar;
     const mod3 = mod3Source * this.params.filterMod3Amount * 8;
     this.filterCutoff += (this.params.filterCutoff - this.filterCutoff) * this.filterCutoffSmoothing;
+    const modulationOctaves = mod1 + mod2 + mod3;
     const modulatedCutoff = clamp(
-      this.filterCutoff * Math.pow(2, mod1 + mod2 + mod3),
+      modulationOctaves === 0
+        ? this.filterCutoff
+        : this.filterCutoff * Math.pow(2, modulationOctaves),
       16,
       this.maximumFilterCutoff,
     );
@@ -1556,22 +1646,33 @@ export class OdysseyDSP {
 
     const filterInputLeft = inputLeft + noise * 0.0000003;
     const filterInputRight = inputRight + noise * 0.0000003;
+    const processAsMono = this.filterChannelsSynchronized && filterInputLeft === filterInputRight;
+    if (!processAsMono) this.filterChannelsSynchronized = false;
     let filteredLeft: number;
     let filteredRight: number;
     if (filterType === 1) {
-      const stateVariableG = Math.tan(
-        Math.PI * clamp(modulatedCutoff, 8, this.internalSampleRate * 0.44) / this.internalSampleRate,
-      );
+      if (modulatedCutoff !== this.stateVariableCutoffValue) {
+        this.stateVariableCutoffValue = modulatedCutoff;
+        this.stateVariableG = Math.tan(
+          Math.PI * clamp(modulatedCutoff, 8, this.internalSampleRate * 0.44)
+            / this.internalSampleRate,
+        );
+      }
       filteredLeft = this.typeOneLeft.process(
         softSaturate(filterInputLeft, 1.05),
-        stateVariableG,
+        this.stateVariableG,
         this.stateVariableBaseK,
       );
-      filteredRight = this.typeOneRight.process(
-        softSaturate(filterInputRight, 1.05),
-        stateVariableG,
-        this.stateVariableBaseK,
-      );
+      if (processAsMono) {
+        this.typeOneRight.copyStateFrom(this.typeOneLeft);
+        filteredRight = filteredLeft;
+      } else {
+        filteredRight = this.typeOneRight.process(
+          softSaturate(filterInputRight, 1.05),
+          this.stateVariableG,
+          this.stateVariableBaseK,
+        );
+      }
     } else {
       const filterCutoff = filterType === 2 ? modulatedCutoff : typeThreeCutoff;
       const normalizedCutoff = clamp(filterCutoff / this.internalSampleRate, 0, 0.22);
@@ -1582,18 +1683,53 @@ export class OdysseyDSP {
         selfOscillationScale
         + (2.3 - selfOscillationScale) * this.fourPoleCornerBlend
       );
-      const poleCoefficient = tptPoleCoefficient(adjustedCutoff, this.internalSampleRate);
+      if (adjustedCutoff !== this.fourPoleAdjustedCutoffValue) {
+        this.fourPoleAdjustedCutoffValue = adjustedCutoff;
+        this.fourPolePoleCoefficient = tptPoleCoefficient(adjustedCutoff, this.internalSampleRate);
+      }
       if (filterType === 2) {
-        filteredLeft = this.typeTwoLeft.process(filterInputLeft, this.typeTwoFeedback, poleCoefficient);
-        filteredRight = this.typeTwoRight.process(filterInputRight, this.typeTwoFeedback, poleCoefficient);
+        filteredLeft = this.typeTwoLeft.process(
+          filterInputLeft,
+          this.typeTwoFeedback,
+          this.fourPolePoleCoefficient,
+        );
+        if (processAsMono) {
+          this.typeTwoRight.copyStateFrom(this.typeTwoLeft);
+          filteredRight = filteredLeft;
+        } else {
+          filteredRight = this.typeTwoRight.process(
+            filterInputRight,
+            this.typeTwoFeedback,
+            this.fourPolePoleCoefficient,
+          );
+        }
       } else {
-        filteredLeft = this.typeThreeLeft.process(filterInputLeft, this.typeThreeFeedback, poleCoefficient);
-        filteredRight = this.typeThreeRight.process(filterInputRight, this.typeThreeFeedback, poleCoefficient);
+        filteredLeft = this.typeThreeLeft.process(
+          filterInputLeft,
+          this.typeThreeFeedback,
+          this.fourPolePoleCoefficient,
+        );
+        if (processAsMono) {
+          this.typeThreeRight.copyStateFrom(this.typeThreeLeft);
+          filteredRight = filteredLeft;
+        } else {
+          filteredRight = this.typeThreeRight.process(
+            filterInputRight,
+            this.typeThreeFeedback,
+            this.fourPolePoleCoefficient,
+          );
+        }
       }
     }
 
     const highPassedLeft = this.highPassLeft.process(filteredLeft, this.highPassPoleCoefficient);
-    const highPassedRight = this.highPassRight.process(filteredRight, this.highPassPoleCoefficient);
+    let highPassedRight: number;
+    if (processAsMono) {
+      this.highPassRight.copyStateFrom(this.highPassLeft);
+      highPassedRight = highPassedLeft;
+    } else {
+      highPassedRight = this.highPassRight.process(filteredRight, this.highPassPoleCoefficient);
+    }
     const envelope = this.params.vcaEnvelopeSource < 0.5 ? ar : adsr;
     const vcaControl = clamp(
       this.params.vcaInitialGain + envelope * this.params.vcaEnvelopeAmount,
@@ -1623,15 +1759,21 @@ export class OdysseyDSP {
       this.lastMeter.adsr = 0;
       this.lastMeter.peak = 0;
       this.lastMeter.rms = 0;
+      this.lastMeter.leftRms = 0;
+      this.lastMeter.rightRms = 0;
       return;
     }
     let peak = 0;
     let sumSquares = 0;
+    let leftSumSquares = 0;
+    let rightSumSquares = 0;
     // Message handlers cannot interleave with one AudioWorklet render quantum.
     // Prepare parameter-only coefficients once per block instead of comparing
     // the same values for every 2x-oversampled frame.
     const filterType = this.selectFilterType();
     const delayTrails = this.params.delayTrails > 0.5;
+    const delayCanBypassProcessing = this.params.delayEnabled < 0.5
+      && this.delay.tailIsRetired;
     const vcaEnvelopeUsesKeyboard = this.params.vcaEnvelopeSource < 0.5
       ? this.params.arSource < 0.5
       : this.params.adsrSource < 0.5;
@@ -1661,7 +1803,21 @@ export class OdysseyDSP {
       for (let pass = 0; pass < this.oversample; pass += 1) {
         const articulation = this.shiftArticulation();
         if (articulation) {
-          if (articulation.gateTransition && !delayTrails) this.delay.reset();
+          // Keyboard-cut delay belongs before the final VCF/HPF/VCA, so its
+          // stored repeats must survive key-up long enough to pass through the
+          // envelope's release segment. Clearing on both edges made any note
+          // shorter than Delay Time sound completely dry. Reset only at the
+          // start of the next phrase (or once the VCA has fully closed): the
+          // release remains audible, while stale repeats can never spill into
+          // that next keyboard attack.
+          if (articulation.gateTransition && !delayTrails) {
+            if (articulation.gate) {
+              this.delay.reset();
+              this.keyboardCutDelayResetPending = false;
+            } else if (!delayCapturesWithoutKeyboard) {
+              this.keyboardCutDelayResetPending = true;
+            }
+          }
           this.keyboardGate = articulation.gate;
           this.lowNote = articulation.lowNote;
           this.highNote = articulation.highNote;
@@ -1669,11 +1825,28 @@ export class OdysseyDSP {
         const keyboardTrigger = this.updateKeyboardTrigger(articulation?.trigger ?? false);
         this.updateLfo(keyboardTrigger);
         this.updateEnvelopes(keyboardTrigger, this.lfoSquare, this.keyboardGate);
+        if (this.keyboardCutDelayResetPending && !delayTrails) {
+          const vcaEnvelope = this.params.vcaEnvelopeSource < 0.5
+            ? this.arValue
+            : this.adsrValue;
+          const vcaControl = clamp(
+            this.params.vcaInitialGain + vcaEnvelope * this.params.vcaEnvelopeAmount,
+            0,
+            1.2,
+          );
+          if (vcaControl <= DELAY_KEYBOARD_CUT_VCA_THRESHOLD) {
+            // The VCA can no longer pass an audible stored repeat. Retire the hidden
+            // ring now so it cannot keep exciting filter state throughout an
+            // otherwise silent gap or leak into the next articulation.
+            this.delay.reset();
+            this.keyboardCutDelayResetPending = false;
+          }
+        }
         this.updateOscillators(this.lfoTriangle, this.lfoSquare, this.adsrValue);
         const white = this.random();
         const pink = this.pinkNoise.process(white);
         const shouldSample = this.params.shClockSource < 0.5 ? this.lfoRising : keyboardTrigger;
-        this.updateSampleHold(white, pink, shouldSample);
+        this.updateSampleHold(pink, shouldSample);
         const selectedNoise = this.params.noiseColor < 0.5 ? white : pink;
         const interpolation = (pass + 1) / this.oversample;
         const interpolatedExternal = this.previousExternalSample
@@ -1692,17 +1865,19 @@ export class OdysseyDSP {
             this.adsrValue,
             filterType,
           );
-          this.delay.process(this.finalLeft, this.finalRight);
-          this.finalLeft = this.delay.outputLeft;
-          this.finalRight = this.delay.outputRight;
+          if (!delayCanBypassProcessing) {
+            this.delay.process(this.finalLeft, this.finalRight);
+            this.finalLeft = this.delay.outputLeft;
+            this.finalRight = this.delay.outputRight;
+          }
         } else {
           const captureDelayInput = delayCanReachVca && (
             this.keyboardGate || delayCapturesWithoutKeyboard
           );
-          this.delay.process(mixed, mixed, captureDelayInput);
+          if (!delayCanBypassProcessing) this.delay.process(mixed, mixed, captureDelayInput);
           this.processFinalFilterAndVca(
-            this.delay.outputLeft,
-            this.delay.outputRight,
+            delayCanBypassProcessing ? mixed : this.delay.outputLeft,
+            delayCanBypassProcessing ? mixed : this.delay.outputRight,
             selectedNoise,
             this.lfoTriangle,
             this.arValue,
@@ -1714,11 +1889,25 @@ export class OdysseyDSP {
         const limitedLeft = softClip(this.finalLeft * this.masterLevel * 0.82);
         const limitedRight = softClip(this.finalRight * this.masterLevel * 0.82);
         this.outputFeedbackReturn = -(limitedLeft + limitedRight) * 0.5;
-        this.leftDecimator.push(limitedLeft);
-        this.rightDecimator.push(limitedRight);
+        if (this.outputChannelsSynchronized && limitedLeft === limitedRight) {
+          this.leftDecimator.push(limitedLeft);
+        } else {
+          if (this.outputChannelsSynchronized) {
+            // The right FIR was idle while output was mathematically mono.
+            // Clone its short history once at the first stereo sample so the
+            // channel transition is identical to having processed it all
+            // along, then retain independent state from this point forward.
+            this.rightDecimator.copyStateFrom(this.leftDecimator);
+            this.outputChannelsSynchronized = false;
+          }
+          this.leftDecimator.push(limitedLeft);
+          this.rightDecimator.push(limitedRight);
+        }
       }
       decimatedLeft = this.leftDecimator.read();
-      decimatedRight = this.rightDecimator.read();
+      decimatedRight = this.outputChannelsSynchronized
+        ? decimatedLeft
+        : this.rightDecimator.read();
       this.previousExternalSample = externalSample;
       const outputLeft = clamp(decimatedLeft, -1, 1);
       const outputRight = clamp(decimatedRight, -1, 1);
@@ -1726,7 +1915,11 @@ export class OdysseyDSP {
       right[frame] = Number.isFinite(outputRight) ? outputRight : 0;
       const magnitude = Math.max(Math.abs(left[frame]), Math.abs(right[frame]));
       peak = Math.max(peak, magnitude);
-      sumSquares += (left[frame] * left[frame] + right[frame] * right[frame]) * 0.5;
+      const leftSquare = left[frame] * left[frame];
+      const rightSquare = right[frame] * right[frame];
+      leftSumSquares += leftSquare;
+      rightSumSquares += rightSquare;
+      sumSquares += (leftSquare + rightSquare) * 0.5;
     }
 
     this.lastMeter.sampleRate = this.sampleRate;
@@ -1739,6 +1932,9 @@ export class OdysseyDSP {
     this.lastMeter.adsr = this.adsr.value;
     this.lastMeter.sampleHold = this.laggedSample;
     this.lastMeter.peak = peak;
-    this.lastMeter.rms = Math.sqrt(sumSquares / Math.max(1, left.length));
+    const meterFrameCount = Math.max(1, left.length);
+    this.lastMeter.rms = Math.sqrt(sumSquares / meterFrameCount);
+    this.lastMeter.leftRms = Math.sqrt(leftSumSquares / meterFrameCount);
+    this.lastMeter.rightRms = Math.sqrt(rightSumSquares / meterFrameCount);
   }
 }

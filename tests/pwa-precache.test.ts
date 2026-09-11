@@ -11,6 +11,8 @@ import {
   isRequiredOfflineUrl,
   validateBuiltVersion,
   validatePrecache,
+  validateUpdateBridge,
+  validateWorkboxRuntime,
 } from "../scripts/verify-precache.mjs";
 
 const matchesIncludePattern = (fileName: string, pattern: string): boolean => {
@@ -19,10 +21,13 @@ const matchesIncludePattern = (fileName: string, pattern: string): boolean => {
 };
 
 describe("PWA precache manifest", () => {
-  it("partitions root install artwork away from Workbox's generated-asset glob", () => {
+  it("partitions root install artwork while precaching emitted console rasters", () => {
     expect(PWA_WORKBOX_GLOB_PATTERNS).toEqual([
       "**/*.{js,css,html,woff2}",
+      "assets/**/*.{png,webp}",
     ]);
+    expect(isRequiredOfflineUrl("assets/enamel-white.webp")).toBe(true);
+    expect(isRequiredOfflineUrl("assets/knob-ivory.png")).toBe(true);
 
     const publicImages = readdirSync(resolve("public"))
       .filter((fileName) => /\.(?:ico|jpe?g|png)$/i.test(fileName));
@@ -59,6 +64,21 @@ describe("PWA precache manifest", () => {
       .toThrow(/Required offline assets missing.*odyssey-worklet\.js/);
   });
 
+  it("requires the service worker's non-precached Workbox bootstrap module", () => {
+    const serviceWorker = 'define(["./workbox-a1b2c3"],function(workbox){})';
+
+    expect(validateWorkboxRuntime(serviceWorker, ["index.html", "workbox-a1b2c3.js"]))
+      .toBe("workbox-a1b2c3.js");
+    expect(() => validateWorkboxRuntime(serviceWorker, ["index.html"]))
+      .toThrow(/exactly one emitted Workbox runtime/);
+    expect(() => validateWorkboxRuntime(serviceWorker, ["workbox-deadbeef.js"]))
+      .toThrow(/does not match emitted/);
+    expect(() => validateWorkboxRuntime(
+      'define(["./workbox-a1b2c3","./workbox-deadbeef"],function(){})',
+      ["workbox-a1b2c3.js"],
+    )).toThrow(/does not match emitted/);
+  });
+
   it("requires the built HTML to expose one resolved release version", () => {
     const valid = [
       '<meta name="application-version" content="1.0.1" />',
@@ -70,5 +90,25 @@ describe("PWA precache manifest", () => {
       .toThrow(/Unresolved %VITE_APP_VERSION%/);
     expect(() => validateBuiltVersion(valid, "1.0.2"))
       .toThrow(/does not declare application-version 1\.0\.2/);
+  });
+
+  it("keeps a versioned migration bridge as the sole client-claim owner", () => {
+    const bridge = "sw-update-bridge-1.0.18.js";
+    const valid = [
+      `importScripts("${bridge}")`,
+      "self.skipWaiting()",
+      'precacheAndRoute([{url:"sw-update-bridge-1.0.18.js",revision:"one"}],{})',
+    ].join(";");
+
+    expect(validateUpdateBridge(valid, [bridge], "1.0.18")).toEqual([bridge]);
+    expect(() => validateUpdateBridge(`${valid};workbox.clientsClaim()`, [bridge], "1.0.18"))
+      .toThrow(/sole clients\.claim/);
+    expect(() => validateUpdateBridge(valid, [bridge], "1.0.19"))
+      .toThrow(/versioned Workbox update bridge sw-update-bridge-1\.0\.19\.js/);
+    expect(() => validateUpdateBridge(valid, [], "1.0.18"))
+      .toThrow(/imports differ from built bridge files/);
+    expect(validateUpdateBridge("workbox.clientsClaim()", [], "1.0.19")).toEqual([]);
+    expect(() => validateUpdateBridge("self.skipWaiting()", [], "1.0.19"))
+      .toThrow(/resume clientsClaim/);
   });
 });

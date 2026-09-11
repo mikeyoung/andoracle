@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ANDORACLE_VERSION } from "../src/version";
 
-const DESCRIPTION = "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.";
+const DESCRIPTION = "Andoracle is an offline-capable desktop duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.";
 const SITE_URL = "https://mikeyoung.org/andoracle/";
 const SOCIAL_IMAGE_URL = `${SITE_URL}icon-512.png`;
 
@@ -36,9 +36,17 @@ describe("Andoracle project metadata", () => {
   it("keeps the release number in application source as the canonical build version", () => {
     const versionSource = readProjectFile("src/version.ts");
     const viteConfig = readProjectFile("vite.config.ts");
+    const packageJson = JSON.parse(readProjectFile("package.json")) as { version: string };
+    const packageLock = JSON.parse(readProjectFile("package-lock.json")) as {
+      version: string;
+      packages: Record<string, { version?: string }>;
+    };
 
     expect(versionSource).toContain(`export const ANDORACLE_VERSION = "${ANDORACLE_VERSION}"`);
     expect(viteConfig).toContain("package.json version must match src/version.ts");
+    expect(packageJson.version).toBe(ANDORACLE_VERSION);
+    expect(packageLock.version).toBe(ANDORACLE_VERSION);
+    expect(packageLock.packages[""]?.version).toBe(ANDORACLE_VERSION);
   });
 
   it("provides standard, social, and structured metadata in the document head", () => {
@@ -99,6 +107,7 @@ describe("Andoracle project metadata", () => {
 
     expect(webConfig).toContain('<add value="index.html" />');
     expect(webConfig).toContain('<mimeMap fileExtension=".webmanifest" mimeType="application/manifest+json" />');
+    expect(webConfig).toContain('<mimeMap fileExtension=".webp" mimeType="image/webp" />');
     expect(webConfig).toContain('<location path="sw.js">');
     expect(serviceWorkerLocation).toContain('<clientCache cacheControlMode="DisableCache" />');
     expect(serviceWorkerLocation).toContain(
@@ -124,8 +133,9 @@ describe("Andoracle project metadata", () => {
     const app = readProjectFile("src/App.tsx");
 
     expect(readme).toContain("Use **Panic** to release every physical note");
+    expect(readme).toContain("hard-clear the synth and stereo-delay state");
     expect(readme).not.toContain("Use **All notes off**");
-    expect(app).toContain('aria-label="Panic: all notes off"');
-    expect(app).toMatch(/>\s*Panic\s*<\/button>/);
+    expect(app).toContain('aria-label="Panic: clear synth, delay, and all notes"');
+    expect(app).toContain('<RasterLabel text="Panic" variant="button" tone="reverse" />');
   });
 });

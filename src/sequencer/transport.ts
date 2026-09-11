@@ -154,11 +154,14 @@ export class NoteSequenceRecorder {
     this.clearIdleTimer();
     if (!this.recording || this.heldSources.size > 0) return;
     const generation = this.timerGeneration;
-    this.idleTimer = this.timers.setTimeout(() => {
-      this.idleTimer = null;
+    const handle = this.timers.setTimeout(() => {
+      // A callback already captured by the host must not orphan a newer idle
+      // timer that replaced it before the stale callback was delivered.
+      if (this.idleTimer === handle) this.idleTimer = null;
       if (!this.recording || generation !== this.timerGeneration || this.heldSources.size > 0) return;
       this.onIdleStop();
     }, SEQUENCE_IDLE_STOP_MS);
+    this.idleTimer = handle;
   }
 
   private clearIdleTimer(): void {
@@ -207,7 +210,7 @@ const takePendingSource = (pending: PendingNoteSources): string | undefined => {
 /** One-timer, drift-corrected playback routed through App's normal note ownership. */
 export class NoteSequencePlayer {
   private events: readonly NoteSequenceEvent[] = [];
-  private readonly sourcesByNote = new Map<number, PendingNoteSources>();
+  private sourcesByNote = new Map<number, PendingNoteSources>();
   private timer: number | null = null;
   private startedAt = 0;
   private cursor = 0;
@@ -240,7 +243,12 @@ export class NoteSequencePlayer {
   }
 
   play(sequence: Pick<CapturedNoteSequence, "events">): boolean {
+    const generationBeforeStop = this.generation;
     this.stop(false);
+    // Releasing the preceding take calls application note handlers. If one of
+    // those handlers deliberately starts newer playback, the re-entrant user
+    // action owns the player and this stale outer Play must not replace it.
+    if (this.generation !== generationBeforeStop + 1) return false;
     if (sequence.events.length === 0) return false;
     this.events = sequence.events;
     this.cursor = 0;
@@ -266,12 +274,12 @@ export class NoteSequencePlayer {
     this.resumeCatchUpElapsedMs = null;
     this.playing = false;
     this.paused = true;
-    this.generation += 1;
+    const pausedGeneration = ++this.generation;
     this.clearTimer();
     // Keep logical FIFO ownership so held notes can be chased on resume and
     // their eventual recorded note-offs still release the correct source.
     this.silenceSources();
-    return true;
+    return this.generation === pausedGeneration && this.paused;
   }
 
   /** Continues from the frozen playhead and retriggers notes held at pause. */
@@ -304,19 +312,13 @@ export class NoteSequencePlayer {
 
     this.resumeCatchUpElapsedMs = null;
     if (this.cursor >= this.events.length) {
-      this.playing = false;
-      this.releaseAllSources();
-      this.events = [];
-      this.cursor = 0;
-      this.nextDueMs = 0;
-      this.pausedElapsedMs = 0;
-      this.handlers.finished("ended");
+      this.finishNaturally(generation);
       return false;
     }
     // Catch-up tasks are part of the paused interval. Restart the monotonic
     // origin here so yielding never shortens the next recorded delay.
     this.startedAt = this.clock.now() - resumeElapsedMs;
-    this.restoreSources();
+    this.restoreSources(generation);
     if (!this.playing || generation !== this.generation) return false;
     this.tick(generation);
     return true;
@@ -326,15 +328,19 @@ export class NoteSequencePlayer {
     const wasActive = this.isActive;
     this.playing = false;
     this.paused = false;
-    this.generation += 1;
+    const stoppedGeneration = ++this.generation;
     this.clearTimer();
-    this.releaseAllSources();
     this.events = [];
     this.cursor = 0;
     this.nextDueMs = 0;
     this.pausedElapsedMs = 0;
     this.resumeCatchUpElapsedMs = null;
-    if (notify && wasActive) this.handlers.finished("stopped");
+    this.releaseAllSources();
+    // A note-off callback may have started a newer take. Do not let the old
+    // stop notification make its UI look stopped while it is actually playing.
+    if (notify && wasActive && this.generation === stoppedGeneration) {
+      this.handlers.finished("stopped");
+    }
   }
 
   dispose(): void {
@@ -364,14 +370,7 @@ export class NoteSequencePlayer {
     }
 
     if (this.cursor >= this.events.length) {
-      this.playing = false;
-      this.paused = false;
-      this.releaseAllSources();
-      this.events = [];
-      this.cursor = 0;
-      this.nextDueMs = 0;
-      this.pausedElapsedMs = 0;
-      this.handlers.finished("ended");
+      this.finishNaturally(generation);
       return;
     }
 
@@ -441,16 +440,20 @@ export class NoteSequencePlayer {
 
   private silenceSources(): void {
     if (!this.sourcesAudible) return;
-    for (const pending of this.sourcesByNote.values()) {
+    // Flip the flag before callbacks so a re-entrant stop cannot recursively
+    // silence the same sources. Keep iterating the captured map if a callback
+    // starts another take; source identifiers are unique across generations.
+    const sourcesByNote = this.sourcesByNote;
+    this.sourcesAudible = false;
+    for (const pending of sourcesByNote.values()) {
       for (let index = pending.head; index < pending.sources.length; index += 1) {
         const source = pending.sources[index];
         if (source !== undefined) this.handlers.noteOff(source);
       }
     }
-    this.sourcesAudible = false;
   }
 
-  private restoreSources(): void {
+  private restoreSources(generation: number): void {
     if (this.sourcesAudible) return;
     // Mark restoration audible before callbacks so even a deliberately
     // re-entrant Pause can release the first restored note safely.
@@ -460,13 +463,50 @@ export class NoteSequencePlayer {
         const source = pending.sources[index];
         if (source === undefined) continue;
         this.handlers.noteOn(source, note);
-        if (!this.playing || this.paused || !this.sourcesAudible) return;
+        if (
+          generation !== this.generation
+          || !this.playing
+          || this.paused
+          || !this.sourcesAudible
+        ) return;
       }
     }
   }
 
+  private finishNaturally(generation: number): void {
+    if (generation !== this.generation) return;
+    this.playing = false;
+    this.paused = false;
+    this.events = [];
+    this.cursor = 0;
+    this.nextDueMs = 0;
+    this.pausedElapsedMs = 0;
+    this.resumeCatchUpElapsedMs = null;
+    this.releaseAllSources();
+    // A defensive cleanup callback for malformed programmatic input may
+    // start another take. Its lifecycle must supersede this old completion.
+    if (generation === this.generation) this.handlers.finished("ended");
+  }
+
   private releaseAllSources(): void {
-    this.silenceSources();
-    this.sourcesByNote.clear();
+    if (!this.sourcesAudible || this.sourcesByNote.size === 0) {
+      this.sourcesAudible = false;
+      this.sourcesByNote.clear();
+      return;
+    }
+    // Detach ownership before invoking application callbacks. A callback may
+    // synchronously start a new take; cleanup of the old take must never clear
+    // or silence the newly created source map.
+    const sourcesByNote = this.sourcesByNote;
+    const wasAudible = this.sourcesAudible;
+    this.sourcesByNote = new Map();
+    this.sourcesAudible = false;
+    if (!wasAudible) return;
+    for (const pending of sourcesByNote.values()) {
+      for (let index = pending.head; index < pending.sources.length; index += 1) {
+        const source = pending.sources[index];
+        if (source !== undefined) this.handlers.noteOff(source);
+      }
+    }
   }
 }

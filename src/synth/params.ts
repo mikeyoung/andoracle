@@ -1,3 +1,5 @@
+import { decimalPlacesForStep } from "../step-precision";
+
 export type ParamControl = "range" | "toggle" | "choice";
 export type ParamScale = "linear" | "log";
 export type ParamDisplay =
@@ -101,11 +103,17 @@ const PARAM_SPEC_DEFINITIONS = {
     scale: "log",
     display: "seconds-per-octave",
   },
-  portamentoMode: choice("Transpose glide mode", "Performance", 0, [
-    { value: 0, label: "Rev 2/3 · immediate" },
-    { value: 1, label: "Rev 1 · portamento" },
-  ]),
-  portamentoFootswitch: toggle("Portamento footswitch bypass", "Performance"),
+  portamentoMode: {
+    ...choice("Transpose glide mode", "Performance", 0, [
+      { value: 0, label: "Rev 2/3 · immediate" },
+      { value: 1, label: "Rev 1 · portamento" },
+    ]),
+    shortLabel: "Glide mode",
+  },
+  portamentoFootswitch: {
+    ...toggle("Portamento footswitch bypass", "Performance"),
+    shortLabel: "Port. bypass",
+  },
   transpose: choice("Transpose", "Performance", 0, [
     { value: -24, label: "2 oct down" },
     { value: 0, label: "Normal" },
@@ -300,7 +308,10 @@ const PARAM_SPEC_DEFINITIONS = {
     { value: 0, label: "Noise" },
     { value: 1, label: "Ring XOR" },
   ]),
-  mixer1Level: percent("Noise / ring level", "Audio mixer", 0),
+  mixer1Level: {
+    ...percent("Noise / ring level", "Audio mixer", 0),
+    shortLabel: "Noise / ring",
+  },
   mixer2Source: choice("Mixer channel 2", "Audio mixer", 0, [
     { value: 0, label: "VCO 1 saw" },
     { value: 1, label: "VCO 1 pulse" },
@@ -311,9 +322,13 @@ const PARAM_SPEC_DEFINITIONS = {
     { value: 1, label: "VCO 2 pulse" },
   ]),
   mixer3Level: percent("VCO 2 level", "Audio mixer", 0.56),
-  externalLevel: percent("External input level", "Audio mixer", 0.7),
+  externalLevel: {
+    ...percent("External input level", "Audio mixer", 0.7),
+    shortLabel: "Ext. input",
+  },
   outputFeedback: {
     ...percent("Output feedback return", "Audio mixer", 0),
+    shortLabel: "Feedback rtn.",
     max: 2,
   },
 
@@ -322,10 +337,13 @@ const PARAM_SPEC_DEFINITIONS = {
     { value: 2, label: "Type II · 24 dB" },
     { value: 3, label: "Type III · 24 dB" },
   ]),
-  filter4075Mode: choice("Type III cutoff scaling", "VCF", 1, [
-    { value: 0, label: "Original · ~12 kHz ceiling" },
-    { value: 1, label: "Repaired · full range" },
-  ]),
+  filter4075Mode: {
+    ...choice("Type III cutoff scaling", "VCF", 1, [
+      { value: 0, label: "Original · ~12 kHz ceiling" },
+      { value: 1, label: "Repaired · full range" },
+    ]),
+    shortLabel: "4075 scaling",
+  },
   filterCutoff: {
     label: "VCF cutoff",
     group: "VCF",
@@ -338,22 +356,34 @@ const PARAM_SPEC_DEFINITIONS = {
     scale: "log",
     display: "hertz",
   },
-  filterResonance: percent("VCF resonance", "VCF", 0.18),
+  filterResonance: {
+    ...percent("VCF resonance", "VCF", 0.18),
+    shortLabel: "Resonance",
+  },
   filterMod1Source: choice("VCF modulation 1", "VCF", 0, [
     { value: 0, label: "Keyboard CV" },
     { value: 1, label: "S/H mixer / pedal" },
   ]),
-  filterMod1Amount: percent("VCF modulation 1", "VCF", 0.25),
+  filterMod1Amount: {
+    ...percent("VCF modulation 1", "VCF", 0.25),
+    shortLabel: "VCF mod 1",
+  },
   filterMod2Source: choice("VCF modulation 2", "VCF", 1, [
     { value: 0, label: "S/H output" },
     { value: 1, label: "LFO triangle" },
   ]),
-  filterMod2Amount: percent("VCF modulation 2", "VCF", 0),
+  filterMod2Amount: {
+    ...percent("VCF modulation 2", "VCF", 0),
+    shortLabel: "VCF mod 2",
+  },
   filterMod3Source: choice("VCF modulation 3", "VCF", 0, [
     { value: 0, label: "ADSR" },
     { value: 1, label: "AR" },
   ]),
-  filterMod3Amount: percent("VCF modulation 3", "VCF", 0.22),
+  filterMod3Amount: {
+    ...percent("VCF modulation 3", "VCF", 0.22),
+    shortLabel: "VCF mod 3",
+  },
   hpfCutoff: {
     label: "HPF cutoff",
     group: "VCF",
@@ -383,7 +413,10 @@ const PARAM_SPEC_DEFINITIONS = {
     { value: 0, label: "AR" },
     { value: 1, label: "ADSR" },
   ]),
-  vcaEnvelopeAmount: percent("VCA envelope", "VCA", 0.9),
+  vcaEnvelopeAmount: {
+    ...percent("VCA envelope", "VCA", 0.9),
+    shortLabel: "Amount",
+  },
 
   repeatMode: choice("Repeat qualifier", "Envelopes", 0, [
     { value: 0, label: "Keyboard repeat" },
@@ -505,12 +538,6 @@ export const DEFAULT_PARAMS = Object.fromEntries(
   PARAM_KEYS.map((key) => [key, PARAM_SPECS[key].default]),
 ) as SynthParams;
 
-const decimalsForStep = (step: number): number => {
-  const stringValue = step.toString();
-  if (stringValue.includes("e-")) return Number(stringValue.split("e-")[1]);
-  return stringValue.includes(".") ? stringValue.split(".")[1].length : 0;
-};
-
 export const isValidParamValue = (key: ParamKey, value: number): boolean => {
   const spec = PARAM_SPECS[key];
   if (!Number.isFinite(value) || value < spec.min || value > spec.max) return false;
@@ -529,7 +556,7 @@ export const normalizeParamValue = (key: ParamKey, value: number): number => {
   }
   const clamped = Math.min(spec.max, Math.max(spec.min, value));
   const stepped = spec.min + Math.round((clamped - spec.min) / spec.step) * spec.step;
-  return Number(stepped.toFixed(decimalsForStep(spec.step)));
+  return Number(stepped.toFixed(decimalPlacesForStep(spec.step)));
 };
 
 export const normalizePatch = (candidate: Partial<Record<ParamKey, number>>): SynthParams => {

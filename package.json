@@ -1,13 +1,13 @@
 {
   "name": "andoracle",
   "private": true,
-  "version": "1.0.18",
+  "version": "1.0.19",
   "license": "MIT",
   "engines": {
     "node": ">=22.12.0",
     "npm": ">=10.0.0"
   },
-  "description": "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.",
+  "description": "Andoracle is an offline-capable desktop duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.",
   "keywords": [
     "synthesizer",
     "duophonic",
@@ -43,6 +43,6 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.4",
     "vite-plugin-pwa": "^1.0.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.11"
   }
 }

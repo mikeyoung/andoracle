@@ -104,6 +104,25 @@ describe("NoteSequenceRecorder", () => {
     expect(idle).toHaveBeenCalledOnce();
   });
 
+  it("does not let a stale idle callback orphan its replacement timer", () => {
+    const time = new FakeTime();
+    const idle = vi.fn();
+    const recorder = new NoteSequenceRecorder(idle, time, time);
+    recorder.start();
+    const stale = [...time.tasks.values()][0];
+    expect(stale).toBeDefined();
+    if (!stale) throw new Error("Expected an idle timer.");
+
+    recorder.noteOn("computer:A", 60);
+    recorder.noteOff("computer:A");
+    expect(time.tasks.size).toBe(1);
+    stale.callback();
+    expect(idle).not.toHaveBeenCalled();
+
+    recorder.dispose();
+    expect(time.tasks.size).toBe(0);
+  });
+
   it("trims leading silence and the inactivity-detection tail", () => {
     const time = new FakeTime();
     let result: CapturedNoteSequence | null = null;
@@ -607,6 +626,40 @@ describe("NoteSequencePlayer", () => {
     expect(activeSources.size).toBe(0);
   });
 
+  it("does not restore stale held notes after a callback starts newer playback", () => {
+    const time = new FakeTime();
+    const attacks: number[] = [];
+    let restartDuringRestore = false;
+    let player!: NoteSequencePlayer;
+    player = new NoteSequencePlayer({
+      noteOn: (_source, note) => {
+        attacks.push(note);
+        if (!restartDuringRestore) return;
+        restartDuringRestore = false;
+        player.play(take([
+          { deltaMs: 0, note: 72, on: true },
+          { deltaMs: 25, note: 72, on: false },
+        ]));
+      },
+      noteOff: () => undefined,
+      finished: () => undefined,
+    }, time, time);
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 0, note: 64, on: true },
+      { deltaMs: 100, note: 60, on: false },
+      { deltaMs: 0, note: 64, on: false },
+    ]));
+    player.pause();
+    const precedingAttackCount = attacks.length;
+    restartDuringRestore = true;
+
+    expect(player.resume()).toBe(false);
+    expect(attacks.slice(precedingAttackCount)).toEqual([60, 72]);
+    expect(player.isPlaying).toBe(true);
+    expect(time.nextDelay()).toBe(25);
+  });
+
   it("stops from paused state, rewinds, and does not duplicate lifecycle work", () => {
     const { time, calls, player } = setup();
     const sequence = take([
@@ -647,6 +700,32 @@ describe("NoteSequencePlayer", () => {
     expect(activeSources).toEqual(new Set(["computer:KeyA"]));
     player.stop(false);
     expect(activeSources).toEqual(new Set(["computer:KeyA"]));
+  });
+
+  it("reports a re-entrant stop during pause instead of recursing or claiming to remain paused", () => {
+    const time = new FakeTime();
+    const activeSources = new Set<string>();
+    let stoppedFromRelease = false;
+    let player!: NoteSequencePlayer;
+    player = new NoteSequencePlayer({
+      noteOn: (source) => activeSources.add(source),
+      noteOff: (source) => {
+        activeSources.delete(source);
+        if (stoppedFromRelease) return;
+        stoppedFromRelease = true;
+        player.stop(false);
+      },
+      finished: () => undefined,
+    }, time, time);
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 100, note: 60, on: false },
+    ]));
+
+    expect(player.pause()).toBe(false);
+    expect(player.isActive).toBe(false);
+    expect(activeSources.size).toBe(0);
+    expect(time.tasks.size).toBe(0);
   });
 
   it("uses distinct FIFO ownership for repeated notes", () => {
@@ -713,6 +792,78 @@ describe("NoteSequencePlayer", () => {
     ]));
     expect(calls[1]).toMatch(/^off:sequence:/);
     expect(calls[2]).toMatch(/^on:sequence:.*:72$/);
+  });
+
+  it("preserves playback started re-entrantly by an old source release", () => {
+    const time = new FakeTime();
+    const activeSources = new Set<string>();
+    const finished: string[] = [];
+    const replacement = take([
+      { deltaMs: 0, note: 72, on: true },
+      { deltaMs: 25, note: 72, on: false },
+    ]);
+    let restarted = false;
+    let player!: NoteSequencePlayer;
+    player = new NoteSequencePlayer({
+      noteOn: (source) => activeSources.add(source),
+      noteOff: (source) => {
+        activeSources.delete(source);
+        if (restarted) return;
+        restarted = true;
+        expect(player.play(replacement)).toBe(true);
+      },
+      finished: (reason) => finished.push(reason),
+    }, time, time);
+
+    player.play(take([
+      { deltaMs: 0, note: 60, on: true },
+      { deltaMs: 1_000, note: 60, on: false },
+    ]));
+    player.stop();
+
+    expect(player.isPlaying).toBe(true);
+    expect(activeSources.size).toBe(1);
+    expect(finished).toEqual([]);
+    expect(time.tasks.size).toBe(1);
+
+    time.advance(25);
+    expect(player.isActive).toBe(false);
+    expect(activeSources.size).toBe(0);
+    expect(finished).toEqual(["ended"]);
+    expect(time.tasks.size).toBe(0);
+  });
+
+  it("does not let defensive end cleanup clobber playback started by a release callback", () => {
+    const time = new FakeTime();
+    const activeSources = new Set<string>();
+    const finished: string[] = [];
+    let restarted = false;
+    let player!: NoteSequencePlayer;
+    player = new NoteSequencePlayer({
+      noteOn: (source) => activeSources.add(source),
+      noteOff: (source) => {
+        activeSources.delete(source);
+        if (restarted) return;
+        restarted = true;
+        player.play(take([
+          { deltaMs: 0, note: 72, on: true },
+          { deltaMs: 25, note: 72, on: false },
+        ]));
+      },
+      finished: (reason) => finished.push(reason),
+    }, time, time);
+
+    // Persisted takes are balanced, but the public player still releases a
+    // dangling programmatic attack defensively at natural completion.
+    player.play(take([{ deltaMs: 0, note: 60, on: true }]));
+    expect(player.isPlaying).toBe(true);
+    expect(activeSources.size).toBe(1);
+    expect(finished).toEqual([]);
+
+    time.advance(25);
+    expect(player.isActive).toBe(false);
+    expect(activeSources.size).toBe(0);
+    expect(finished).toEqual(["ended"]);
   });
 
   it("slices delays longer than the browser timer maximum without limiting duration", () => {

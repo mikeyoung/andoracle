@@ -1,6 +1,7 @@
 :root {
   color-scheme: light;
-  font-family: "Arial Narrow", "Roboto Condensed", "Franklin Gothic Medium", "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+  --andoracle-font: "Arial Narrow", "Roboto Condensed", "Franklin Gothic Medium", "Helvetica Neue", Arial, ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--andoracle-font);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --panel: #333333;
@@ -150,7 +151,7 @@ input:focus-visible,
     radial-gradient(circle at 5px calc(100% - 5px), #686868 0 1px, transparent 2px),
     radial-gradient(circle at calc(100% - 5px) calc(100% - 5px), #686868 0 1px, transparent 2px),
     linear-gradient(135deg, #eaeaea, #a8a8a8);
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: var(--andoracle-font);
   font-size: 29px;
   font-style: normal;
   font-weight: 800;
@@ -172,7 +173,7 @@ input:focus-visible,
 
 .brand-model {
   color: #363636;
-  font-family: "Courier New", Courier, monospace;
+  font-family: var(--andoracle-font);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.11em;
@@ -474,29 +475,6 @@ input:focus-visible,
   }
 }
 
-.status-deck {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(100px, 0.7fr)) minmax(180px, 1.5fr) auto;
-  gap: 2px;
-  padding: 2px calc(clamp(14px, 2vw, 34px) + env(safe-area-inset-right)) 2px calc(clamp(14px, 2vw, 34px) + env(safe-area-inset-left));
-  border-top: 1px solid #2e2e2e;
-  border-bottom: 3px solid #4c4c4c;
-  background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.17) 0 1px, rgba(0, 0, 0, 0.08) 1px 3px),
-    linear-gradient(90deg, #d8d8d8, #f0f0f0 50%, #d6d6d6);
-}
-
-.status-deck > div {
-  min-height: 44px;
-  padding: 7px 12px;
-  border: 1px solid #434343;
-  background: linear-gradient(180deg, #fafafa, #e5e5e5);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.65), inset 0 0 0 1px #777777;
-}
-
-.status-deck span,
-.sample-rate span,
-.voice-readout span,
 .output-meter > span {
   display: block;
   color: #4b4b4b;
@@ -505,66 +483,31 @@ input:focus-visible,
   letter-spacing: 0.16em;
 }
 
-.status-deck strong {
-  display: block;
-  min-width: 0;
-  margin-top: 3px;
-  color: #1f1f1f;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.25;
-  white-space: normal;
-  overflow-wrap: normal;
-  word-break: normal;
-  hyphens: none;
-}
-
-.sample-rate.has-warning strong {
-  color: #333333;
-  font-weight: 850;
-}
-
-.output-meter > div {
-  height: 8px;
-  margin-top: 7px;
+.output-vu-meter {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 698 / 260;
   overflow: hidden;
-  border: 1px solid #181818;
-  background:
-    repeating-linear-gradient(90deg, transparent 0 9%, rgba(43, 43, 43, 0.35) 9% 9.7%),
-    linear-gradient(180deg, #dadada, #aaaaaa);
-  box-shadow: inset 0 1px 3px rgba(32, 32, 32, 0.78);
 }
 
-.output-meter i {
-  display: block;
+.output-vu-meter__face,
+.output-vu-meter__needles {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  transform-origin: left;
-  background: linear-gradient(90deg, #747474 0 66%, #8f8f8f 80%, #515151 100%);
 }
 
-.network-status {
-  display: flex;
-  min-width: 94px;
-  align-items: center;
-  gap: 7px;
-  color: #252525;
-  font-size: 10px;
-  font-weight: 700;
+.output-vu-meter__face--on {
+  display: none;
 }
 
-.network-status i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1px solid #181818;
-  background: #4b4b4b;
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.2);
+.output-meter.is-powered .output-vu-meter__face--on {
+  display: block;
 }
 
-.network-status i.is-online {
-  background: #919191;
+.output-meter.is-powered .output-vu-meter__face--off {
+  display: none;
 }
 
 .system-banner {
@@ -644,62 +587,6 @@ main {
   background:
     repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.025) 0 1px, transparent 1px 5px),
     linear-gradient(90deg, rgba(18, 18, 18, 0.3), rgba(116, 116, 116, 0.14) 50%, rgba(18, 18, 18, 0.3));
-}
-
-.usage-note {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-bottom: 12px;
-  padding: 8px 11px;
-  border: 1px solid #353535;
-  color: #3a3a3a;
-  background: linear-gradient(180deg, rgba(227, 227, 227, 0.97), rgba(190, 190, 190, 0.97));
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.55), 0 2px 5px rgba(14, 14, 14, 0.38);
-  font-size: 11px;
-}
-
-.usage-note span:first-child {
-  color: #444444;
-  font-weight: 850;
-}
-
-.usage-note span {
-  min-width: 0;
-  overflow-wrap: normal;
-  word-break: normal;
-  hyphens: none;
-}
-
-.usage-note [role="status"] {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.signal-flow {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 10px;
-  padding: 7px 10px;
-  border: 1px solid #383838;
-  color: #353535;
-  background:
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.14) 0 1px, rgba(0, 0, 0, 0.04) 1px 3px),
-    linear-gradient(180deg, #c6c6c6, #a8a8a8);
-  box-shadow: inset 0 1px rgba(255, 255, 255, 0.48);
-  font-size: 9px;
-  font-weight: 850;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.signal-flow i {
-  color: #4e4e4e;
-  font-size: 13px;
-  font-style: normal;
 }
 
 .panel-grid {
@@ -918,7 +805,7 @@ main {
   padding-top: 6px;
   color: #343434;
   color: color-mix(in srgb, var(--accent), #171717 58%);
-  font-family: "Courier New", Courier, monospace;
+  font-family: var(--andoracle-font);
   font-size: 10px;
   font-weight: 700;
   line-height: 1.1;
@@ -1885,7 +1772,7 @@ footer span {
   outline: 0;
   background: #2a2a2a;
   box-shadow: inset 0 2px 6px #000;
-  font-family: "Courier New", Courier, monospace;
+  font-family: var(--andoracle-font);
   font-size: 18px;
 }
 
@@ -1981,7 +1868,7 @@ footer span {
   overflow-wrap: normal;
   word-break: normal;
   hyphens: none;
-  font-family: "Courier New", Courier, monospace;
+  font-family: var(--andoracle-font);
   font-weight: 700;
 }
 
@@ -2029,7 +1916,7 @@ footer span {
 .help-interface-list kbd {
   max-width: 100%;
   color: #282828;
-  font-family: "Courier New", Courier, monospace;
+  font-family: var(--andoracle-font);
   font-size: 11px;
   font-weight: 800;
   overflow-wrap: normal;
@@ -2067,7 +1954,7 @@ footer span {
   color: #e5e5e5;
   outline: 0;
   background: transparent;
-  font-family: "Courier New", Courier, monospace;
+  font-family: var(--andoracle-font);
   font-size: 20px;
 }
 
@@ -2134,10 +2021,6 @@ footer span {
   .brand-name {
     font-size: 16px;
     letter-spacing: 0.05em;
-  }
-
-  .status-deck {
-    grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
   }
 
   .panel-grid {
@@ -2235,23 +2118,8 @@ footer span {
     font-size: 9px;
   }
 
-  .status-deck {
-    grid-template-columns: repeat(auto-fit, minmax(min(112px, 100%), 1fr));
-    padding: 1px env(safe-area-inset-right) 1px env(safe-area-inset-left);
-  }
-
   main {
     padding: 12px calc(8px + env(safe-area-inset-right)) 24px calc(8px + env(safe-area-inset-left));
-  }
-
-  .usage-note {
-    display: block;
-    font-size: 10px;
-  }
-
-  .usage-note span {
-    display: block;
-    margin-bottom: 5px;
   }
 
   .panel-grid {
@@ -2262,16 +2130,6 @@ footer span {
   .module--envelopes {
     grid-column: span 1;
   }
-
-  .module--controllers { order: 1; }
-  .module--vco1 { order: 2; }
-  .module--vco2 { order: 3; }
-  .module--modulators { order: 4; }
-  .module--mixer { order: 5; }
-  .module--delay { order: 6; }
-  .module--filter { order: 7; }
-  .module--envelopes { order: 8; }
-  .module--amplifier { order: 9; }
 
   .control-bank {
     min-height: 184px;
@@ -2618,18 +2476,18 @@ footer span {
   }
 }
 
-/* Let the desktop patch selector use the native select's widest-option
-   intrinsic size. It may still shrink to its row, and compact screens retain
-   the full-width rule above, so a long saved name cannot create page overflow. */
+/* The photographic selector shell owns responsive sizing. Keep the native
+   patch select locked to that shell so its hit target, text, and bezel remain
+   one fluid control at every desktop width. */
 @media (min-width: 701px) {
   .patch-strip #preset {
-    width: auto;
-    inline-size: auto;
+    width: 100%;
+    inline-size: 100%;
     min-width: 0;
     min-inline-size: 0;
-    max-width: 100%;
-    max-inline-size: 100%;
-    flex: 0 1 auto;
+    max-width: none;
+    max-inline-size: none;
+    flex: 1 1 auto;
   }
 }
 
@@ -2637,11 +2495,6 @@ footer span {
    screens. Safe-area insets are additive, so notches never consume the 20px. */
 @media (max-width: 960px) {
   .topbar {
-    padding-right: calc(20px + env(safe-area-inset-right));
-    padding-left: calc(20px + env(safe-area-inset-left));
-  }
-
-  .status-deck {
     padding-right: calc(20px + env(safe-area-inset-right));
     padding-left: calc(20px + env(safe-area-inset-left));
   }
@@ -2696,8 +2549,6 @@ footer span {
   .module,
   .midi-strip,
   .keyboard-module,
-  .usage-note,
-  .signal-flow,
   .direct-entry {
     border-color: CanvasText;
   }

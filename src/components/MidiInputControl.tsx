@@ -1,6 +1,6 @@
-import { memo, useId } from "react";
+import { memo, useEffect, useId, useRef, useState, type MouseEvent } from "react";
 import type { MidiInputSummary } from "../midi/web-midi";
-import { PanelScrews } from "./PanelScrews";
+import { RasterLabel } from "./RasterLabel";
 
 export type MidiInputOperation = "connecting" | "refreshing" | "disconnecting" | "cancelling" | null;
 
@@ -39,6 +39,10 @@ function MidiInputControlComponent({
 }: MidiInputControlProps) {
   const titleId = useId();
   const statusId = useId();
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const [open, setOpen] = useState(false);
   const busy = operation !== null;
   const inputNames = midiInputListLabel(inputs);
   const connectedStatus = `${inputs.length} MIDI input${inputs.length === 1 ? "" : "s"}: ${inputNames}`;
@@ -71,53 +75,108 @@ function MidiInputControlComponent({
         ? "Cancelling…"
         : enabled ? "Disconnect MIDI" : "Connect MIDI";
 
+  useEffect(() => {
+    if (!open) return;
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    const focusTimer = window.setTimeout(() => titleRef.current?.focus({ preventScroll: true }), 0);
+    return () => {
+      window.clearTimeout(focusTimer);
+      if (dialog?.open) dialog.close();
+      launcherRef.current?.focus({ preventScroll: true });
+    };
+  }, [open]);
+
+  const backdropClose = (event: MouseEvent<HTMLDialogElement>): void => {
+    if (event.target === dialogRef.current) setOpen(false);
+  };
+
   return (
-    <section className="midi-strip"
-      aria-labelledby={titleId}
-      aria-describedby={statusId}
-      aria-busy={busy}
-    >
-      <PanelScrews />
-      <div className="midi-strip-copy">
-        <span className="module-eyebrow">Later-model interface · retrofit</span>
-        <strong id={titleId}>MIDI keyboard control</strong>
-        <small
-          id={statusId}
-          className={error ? "control-error" : undefined}
-          role={error ? "alert" : "status"}
-          aria-live={error ? "assertive" : "polite"}
-          aria-atomic="true"
+    <div className="midi-control" aria-busy={busy}>
+      <button
+        ref={launcherRef}
+        type="button"
+        className={`button button--quiet midi-control__launcher${enabled ? " is-enabled" : ""}${error ? " has-error" : ""}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`MIDI keyboard controls. ${status}`}
+        onClick={() => setOpen(true)}
+      >
+        <i className="midi-control__lamp" aria-hidden="true" />
+        <RasterLabel text="MIDI" variant="button" tone="reverse" />
+      </button>
+
+      <dialog
+        ref={dialogRef}
+        className="direct-entry midi-dialog"
+        aria-labelledby={titleId}
+        aria-describedby={statusId}
+        aria-busy={busy}
+        onCancel={(event) => {
+          event.preventDefault();
+          setOpen(false);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(false);
+        }}
+        onClick={backdropClose}
+      >
+        <form
+          method="dialog"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setOpen(false);
+          }}
         >
-          {status}
-        </small>
-      </div>
-      <div className="midi-strip-actions">
-        {enabled && (
-          <button
-            key="refresh"
-            type="button"
-            className="button button--quiet"
-            aria-describedby={statusId}
-            aria-disabled={busy || undefined}
-            onClick={busy ? undefined : onRefresh}
+          <div className="modal-kicker">Later-model interface · retrofit</div>
+          <h2 ref={titleRef} id={titleId} tabIndex={-1}>MIDI keyboard control</h2>
+          <p
+            id={statusId}
+            className={`modal-current midi-dialog__status${error ? " control-error" : ""}`}
+            role={error ? "alert" : "status"}
+            aria-live={error ? "assertive" : "polite"}
+            aria-atomic="true"
           >
-            Refresh
-          </button>
-        )}
-        <button
-          key="toggle"
-          type="button"
-          className={`button${enabled ? " button--midi-on" : " button--primary"}`}
-          aria-pressed={enabled}
-          aria-describedby={statusId}
-          aria-disabled={operation === "disconnecting" || operation === "cancelling" || undefined}
-          disabled={!supported}
-          onClick={operation === "disconnecting" || operation === "cancelling" ? undefined : onToggle}
-        >
-          {actionLabel}
-        </button>
-      </div>
-    </section>
+            {status}
+          </p>
+          <div className="modal-actions midi-dialog__actions">
+            {enabled && (
+              <button
+                key="refresh"
+                type="button"
+                className="button button--quiet"
+                aria-describedby={statusId}
+                aria-disabled={busy || undefined}
+                onClick={busy ? undefined : onRefresh}
+              >
+                <RasterLabel text="Refresh" variant="button" tone="reverse" />
+              </button>
+            )}
+            <button
+              key="toggle"
+              type="button"
+              className={`button${enabled ? " button--midi-on" : " button--primary"}`}
+              aria-pressed={enabled}
+              aria-describedby={statusId}
+              aria-disabled={operation === "disconnecting" || operation === "cancelling" || undefined}
+              disabled={!supported}
+              onClick={operation === "disconnecting" || operation === "cancelling" ? undefined : onToggle}
+            >
+              <RasterLabel text={actionLabel} variant="button" tone="reverse" />
+            </button>
+            <button
+              type="submit"
+              className="button button--quiet"
+            >
+              <RasterLabel text="Close" variant="button" tone="reverse" />
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </div>
   );
 }
 

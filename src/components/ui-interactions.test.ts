@@ -14,15 +14,22 @@ import {
 import {
   EMPTY_ODYSSEY_METER,
   OutputMeter,
+  integrateOutputVuMeterPhysics,
   odysseyMetersMatch,
-  outputPeakPercent,
+  outputVuMeterDrive,
+  outputVuMeterMotionIsSettled,
 } from "./OutputMeter";
 import {
+  DIRECT_ENTRY_LONG_PRESS_DELAY_MS,
+  DirectEntryLongPressTracker,
   DirectEntryInterruptionRegistry,
   DeferredRangePointerFocusRelease,
   keyboardAdjustedRangeValue,
   LongPressClickSuppression,
   RangeControl,
+  ReversibleRangeKeyboardStepper,
+  shouldStartDirectEntryLongPress,
+  shouldReleaseChoicePointerFocus,
   shouldConsumeLongPressClick,
   shouldEmitRangeChange,
 } from "./ParameterControls";
@@ -34,9 +41,16 @@ import {
 import { ExternalInputControl } from "./ExternalInputControl";
 import { HelpDialog } from "./HelpDialog";
 import { MidiInputControl } from "./MidiInputControl";
+import parameterControlsSource from "./ParameterControls.tsx?raw";
 import { PatchLibraryDialog } from "./PatchLibraryDialog";
 import patchLibraryDialogSource from "./PatchLibraryDialog.tsx?raw";
-import { PARAM_KEYS, PARAM_SPECS, normalizedToParam } from "../synth/params";
+import {
+  PARAM_KEYS,
+  PARAM_SPECS,
+  formatParamValue,
+  normalizedToParam,
+  paramToNormalized,
+} from "../synth/params";
 import {
   clearPpcOwnership,
   isPadActivationKey,
@@ -83,6 +97,8 @@ describe("on-screen keyboard interaction contracts", () => {
       resetEpoch: 0,
       onNoteOn: vi.fn(),
       onNoteOff: vi.fn(),
+      position: "bottom",
+      onPositionChange: vi.fn(),
     }));
 
     expect(markup.match(/class="piano-key /g)).toHaveLength(37);
@@ -119,6 +135,8 @@ describe("on-screen keyboard interaction contracts", () => {
       resetEpoch: 0,
       onNoteOn: vi.fn(),
       onNoteOff: vi.fn(),
+      position: "bottom",
+      onPositionChange: vi.fn(),
     }));
     const secondOctaveStart = markup.match(/style="[^"]*--two-row-key-left:([^%;]+)%[^"]*" data-note="48"/);
     const lowerRowStart = markup.match(/style="[^"]*--two-row-key-left:([^%;]+)%[^"]*" data-note="60"/);
@@ -250,6 +268,12 @@ describe("PPC interaction contracts", () => {
     expect(markup.match(/aria-keyshortcuts="Enter Space"/g)).toHaveLength(3);
     expect(markup.match(/aria-pressed="false"/g)).toHaveLength(3);
     expect(markup).toContain('role="group" aria-label="Proportional pitch controls"');
+    expect(markup.indexOf('aria-label="Bend down pressure pad"')).toBeLessThan(
+      markup.indexOf('aria-label="Vibrato pressure pad"'),
+    );
+    expect(markup.indexOf('aria-label="Vibrato pressure pad"')).toBeLessThan(
+      markup.indexOf('aria-label="Bend up pressure pad"'),
+    );
   });
 
   it("clears every pointer, keyboard, assistive, and pending-click pad owner", () => {
@@ -291,34 +315,120 @@ describe("PPC interaction contracts", () => {
 });
 
 describe("output meter accessibility", () => {
-  it("exposes a clamped, finite percentage through the meter role", () => {
-    const markup = renderToStaticMarkup(createElement(OutputMeter, { peak: 0.426 }));
+  it("exposes both physical VU channels through one concise meter role", () => {
+    const leftRms = 0.01;
+    const rightRms = 0.02;
+    const leftPercent = Math.round(outputVuMeterDrive(leftRms) * 100);
+    const rightPercent = Math.round(outputVuMeterDrive(rightRms) * 100);
+    const markup = renderToStaticMarkup(createElement(OutputMeter, {
+      leftRms,
+      rightRms,
+      running: true,
+    }));
 
-    expect(markup).toContain('role="meter"');
-    expect(markup).toContain('aria-label="Output peak"');
-    expect(markup).toContain('aria-valuemin="0"');
-    expect(markup).toContain('aria-valuemax="100"');
-    expect(markup).toContain('aria-valuenow="43"');
-    expect(markup).toContain('aria-valuetext="43 percent"');
+    expect(markup).toContain('role="group" aria-label="Stereo output level"');
+    expect(markup.match(/role="meter"/g)).toHaveLength(2);
+    expect(markup).toContain('aria-label="Left output level"');
+    expect(markup).toContain('aria-label="Right output level"');
+    expect(markup.match(/aria-valuemin="0"/g)).toHaveLength(2);
+    expect(markup.match(/aria-valuemax="100"/g)).toHaveLength(2);
+    expect(markup).toContain(`aria-valuenow="${leftPercent}" aria-valuetext="${leftPercent} percent"`);
+    expect(markup).toContain(`aria-valuenow="${rightPercent}" aria-valuetext="${rightPercent} percent"`);
+    expect(markup).toContain('class="output-meter is-powered"');
+    expect(markup).toContain('class="output-vu-meter__face output-vu-meter__face--off"');
+    expect(markup).toContain('class="output-vu-meter__face output-vu-meter__face--on"');
+    expect(markup).toContain('class="output-vu-meter__needles" width="698" height="260"');
   });
 
-  it("normalizes invalid and out-of-range peaks", () => {
-    expect(outputPeakPercent(Number.NaN)).toBe(0);
-    expect(outputPeakPercent(Number.POSITIVE_INFINITY)).toBe(0);
-    expect(outputPeakPercent(-0.1)).toBe(0);
-    expect(outputPeakPercent(1.1)).toBe(100);
+  it("normalizes invalid, silent, and over-range RMS levels", () => {
+    expect(outputVuMeterDrive(Number.NaN)).toBe(0);
+    expect(outputVuMeterDrive(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(outputVuMeterDrive(-0.1)).toBe(0);
+    expect(outputVuMeterDrive(0)).toBe(0);
+    expect(outputVuMeterDrive(1)).toBe(1);
+  });
+
+  it("retains Chaotic Sound Effects' calibrated dB scale and frame-clamped response", () => {
+    expect(outputVuMeterDrive(0.004777286046641967)).toBeCloseTo(0, 8);
+    expect(outputVuMeterDrive(0.016950450455051074)).toBeCloseTo(0.5, 8);
+    expect(outputVuMeterDrive(0.06014246794170308)).toBeCloseTo(1, 8);
+
+    const positions = new Float64Array(2);
+    const velocities = new Float64Array(2);
+    const drives = new Float64Array([1, 0]);
+    integrateOutputVuMeterPhysics(positions, velocities, drives, 1 / 60);
+    expect(positions[0]).toBeCloseTo(0.07515432098765432, 10);
+    expect(velocities[0]).toBeCloseTo(5.685185185185185, 10);
+
+    const clampedPositions = new Float64Array(2);
+    const clampedVelocities = new Float64Array(2);
+    integrateOutputVuMeterPhysics(clampedPositions, clampedVelocities, drives, 5);
+    expect(clampedPositions[0]).toBeCloseTo(0.34920719811897644, 9);
+    expect(clampedVelocities[0]).toBeCloseTo(8.768353140100453, 8);
+  });
+
+  it("uses bounded moving-coil physics and settles at both target levels", () => {
+    const positions = new Float64Array(2);
+    const velocities = new Float64Array(2);
+    const drives = new Float64Array([1, 0.4]);
+
+    expect(outputVuMeterMotionIsSettled(positions, velocities, drives)).toBe(false);
+    for (let step = 0; step < 300; step += 1) {
+      integrateOutputVuMeterPhysics(positions, velocities, drives, 1 / 120);
+    }
+    expect(positions[0]).toBeCloseTo(1, 3);
+    expect(positions[1]).toBeCloseTo(0.4, 3);
+    expect(outputVuMeterMotionIsSettled(positions, velocities, drives)).toBe(true);
+
+    drives.fill(0);
+    for (let step = 0; step < 300; step += 1) {
+      integrateOutputVuMeterPhysics(positions, velocities, drives, 1 / 120);
+    }
+    expect([...positions].every((position) => position >= 0 && position <= 1)).toBe(true);
+    expect(outputVuMeterMotionIsSettled(positions, velocities, drives)).toBe(true);
   });
 
   it("suppresses identical telemetry frames without hiding a changed field", () => {
     expect(odysseyMetersMatch(EMPTY_ODYSSEY_METER, { ...EMPTY_ODYSSEY_METER })).toBe(true);
     expect(odysseyMetersMatch(EMPTY_ODYSSEY_METER, {
       ...EMPTY_ODYSSEY_METER,
-      peak: 0.25,
+      leftRms: 0.25,
     })).toBe(false);
   });
 });
 
 describe("range control change filtering", () => {
+  class FakeRangeWindowTarget {
+    readonly added = new Map<string, number>();
+    readonly removed = new Map<string, number>();
+    private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+      const listeners = this.listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
+      listeners.add(listener);
+      this.listeners.set(type, listeners);
+      this.added.set(type, (this.added.get(type) ?? 0) + 1);
+    }
+
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+      this.listeners.get(type)?.delete(listener);
+      this.removed.set(type, (this.removed.get(type) ?? 0) + 1);
+    }
+
+    dispatch(type: string, pointerId?: number): void {
+      const event = new Event(type);
+      if (pointerId !== undefined) Object.defineProperty(event, "pointerId", { value: pointerId });
+      for (const listener of [...(this.listeners.get(type) ?? [])]) {
+        if (typeof listener === "function") listener(event);
+        else listener.handleEvent(event);
+      }
+    }
+
+    listenerCount(type: string): number {
+      return this.listeners.get(type)?.size ?? 0;
+    }
+  }
+
   it("renders native vertical inputs as accessible 270-degree rotary dials", () => {
     const renderDial = (value: number) => renderToStaticMarkup(createElement(RangeControl, {
       param: "masterVolume",
@@ -403,17 +513,133 @@ describe("range control change filtering", () => {
     expect(blur).toHaveBeenCalledTimes(1);
   });
 
+  it("releases dial focus after its pointer ends outside the input", () => {
+    const windowTarget = new FakeRangeWindowTarget();
+    const callbacks = new Map<number, () => void>();
+    const blur = vi.fn();
+    const release = new DeferredRangePointerFocusRelease(
+      (callback) => {
+        callbacks.set(71, callback);
+        return 71;
+      },
+      (timerId) => callbacks.delete(timerId),
+      windowTarget,
+    );
+
+    release.beginPointerGesture({ blur }, 14);
+    expect(windowTarget.listenerCount("pointerup")).toBe(1);
+    expect(windowTarget.listenerCount("pointercancel")).toBe(1);
+    expect(windowTarget.listenerCount("blur")).toBe(1);
+    expect(windowTarget.listenerCount("pagehide")).toBe(1);
+
+    windowTarget.dispatch("pointerup", 99);
+    expect(callbacks.size).toBe(0);
+    expect(windowTarget.listenerCount("pointerup")).toBe(1);
+
+    windowTarget.dispatch("pointerup", 14);
+    expect(callbacks.size).toBe(1);
+    for (const type of ["pointerup", "pointercancel", "blur", "pagehide"]) {
+      expect(windowTarget.listenerCount(type), type).toBe(0);
+      expect(windowTarget.removed.get(type), type).toBe(1);
+    }
+    expect(blur).not.toHaveBeenCalled();
+    callbacks.get(71)?.();
+    expect(blur).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans temporary dial listeners on interruption and disposal", () => {
+    const windowTarget = new FakeRangeWindowTarget();
+    const interruptedBlur = vi.fn();
+    const disposedBlur = vi.fn();
+    const release = new DeferredRangePointerFocusRelease(
+      vi.fn(() => 81),
+      vi.fn(),
+      windowTarget,
+    );
+
+    release.beginPointerGesture({ blur: interruptedBlur }, 21);
+    windowTarget.dispatch("pagehide");
+    expect(interruptedBlur).toHaveBeenCalledTimes(1);
+    expect(windowTarget.listenerCount("pointerup")).toBe(0);
+
+    release.beginPointerGesture({ blur: disposedBlur }, 22);
+    release.dispose();
+    windowTarget.dispatch("pointercancel", 22);
+    expect(disposedBlur).not.toHaveBeenCalled();
+    for (const type of ["pointerup", "pointercancel", "blur", "pagehide"]) {
+      expect(windowTarget.listenerCount(type), type).toBe(0);
+      expect(windowTarget.added.get(type), type).toBe(2);
+      expect(windowTarget.removed.get(type), type).toBe(2);
+    }
+  });
+
   it("does not emit an unchanged value but preserves real edits", () => {
     expect(shouldEmitRangeChange(0.5, 0.5)).toBe(false);
     expect(shouldEmitRangeChange(0.5, 0.51)).toBe(true);
   });
 
-  it("moves stepped controls by one declared value on every Arrow key", () => {
+  it("releases choice focus only for pointer-generated clicks", () => {
+    expect(shouldReleaseChoicePointerFocus(1)).toBe(true);
+    expect(shouldReleaseChoicePointerFocus(2)).toBe(true);
+    expect(shouldReleaseChoicePointerFocus(0)).toBe(false);
+    expect(shouldReleaseChoicePointerFocus(-1)).toBe(false);
+  });
+
+  it("keeps one-step movement when it already produces complete rotary feedback", () => {
     expect(keyboardAdjustedRangeValue("masterTune", 0, "ArrowRight")).toBe(1);
     expect(keyboardAdjustedRangeValue("masterTune", 0, "ArrowUp")).toBe(1);
     expect(keyboardAdjustedRangeValue("masterTune", 0, "ArrowLeft")).toBe(-1);
     expect(keyboardAdjustedRangeValue("autoNote", 48, "ArrowRight")).toBe(49);
     expect(keyboardAdjustedRangeValue("ppcBendRange", 8, "ArrowDown")).toBe(7);
+  });
+
+  it("advances fine controls to the next visible and screen-reader-distinct stop", () => {
+    const raw = 65.41;
+    const nextAudio = keyboardAdjustedRangeValue("vco1Coarse", raw, "ArrowUp");
+    const nextLowFrequency = keyboardAdjustedRangeValue("vco1Coarse", raw, "ArrowUp", 0.01);
+
+    expect(nextAudio).toBeDefined();
+    expect(nextLowFrequency).toBeDefined();
+    expect(Math.round(paramToNormalized("vco1Coarse", nextAudio!) * 1000))
+      .toBeGreaterThan(Math.round(paramToNormalized("vco1Coarse", raw) * 1000));
+    expect(formatParamValue("vco1Coarse", nextAudio!)).not.toBe(formatParamValue("vco1Coarse", raw));
+    expect(Math.round(paramToNormalized("vco1Coarse", nextLowFrequency!) * 1000))
+      .toBeGreaterThan(Math.round(paramToNormalized("vco1Coarse", raw) * 1000));
+    expect(formatParamValue("vco1Coarse", nextLowFrequency! * 0.01))
+      .not.toBe(formatParamValue("vco1Coarse", raw * 0.01));
+  });
+
+  it("exactly reverses the last perceptible Arrow-key transition", () => {
+    const stepper = new ReversibleRangeKeyboardStepper();
+    const pedalStart = PARAM_SPECS.pedalPosition.default;
+    const pedalUp = stepper.adjust("pedalPosition", pedalStart, "ArrowUp")!;
+
+    expect(formatParamValue("pedalPosition", pedalUp))
+      .not.toBe(formatParamValue("pedalPosition", pedalStart));
+    expect(stepper.adjust("pedalPosition", pedalUp, "ArrowDown")).toBe(pedalStart);
+
+    const coarseStart = PARAM_SPECS.vco1Coarse.default;
+    const coarseUp = stepper.adjust("vco1Coarse", coarseStart, "ArrowUp", 0.01)!;
+    expect(Math.round(paramToNormalized("vco1Coarse", coarseUp) * 1000))
+      .toBeGreaterThan(Math.round(paramToNormalized("vco1Coarse", coarseStart) * 1000));
+    expect(formatParamValue("vco1Coarse", coarseUp * 0.01))
+      .not.toBe(formatParamValue("vco1Coarse", coarseStart * 0.01));
+    expect(stepper.adjust("vco1Coarse", coarseUp, "ArrowDown", 0.01)).toBe(coarseStart);
+  });
+
+  it("invalidates reversible Arrow history when the dial loses focus", () => {
+    const stepper = new ReversibleRangeKeyboardStepper();
+    const start = PARAM_SPECS.pedalPosition.default;
+    const up = stepper.adjust("pedalPosition", start, "ArrowUp")!;
+
+    stepper.reset();
+    const laterDown = stepper.adjust("pedalPosition", up, "ArrowDown")!;
+    expect(laterDown).not.toBe(start);
+    expect(laterDown).toBeLessThan(up);
+
+    expect(parameterControlsSource).toMatch(
+      /aria-describedby=\{`param-\$\{param\}-range`}\s+onBlur=\{\(\) => keyboardStepper\.current\?\.reset\(\)}/,
+    );
   });
 
   it("clamps Arrow keys, reaches endpoints, and keeps page motion normalized", () => {
@@ -451,6 +677,41 @@ describe("range control change filtering", () => {
         .toBe(spec.min);
       expect(keyboardAdjustedRangeValue(param, middle, "End"), `${param} End`)
         .toBe(spec.max);
+
+      const up = keyboardAdjustedRangeValue(param, middle, "ArrowUp")!;
+      const down = keyboardAdjustedRangeValue(param, middle, "ArrowDown")!;
+      const middlePosition = Math.round(paramToNormalized(param, middle) * 1000);
+      expect(Math.round(paramToNormalized(param, up) * 1000), `${param} visible ArrowUp`)
+        .toBeGreaterThan(middlePosition);
+      expect(Math.round(paramToNormalized(param, down) * 1000), `${param} visible ArrowDown`)
+        .toBeLessThan(middlePosition);
+      expect(formatParamValue(param, up), `${param} announced ArrowUp`)
+        .not.toBe(formatParamValue(param, middle));
+      expect(formatParamValue(param, down), `${param} announced ArrowDown`)
+        .not.toBe(formatParamValue(param, middle));
+
+      const upwardStepper = new ReversibleRangeKeyboardStepper();
+      const perceptibleUp = upwardStepper.adjust(param, middle, "ArrowUp")!;
+      expect(
+        upwardStepper.adjust(param, perceptibleUp, "ArrowDown"),
+        `${param} exact interior Arrow reversal`,
+      ).toBe(middle);
+
+      const fromMinimum = new ReversibleRangeKeyboardStepper();
+      const minimumUp = fromMinimum.adjust(param, spec.min, "ArrowUp")!;
+      expect(minimumUp, `${param} lower endpoint inward movement`).toBeGreaterThan(spec.min);
+      expect(
+        fromMinimum.adjust(param, minimumUp, "ArrowDown"),
+        `${param} exact lower endpoint reversal`,
+      ).toBe(spec.min);
+
+      const fromMaximum = new ReversibleRangeKeyboardStepper();
+      const maximumDown = fromMaximum.adjust(param, spec.max, "ArrowDown")!;
+      expect(maximumDown, `${param} upper endpoint inward movement`).toBeLessThan(spec.max);
+      expect(
+        fromMaximum.adjust(param, maximumDown, "ArrowUp"),
+        `${param} exact upper endpoint reversal`,
+      ).toBe(spec.max);
     }
   });
 });
@@ -513,6 +774,130 @@ describe("direct-entry interruption listener registry", () => {
     expect(registry.subscriberCount).toBe(0);
     expect(windowTarget.removed.get("blur")).toBe(1);
     expect(documentTarget.removed.get("visibilitychange")).toBe(1);
+  });
+});
+
+describe("direct-entry long-press gesture tracking", () => {
+  const pointer = (
+    pointerType: string,
+    overrides: Partial<{
+      pointerId: number;
+      button: number;
+      isPrimary: boolean;
+      clientX: number;
+      clientY: number;
+    }> = {},
+  ) => ({
+    pointerId: overrides.pointerId ?? 7,
+    pointerType,
+    button: overrides.button ?? 0,
+    isPrimary: overrides.isPrimary ?? true,
+    clientX: overrides.clientX ?? 100,
+    clientY: overrides.clientY ?? 100,
+  });
+
+  it("opens exact entry after a primary mouse, touch, or pen hold", () => {
+    for (const pointerType of ["mouse", "touch", "pen"]) {
+      let callback: (() => void) | undefined;
+      const activate = vi.fn();
+      const setTimer = vi.fn((next: () => void) => {
+        callback = next;
+        return 91;
+      });
+      const clearTimer = vi.fn();
+      const tracker = new DirectEntryLongPressTracker(setTimer, clearTimer);
+
+      expect(tracker.begin(pointer(pointerType), activate), pointerType).toBe(true);
+      expect(setTimer, pointerType).toHaveBeenCalledExactlyOnceWith(
+        expect.any(Function),
+        DIRECT_ENTRY_LONG_PRESS_DELAY_MS,
+      );
+      callback?.();
+      expect(activate, pointerType).toHaveBeenCalledTimes(1);
+      expect(tracker.end(7), pointerType).toBe(true);
+      // A timer that has already fired is not cleared a second time.
+      expect(clearTimer, pointerType).not.toHaveBeenCalled();
+    }
+  });
+
+  it("leaves right click to context-menu handling and ignores secondary pointers", () => {
+    const setTimer = vi.fn(() => 92);
+    const tracker = new DirectEntryLongPressTracker(setTimer, vi.fn());
+
+    expect(shouldStartDirectEntryLongPress(pointer("mouse"))).toBe(true);
+    expect(shouldStartDirectEntryLongPress(pointer("mouse", { button: 2 }))).toBe(false);
+    expect(shouldStartDirectEntryLongPress(pointer("touch", { isPrimary: false }))).toBe(false);
+    expect(tracker.begin(pointer("mouse", { button: 2 }), vi.fn())).toBe(false);
+    expect(tracker.begin(pointer("touch", { isPrimary: false }), vi.fn())).toBe(false);
+    expect(setTimer).not.toHaveBeenCalled();
+  });
+
+  it("tolerates finger drift while cancelling deliberate dial movement", () => {
+    const callbacks = new Map<number, () => void>();
+    let nextTimer = 100;
+    const clearTimer = vi.fn((timerId: number) => callbacks.delete(timerId));
+    const tracker = new DirectEntryLongPressTracker(
+      (callback) => {
+        const timerId = nextTimer++;
+        callbacks.set(timerId, callback);
+        return timerId;
+      },
+      clearTimer,
+    );
+    const touchActivation = vi.fn();
+
+    tracker.begin(pointer("touch"), touchActivation);
+    expect(tracker.move(99, 500, 500)).toBe(false);
+    expect(tracker.move(7, 117, 100)).toBe(true);
+    callbacks.get(100)?.();
+    expect(touchActivation).toHaveBeenCalledTimes(1);
+    tracker.end(7);
+
+    const cancelledTouchActivation = vi.fn();
+    tracker.begin(pointer("touch"), cancelledTouchActivation);
+    expect(tracker.move(7, 119, 100)).toBe(false);
+    expect(clearTimer).toHaveBeenCalledWith(101);
+    expect(callbacks.has(101)).toBe(false);
+    expect(cancelledTouchActivation).not.toHaveBeenCalled();
+
+    const mouseActivation = vi.fn();
+    tracker.begin(pointer("mouse"), mouseActivation);
+    expect(tracker.move(7, 109, 100)).toBe(false);
+    expect(callbacks.has(102)).toBe(false);
+    expect(mouseActivation).not.toHaveBeenCalled();
+  });
+
+  it("ignores unrelated terminal events and owns cancellation cleanup", () => {
+    const callbacks = new Map<number, () => void>();
+    const clearTimer = vi.fn((timerId: number) => callbacks.delete(timerId));
+    const activate = vi.fn();
+    const tracker = new DirectEntryLongPressTracker(
+      (callback) => {
+        callbacks.set(110, callback);
+        return 110;
+      },
+      clearTimer,
+    );
+
+    tracker.begin(pointer("touch"), activate);
+    expect(tracker.end(8)).toBe(false);
+    expect(callbacks.has(110)).toBe(true);
+    tracker.cancel();
+    expect(clearTimer).toHaveBeenCalledExactlyOnceWith(110);
+    expect(callbacks.size).toBe(0);
+    expect(tracker.end(7)).toBe(false);
+    expect(activate).not.toHaveBeenCalled();
+  });
+
+  it("wires the all-pointer tracker into parameter capture handlers", () => {
+    expect(parameterControlsSource).toContain("if (!shouldStartDirectEntryLongPress(event)) return;");
+    expect(parameterControlsSource).not.toContain('if (event.pointerType === "mouse")');
+    expect(parameterControlsSource).toContain(
+      "longPress.current?.move(event.pointerId, event.clientX, event.clientY);",
+    );
+    expect(parameterControlsSource).toContain(
+      "if (!longPress.current?.end(event.pointerId)) return;",
+    );
   });
 });
 
@@ -611,8 +996,13 @@ describe("cancellable device connection controls", () => {
     }));
 
     expect(markup).toContain("Cancel MIDI");
-    expect(markup).toMatch(/<button[^>]*aria-disabled="true"[^>]*>Refresh<\/button>/);
-    expect(markup).toMatch(/<button[^>]*>Cancel MIDI<\/button>/);
+    const buttons = markup.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? [];
+    const refresh = buttons.find((button) => button.includes(">Refresh</span>")) ?? "";
+    const cancel = buttons.find((button) => button.includes(">Cancel MIDI</span>")) ?? "";
+    expect(refresh).toContain('aria-disabled="true"');
+    expect(refresh).not.toContain('disabled=""');
+    expect(cancel).not.toBe("");
+    expect(cancel).not.toContain('aria-disabled="true"');
   });
 });
 

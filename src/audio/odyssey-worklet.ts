@@ -25,14 +25,15 @@ type WorkletMessage =
   | { type: "request-meter" }
   | { type: "performance"; performance: Partial<PerformanceState> };
 
-// About 21.5 visual updates per second at 44.1 kHz/128 frames keeps the meter
-// fluid without spending main-thread time on display telemetry near 30 Hz.
-const METER_BLOCK_INTERVAL = 16;
+// Match the 30 Hz moving-coil sampling cadence used by Chaotic Sound Effects.
+// Counting rendered frames instead of fixed 128-frame blocks alternates the
+// 44.1 kHz schedule naturally without drifting away from real time.
+const METER_UPDATES_PER_SECOND = 30;
 
 class AndoracleProcessor extends AudioWorkletProcessor {
   private readonly dsp = new OdysseyDSP(sampleRate);
   private externalInputBuffer = new Float32Array(0);
-  private blocksUntilMeter = 1;
+  private framesUntilMeter = 0;
   private meterRequested = false;
 
   constructor() {
@@ -98,13 +99,16 @@ class AndoracleProcessor extends AudioWorkletProcessor {
     const left = output[0];
     const right = output[1] ?? output[0];
     this.dsp.process(left, right, this.foldExternalInput(inputs[0], left.length));
-    this.blocksUntilMeter -= 1;
-    if (this.blocksUntilMeter <= 0) {
+    this.framesUntilMeter -= left.length;
+    if (this.framesUntilMeter <= 0) {
       if (this.meterRequested) {
         this.port.postMessage({ type: "meter", meter: this.dsp.getMeter() });
         this.meterRequested = false;
       }
-      this.blocksUntilMeter = METER_BLOCK_INTERVAL;
+      const meterFrameInterval = sampleRate / METER_UPDATES_PER_SECOND;
+      do {
+        this.framesUntilMeter += meterFrameInterval;
+      } while (this.framesUntilMeter <= 0);
     }
     return true;
   }

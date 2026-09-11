@@ -17,6 +17,7 @@ import {
   saveUserSequence,
   saveUserSequenceSafely,
   userSequenceNameKey,
+  type CapturedNoteSequence,
   type NoteSequenceEvent,
   type SafeDeleteUserSequenceResult,
   type SafeReplaceUserSequenceResult,
@@ -262,6 +263,77 @@ describe("note-sequence compact codec", () => {
 });
 
 describe("user sequence storage", () => {
+  it("does not inspect unbounded payloads or stale targets after cancellation", async () => {
+    const storage = new MemoryStorage();
+    const lockManager: UserSequenceLockManager = { request: vi.fn() };
+    const controller = new AbortController();
+    controller.abort();
+    const inaccessibleTake = Object.defineProperty({}, "events", {
+      get: () => { throw new Error("cancelled take was inspected"); },
+    }) as CapturedNoteSequence;
+    const inaccessibleTarget = Object.defineProperty({}, "name", {
+      get: () => { throw new Error("cancelled target was inspected"); },
+    }) as UserNoteSequence;
+
+    await expect(replaceUserSequenceSafely(
+      sequenceSnapshot("Existing"),
+      inaccessibleTake,
+      storage,
+      lockManager,
+      controller.signal,
+    )).resolves.toMatchObject({ status: "busy", sequences: [] });
+    await expect(deleteUserSequenceSafely(
+      inaccessibleTarget,
+      storage,
+      lockManager,
+      controller.signal,
+    )).resolves.toMatchObject({ status: "busy", sequences: [] });
+    expect(lockManager.request).not.toHaveBeenCalled();
+  });
+
+  it("does not inspect an unbounded take or acquire a lock for name-only failures", async () => {
+    const storage = new MemoryStorage();
+    const lockManager: UserSequenceLockManager = { request: vi.fn() };
+    const inaccessibleTake = Object.defineProperty({}, "events", {
+      get: () => { throw new Error("irrelevant take was inspected"); },
+    }) as CapturedNoteSequence;
+    const emptyTarget = Object.defineProperties({ name: " \t " }, {
+      data: { get: () => { throw new Error("irrelevant target data was inspected"); } },
+      durationMs: { get: () => { throw new Error("irrelevant target metadata was inspected"); } },
+      noteCount: { get: () => { throw new Error("irrelevant target metadata was inspected"); } },
+      eventCount: { get: () => { throw new Error("irrelevant target metadata was inspected"); } },
+    }) as UserNoteSequence;
+    const overlongTarget = Object.defineProperties({ name: "x".repeat(34) }, {
+      data: { get: () => { throw new Error("irrelevant target data was inspected"); } },
+      durationMs: { get: () => { throw new Error("irrelevant target metadata was inspected"); } },
+      noteCount: { get: () => { throw new Error("irrelevant target metadata was inspected"); } },
+      eventCount: { get: () => { throw new Error("irrelevant target metadata was inspected"); } },
+    }) as UserNoteSequence;
+
+    await expect(saveUserSequenceSafely(" \n\t ", inaccessibleTake, storage, lockManager))
+      .resolves.toMatchObject({ status: "empty-name" });
+    await expect(saveUserSequenceSafely("x".repeat(34), inaccessibleTake, storage, lockManager))
+      .resolves.toMatchObject({ status: "name-too-long" });
+    await expect(replaceUserSequenceSafely(
+      emptyTarget,
+      inaccessibleTake,
+      storage,
+      lockManager,
+    )).resolves.toMatchObject({ status: "empty-name" });
+    await expect(deleteUserSequenceSafely(emptyTarget, storage, lockManager))
+      .resolves.toMatchObject({ status: "empty-name" });
+    await expect(replaceUserSequenceSafely(
+      overlongTarget,
+      inaccessibleTake,
+      storage,
+      lockManager,
+    )).resolves.toMatchObject({ status: "not-found" });
+    await expect(deleteUserSequenceSafely(overlongTarget, storage, lockManager))
+      .resolves.toMatchObject({ status: "not-found" });
+    expect(lockManager.request).not.toHaveBeenCalled();
+    expect(storage.writes).toBe(0);
+  });
+
   it("saves a trimmed name and a compact versioned snapshot", () => {
     const storage = new MemoryStorage();
 

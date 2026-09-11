@@ -265,6 +265,24 @@ export const hasUserPatchNamed = (
   return Boolean(nameKey) && patches.some((patch) => userPatchNameKey(patch.name) === nameKey);
 };
 
+/**
+ * Recovers a saved-patch identity only when the current sound identifies one
+ * local record unambiguously. Patch URLs intentionally contain no local name,
+ * so equal duplicate sounds must remain an unsaved Custom patch.
+ */
+export const uniqueUserPatchMatchingParams = (
+  patches: readonly UserPatch[],
+  params: SynthParams,
+): UserPatch | null => {
+  let match: UserPatch | null = null;
+  for (const patch of patches) {
+    if (!PARAM_KEYS.every((key) => Object.is(patch.params[key], params[key]))) continue;
+    if (match) return null;
+    match = patch;
+  }
+  return match;
+};
+
 const defaultStorage = (): UserPatchStorage | null => {
   try {
     return typeof window === "undefined" ? null : window.localStorage;
@@ -755,6 +773,17 @@ export const saveUserPatchSafely = (
   signal?: AbortSignal,
 ): Promise<SafeSaveUserPatchResult> => {
   if (signal?.aborted) return Promise.resolve(createUserPatchBusyReader(storage)());
+  const normalizedName = normalizeUserPatchName(name);
+  // Name-only failures never need write authority or a snapshot of every
+  // control. This matters for programmatic callers whose proposed patch may
+  // be expensive or already revoked.
+  if (
+    !normalizedName
+    || !isUserLibraryNameWithinLimit(normalizedName)
+    || immutablePatchName(normalizedName)
+  ) {
+    return Promise.resolve(saveUserPatch(name, params, storage));
+  }
   const paramsSnapshot = normalizePatch(params);
   return runUserPatchWriteSafely<SafeSaveUserPatchResult>(
     () => saveUserPatch(name, paramsSnapshot, storage),
@@ -776,6 +805,15 @@ export const replaceUserPatchSafely = (
   lockManager: UserPatchLockManager | null = defaultLockManager(),
   signal?: AbortSignal,
 ): Promise<SafeReplaceUserPatchResult> => {
+  if (signal?.aborted) return Promise.resolve(createUserPatchBusyReader(storage)());
+  const normalizedName = normalizeUserPatchName(expected.name);
+  if (
+    !normalizedName
+    || !isUserLibraryNameWithinLimit(normalizedName)
+    || immutablePatchName(normalizedName)
+  ) {
+    return Promise.resolve(replaceUserPatch(expected, params, storage));
+  }
   const expectedSnapshot = snapshotUserPatch(expected);
   const paramsSnapshot = normalizePatch(params);
   return runUserPatchWriteSafely<SafeReplaceUserPatchResult>(
@@ -796,6 +834,15 @@ export const deleteUserPatchSafely = (
   lockManager: UserPatchLockManager | null = defaultLockManager(),
   signal?: AbortSignal,
 ): Promise<SafeDeleteUserPatchResult> => {
+  if (signal?.aborted) return Promise.resolve(createUserPatchBusyReader(storage)());
+  const normalizedName = normalizeUserPatchName(expected.name);
+  if (
+    !normalizedName
+    || !isUserLibraryNameWithinLimit(normalizedName)
+    || immutablePatchName(normalizedName)
+  ) {
+    return Promise.resolve(deleteUserPatch(expected, storage));
+  }
   // The Web Locks host may defer the callback. Capture the confirmed target
   // now so caller mutation cannot silently retarget that later transaction.
   const expectedSnapshot = snapshotUserPatch(expected);

@@ -1,7 +1,12 @@
 import workletUrl from "./odyssey-worklet.ts?worker&url";
 import type { OdysseyMeter, PerformanceState } from "./dsp-core";
 import { KeyedHostOperationGate } from "../host-operation";
-import type { SynthParams } from "../synth/params";
+import {
+  DEFAULT_PARAMS,
+  normalizeParamValue,
+  type ParamKey,
+  type SynthParams,
+} from "../synth/params";
 
 export interface AudioEngineStatus {
   state: AudioContextState | "uninitialized";
@@ -96,6 +101,19 @@ const closeDetachedContext = (context: AudioContext): void => {
 const streamHasLiveAudio = (stream: MediaStream): boolean =>
   stream.active !== false && stream.getAudioTracks().some((track) => track.readyState === "live");
 
+const normalizeSynthParamChanges = (changes: Partial<SynthParams>): Partial<SynthParams> | null => {
+  let normalized: Partial<SynthParams> | null = null;
+  for (const rawKey in changes) {
+    if (!Object.hasOwn(changes, rawKey)) continue;
+    const key = rawKey as ParamKey;
+    const value = changes[key];
+    if (!Object.hasOwn(DEFAULT_PARAMS, key) || typeof value !== "number") continue;
+    normalized ??= {};
+    normalized[key] = normalizeParamValue(key, value);
+  }
+  return normalized;
+};
+
 export class OdysseyAudioEngine {
   private context: AudioContext | null = null;
   private initializingContext: AudioContext | null = null;
@@ -126,6 +144,16 @@ export class OdysseyAudioEngine {
   private contextCloseSequence = 0;
   private shouldRun = false;
   private runIntentEstablished = false;
+  // A context can report `running` after an involuntary suspension without
+  // having received controls or note ownership changes made while it slept.
+  // Keep host state separate from processor readiness until power-on performs
+  // its checked reset-and-resync transaction.
+  private processorStateDirty = false;
+  // A channel panic can arrive while the browser has suspended the context.
+  // Unlike ordinary notes, this destructive command must survive that gap or
+  // a Trails-on delay ring in the still-live worklet can reappear on resume.
+  private hardSoundOffPending = false;
+  private resumeSoundPending = false;
   private disposed = false;
   private externalInputConnected = false;
   private meterRequestOutstanding = false;
@@ -156,6 +184,7 @@ export class OdysseyAudioEngine {
   get isAudioReady(): boolean {
     return this.shouldRun
       && !this.disposed
+      && !this.processorStateDirty
       && this.context?.state === "running"
       && this.node !== null
       && this.output !== null;
@@ -209,12 +238,21 @@ export class OdysseyAudioEngine {
     }
   }
 
+  private postControl(message: unknown): boolean {
+    const posted = this.postToProcessor(message);
+    if (!posted && this.shouldRun && this.runIntentEstablished) {
+      this.processorStateDirty = true;
+    }
+    return posted;
+  }
+
   private requestMeter(): void {
     const context = this.context;
     const node = this.node;
     if (
       this.meterRequestOutstanding
       || !this.meterListener
+      || this.processorStateDirty
       || !context
       || context.state !== "running"
       || !node
@@ -238,6 +276,12 @@ export class OdysseyAudioEngine {
     disconnectNode(source);
     stopStream(stream);
     this.emitExternalInputState(false);
+    // A deferred resume exists only for AUTO or live input. If the stream is
+    // gone and AUTO is off, keep a preceding hard-clear latched so a patch
+    // with Initial Gain cannot start droning after recovery by accident.
+    if ((this.params?.autoRun ?? DEFAULT_PARAMS.autoRun) <= 0.5) {
+      this.resumeSoundPending = false;
+    }
   }
 
   private clearGraph(context: AudioContext): void {
@@ -275,6 +319,7 @@ export class OdysseyAudioEngine {
     cancelPowerOperation?.();
     const shouldRecover = this.shouldRun && this.runIntentEstablished;
     this.shouldRun = shouldRecover;
+    this.processorStateDirty = shouldRecover;
     this.retireContext(context);
     this.emitStatus({
       state: "closed",
@@ -287,6 +332,20 @@ export class OdysseyAudioEngine {
   private handleContextStateChange(context: AudioContext): void {
     if (this.disposed || this.context !== context) return;
     const state = context.state;
+    if (state !== "running" && this.shouldRun && this.runIntentEstablished) {
+      this.processorStateDirty = true;
+      const output = this.output;
+      if (output) {
+        try {
+          const now = context.currentTime;
+          output.gain.cancelScheduledValues(now);
+          output.gain.setValueAtTime(0, now);
+        } catch {
+          // A host interruption may invalidate automation before statechange.
+          // The readiness gate still prevents stale state being accepted.
+        }
+      }
+    }
     if (state === "closed") {
       // An active context can be closed by the browser or operating system.
       // Preserve the logical Power intent so ensureRunning() can construct a
@@ -295,7 +354,7 @@ export class OdysseyAudioEngine {
       this.clearGraph(context);
     }
     this.emitStatus(state === "running" ? { state, error: null } : { state });
-    if (state === "running") this.requestMeter();
+    if (state === "running" && !this.processorStateDirty) this.requestMeter();
   }
 
   private closeContext(context: AudioContext): Promise<void> {
@@ -542,7 +601,7 @@ export class OdysseyAudioEngine {
         if (this.node !== node) return;
         if (event.data.type !== "meter") return;
         this.meterRequestOutstanding = false;
-        if (context.state !== "running") return;
+        if (context.state !== "running" || this.processorStateDirty) return;
         if (event.data.meter) this.meterListener?.(event.data.meter);
         this.requestMeter();
       };
@@ -618,7 +677,10 @@ export class OdysseyAudioEngine {
     // The UI owns its immutable React state object. Keep one engine-owned
     // snapshot so rapid partial fader updates can mutate this cache without
     // cloning the complete parameter map for every pointer event.
-    this.params = { ...params };
+    this.params = {
+      ...DEFAULT_PARAMS,
+      ...(normalizeSynthParamChanges(params) ?? {}),
+    };
     const cancelPrevious = this.cancelPowerOperation;
     const sequence = ++this.powerSequence;
     let cancelCurrent: (() => void) | null = null;
@@ -659,13 +721,24 @@ export class OdysseyAudioEngine {
       output.gain.cancelScheduledValues(now);
       output.gain.setValueAtTime(output.gain.value, now);
       output.gain.linearRampToValueAtTime(1, now + 0.035);
+      const resetType = this.hardSoundOffPending ? "all-sound-off" : "all-notes-off";
+      if (!this.postToProcessor({ type: resetType })) {
+        throw new Error("The audio processor stopped before it could accept the current controls.");
+      }
+      this.hardSoundOffPending = false;
       if (
-        !this.postToProcessor({ type: "all-notes-off" })
-        || !this.postToProcessor({ type: "params", params: this.params })
+        !this.postToProcessor({ type: "params", params: this.params })
         || !this.postToProcessor({ type: "performance", performance: this.performance })
       ) {
         throw new Error("The audio processor stopped before it could accept the current controls.");
       }
+      if (this.resumeSoundPending) {
+        if (!this.postToProcessor({ type: "resume-sound" })) {
+          throw new Error("The audio processor stopped before it could restore non-note sound sources.");
+        }
+        this.resumeSoundPending = false;
+      }
+      this.processorStateDirty = false;
       this.runIntentEstablished = true;
       this.emitStatus({ state: context.state, error: null });
       this.requestMeter();
@@ -714,8 +787,10 @@ export class OdysseyAudioEngine {
     if (this.disposed || !this.shouldRun) return Promise.resolve("off");
     const context = this.context;
     if (context?.state === "running" && this.node && this.output) {
-      if (this.status.error !== null) this.emitStatus({ state: "running", error: null });
-      return Promise.resolve("already-running");
+      if (!this.processorStateDirty) {
+        if (this.status.error !== null) this.emitStatus({ state: "running", error: null });
+        return Promise.resolve("already-running");
+      }
     }
     if (this.recoveryPromise) return this.recoveryPromise;
 
@@ -919,7 +994,11 @@ export class OdysseyAudioEngine {
       }
       // MIDI CC120 latches the shared DSP silent until a new sound source
       // arrives. A freshly attached external stream is such a source.
-      if (!this.postToProcessor({ type: "resume-sound" })) {
+      if (this.hardSoundOffPending) {
+        // The deferred hard-clear must remain first; otherwise a resume sent
+        // during a spontaneous host recovery would be erased by that clear.
+        this.resumeSoundPending = true;
+      } else if (!this.postControl({ type: "resume-sound" })) {
         throw new Error("The audio processor stopped while live input was connecting.");
       }
     } catch (error) {
@@ -1031,32 +1110,44 @@ export class OdysseyAudioEngine {
   }
 
   setParams(params: Partial<SynthParams>): void {
-    if (this.params) Object.assign(this.params, params);
-    this.postToProcessor({ type: "params", params });
+    const normalized = normalizeSynthParamChanges(params);
+    if (!normalized) return;
+    if (this.params) Object.assign(this.params, normalized);
+    if (
+      normalized.autoRun !== undefined
+      && normalized.autoRun <= 0.5
+      && !this.externalInputConnected
+    ) this.resumeSoundPending = false;
+    this.postControl({ type: "params", params: normalized });
   }
 
   noteOn(note: number): void {
-    this.postToProcessor({ type: "note-on", note });
+    this.postControl({ type: "note-on", note });
   }
 
   noteOff(note: number): void {
-    this.postToProcessor({ type: "note-off", note });
+    this.postControl({ type: "note-off", note });
   }
 
   keyboardTrigger(): void {
-    this.postToProcessor({ type: "keyboard-trigger" });
+    this.postControl({ type: "keyboard-trigger" });
   }
 
   allNotesOff(): void {
-    this.postToProcessor({ type: "all-notes-off" });
+    this.postControl({ type: "all-notes-off" });
   }
 
   allSoundOff(): void {
-    this.postToProcessor({ type: "all-sound-off" });
+    this.resumeSoundPending = false;
+    this.hardSoundOffPending = !this.postControl({ type: "all-sound-off" });
   }
 
   resumeSound(): void {
-    this.postToProcessor({ type: "resume-sound" });
+    if (this.hardSoundOffPending) {
+      this.resumeSoundPending = true;
+      return;
+    }
+    this.resumeSoundPending = !this.postControl({ type: "resume-sound" });
   }
 
   setPerformance(performance: Partial<PerformanceState>): void {
@@ -1065,7 +1156,17 @@ export class OdysseyAudioEngine {
     // otherwise identical two-field snapshot for every report.
     const previousBend = this.performance.bendSemitones;
     const previousVibrato = this.performance.vibratoSemitones;
-    Object.assign(this.performance, performance);
+    const bend = performance.bendSemitones;
+    const vibrato = performance.vibratoSemitones;
+    const normalized: Partial<PerformanceState> = {};
+    if (typeof bend === "number" && Number.isFinite(bend)) {
+      this.performance.bendSemitones = Math.min(24, Math.max(-24, bend));
+      normalized.bendSemitones = this.performance.bendSemitones;
+    }
+    if (typeof vibrato === "number" && Number.isFinite(vibrato)) {
+      this.performance.vibratoSemitones = Math.min(12, Math.max(0, vibrato));
+      normalized.vibratoSemitones = this.performance.vibratoSemitones;
+    }
     // Many controllers resend their last wheel value on every device report.
     // Avoid crossing the main/audio-thread boundary when the effective pair
     // is unchanged; startup still sends the complete cached pair explicitly.
@@ -1073,7 +1174,7 @@ export class OdysseyAudioEngine {
       Object.is(previousBend, this.performance.bendSemitones)
       && Object.is(previousVibrato, this.performance.vibratoSemitones)
     ) return;
-    this.postToProcessor({ type: "performance", performance });
+    this.postControl({ type: "performance", performance: normalized });
   }
 
   dispose(): Promise<void> {
@@ -1081,6 +1182,9 @@ export class OdysseyAudioEngine {
     this.disposed = true;
     this.shouldRun = false;
     this.runIntentEstablished = false;
+    this.processorStateDirty = false;
+    this.hardSoundOffPending = false;
+    this.resumeSoundPending = false;
     this.lifecycleSequence += 1;
     const cancelInitialization = this.cancelInitialization;
     this.cancelInitialization = null;

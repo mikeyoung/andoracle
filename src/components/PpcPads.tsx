@@ -8,6 +8,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
+import { RasterLabel } from "./RasterLabel";
 import type { PerformanceState } from "../audio/dsp-core";
 
 interface PpcPadsProps {
@@ -20,11 +21,18 @@ interface PpcPadsProps {
 export type PadKind = "down" | "vibrato" | "up";
 export type PadActivation = " " | "Enter" | "assistive";
 
+/** Canonical left-to-right order; compact vertical layout reverses bend pads. */
 const PPC_PAD_KINDS = ["down", "vibrato", "up"] as const;
 const PPC_PAD_LABELS: Readonly<Record<PadKind, string>> = {
   down: "Bend down",
   vibrato: "Vibrato",
   up: "Bend up",
+};
+
+const PPC_PAD_FACE_LABELS: Readonly<Record<PadKind, string>> = {
+  down: "Down",
+  vibrato: "Vib",
+  up: "Up",
 };
 
 export interface PpcPointerState {
@@ -248,7 +256,7 @@ function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }
 
   return (
     <div className="ppc" role="group" aria-label="Proportional pitch controls">
-      <span className="ppc-title">PPC</span>
+      <span className="ppc-title"><RasterLabel text="PPC" variant="micro" /></span>
       {PPC_PAD_KINDS.map((kind) => (
         <button
           key={kind}
@@ -284,7 +292,7 @@ function PpcPadsComponent({ bendRange, vibratoRange, resetEpoch, onPerformance }
           onBlur={() => releasePad(kind)}
         >
           <span>{kind === "down" ? "−" : kind === "up" ? "+" : "≈"}</span>
-          <b>{PPC_PAD_LABELS[kind]}</b>
+          <b><RasterLabel text={PPC_PAD_FACE_LABELS[kind]} variant="micro" tone="reverse" /></b>
         </button>
       ))}
     </div>

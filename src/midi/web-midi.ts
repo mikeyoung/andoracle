@@ -578,6 +578,7 @@ export class WebMidiSession {
     // driver's pending open(). syncInputsOnce() can remain blocked for its
     // bounded open timeout, while note-off and controller reset must happen as
     // soon as the browser reports this input gone or no longer open.
+    let topologyChanged = false;
     for (const [inputId, input] of [...this.inputs]) {
       const current = access?.inputs.get(inputId);
       if (
@@ -586,7 +587,16 @@ export class WebMidiSession {
         && input.connection === "open"
       ) continue;
       const revoked = this.revokeInput(inputId);
-      if (revoked) void this.closeRevokedInput(revoked);
+      if (revoked) {
+        topologyChanged = true;
+        void this.closeRevokedInput(revoked);
+      }
+    }
+    if (topologyChanged) {
+      // Native close() is host-owned and may take seconds or never settle.
+      // Publish the already-revoked topology now so the device list cannot
+      // advertise a port whose notes, wheels, and callback are gone.
+      this.publishSyncResult([...this.inputs.values()].map(inputSummary), []);
     }
     for (const [inputId, opening] of this.openingInputs) {
       const current = access?.inputs.get(inputId);

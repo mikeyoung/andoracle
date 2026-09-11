@@ -1,0 +1,4894 @@
+/*
+ * Andoracle 1968 console skin
+ *
+ * The photographed instrument surface grows naturally up to its 1880px native
+ * width. Modules reflow through signal-path breakpoints and the document may
+ * scroll vertically, while every viewport remains free of horizontal overflow.
+ */
+
+:root {
+  --console-ink: #171713;
+  --console-muted-ink: #504d45;
+  --console-enamel: #eee9da;
+  --console-enamel-dark: #d2ccba;
+  --console-metal-edge: #6d6a62;
+  --console-well: #1b1a17;
+  --console-scale: 1;
+  --console-enamel-texture-size: 420px 420px;
+  --console-phenolic-texture-size: 420px 420px;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+html {
+  background-color: #241710;
+  background-image: url("./assets/console/black-walnut-seamless.webp");
+  background-position: center top;
+  background-repeat: repeat;
+  background-size: 1880px 1880px;
+}
+
+body {
+  color: var(--console-ink);
+  background: transparent;
+}
+
+#root {
+  position: relative;
+}
+
+.console-stage {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  padding: 8px;
+}
+
+.app-shell {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: 1880px;
+  min-width: 1880px;
+  max-width: none;
+  height: 940px;
+  min-height: 940px;
+  grid-template-rows: 104px 32px 774px 20px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  color: var(--console-ink);
+  background: transparent;
+  box-shadow: none;
+  transform: translate(-50%, -50%) scale(var(--console-scale));
+  transform-origin: center center;
+}
+
+.topbar {
+  position: relative;
+  z-index: 5;
+  top: auto;
+  display: grid;
+  width: auto;
+  min-height: 0;
+  height: 104px;
+  grid-template-columns: 250px minmax(0, 1fr) 180px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 2px solid #777268;
+  border-radius: 5px 5px 0 0;
+  background-color: var(--console-enamel);
+  background-image:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.28), transparent 24%, rgba(75, 70, 60, 0.07)),
+    url("./assets/console/enamel-white.webp");
+  background-size: auto, var(--console-enamel-texture-size);
+  box-shadow:
+    inset 0 2px rgba(255, 255, 255, 0.72),
+    inset 0 -3px rgba(76, 72, 63, 0.16);
+}
+
+.brand {
+  display: grid;
+  width: auto;
+  min-width: 0;
+  flex: none;
+  grid-template-columns: 54px 1fr;
+  align-items: center;
+  gap: 9px;
+  padding-right: 12px;
+  border-right: 1px solid rgba(53, 51, 45, 0.45);
+}
+
+.brand-mark {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 2px solid #504e47;
+  border-radius: 50%;
+  color: var(--console-ink);
+  background-color: #e3decd;
+  background-image: url("./assets/console/enamel-white.webp");
+  background-size: var(--console-enamel-texture-size);
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 255, 255, 0.6),
+    inset 0 -5px 8px rgba(64, 60, 52, 0.15),
+    0 2px 3px rgba(30, 28, 24, 0.38);
+}
+
+.brand-name,
+.brand-model {
+  overflow: visible;
+  color: var(--console-ink);
+  line-height: 1;
+}
+
+.brand-name {
+  height: 28px;
+}
+
+.brand-model {
+  height: 12px;
+  margin-top: 4px;
+}
+
+.library-deck {
+  display: grid;
+  width: auto;
+  min-width: 0;
+  height: 90px;
+  flex: none;
+  grid-template-rows: repeat(3, 28px);
+  gap: 3px;
+  order: initial;
+}
+
+.utility-strip,
+.patch-strip,
+.sequence-strip {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: 28px;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.utility-strip {
+  grid-template-columns: 1fr;
+}
+
+.patch-strip,
+.sequence-strip {
+  grid-template-columns: 345px minmax(0, 1fr);
+}
+
+.library-actions {
+  display: grid;
+  min-width: 0;
+  align-items: stretch;
+  gap: 5px;
+}
+
+.utility-actions {
+  width: 410px;
+  grid-column: auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.patch-actions {
+  width: 520px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sequence-actions {
+  grid-template-columns: repeat(5, 28px);
+  justify-content: start;
+}
+
+.library-picker {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+}
+
+.library-picker label,
+.patch-strip label,
+.sequence-strip label {
+  display: grid;
+  width: 72px;
+  height: 14px;
+  place-items: center;
+  color: var(--console-ink);
+  font-size: 0;
+}
+
+.patch-strip select,
+.sequence-strip select,
+.library-picker select {
+  width: 268px;
+  min-width: 0;
+  max-width: 268px;
+  height: 27px;
+  min-height: 0;
+  padding: 1px 28px 1px 9px;
+  border: 1px solid #57544c;
+  border-radius: 3px;
+  color: #171713;
+  color-scheme: light;
+  background-color: #e8e3d4;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.24), rgba(93, 87, 74, 0.11)),
+    url("./assets/console/enamel-white.webp");
+  background-size: auto, var(--console-enamel-texture-size);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.72),
+    inset 0 -2px rgba(55, 52, 45, 0.17),
+    0 1px 1px rgba(32, 30, 26, 0.32);
+  font-family: var(--andoracle-font);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.button,
+.utility-strip .button,
+.patch-strip .button,
+.sequence-strip .button,
+.midi-strip .button {
+  display: grid;
+  width: auto;
+  min-width: 0;
+  height: 27px;
+  min-height: 0;
+  align-items: center;
+  justify-items: center;
+  padding: 2px 8px;
+  overflow: visible;
+  border: 1px solid #11110f;
+  border-radius: 3px;
+  color: #f3eee1;
+  background-color: #24231f;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.13), rgba(0, 0, 0, 0.34)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.18),
+    0 2px 0 #080807;
+  font-size: 0;
+  line-height: 1;
+  text-transform: none;
+}
+
+.button:hover {
+  border-color: #827e72;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.2), rgba(0, 0, 0, 0.24)),
+    url("./assets/console/phenolic-black.webp");
+}
+
+.button:active {
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.78);
+  transform: translateY(1px);
+}
+
+.button--primary,
+.button--danger,
+.button--quiet,
+.button--midi-on {
+  border-color: #11110f;
+  color: #f3eee1;
+  background-color: #24231f;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.13), rgba(0, 0, 0, 0.34)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+}
+
+.sequence-strip .button,
+.sequence-icon-button {
+  width: 28px;
+  min-width: 28px;
+  height: 27px;
+  min-height: 0;
+  padding: 0;
+}
+
+.sequence-icon-button i {
+  width: 11px;
+  height: 11px;
+  border-color: #0b0b09;
+  background: #ded8c7;
+}
+
+.sequence-delete-button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.sequence-record-button.is-active,
+.sequence-play-button.is-active,
+.sequence-pause-button.is-active {
+  border-color: #858176;
+  color: #f3eee1;
+  background-color: #161512;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.16), rgba(255, 255, 255, 0.05)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.72);
+}
+
+.power-strip {
+  position: relative;
+  display: grid;
+  width: 180px;
+  min-width: 180px;
+  height: 90px;
+  grid-template-columns: 80px 94px;
+  align-items: center;
+  justify-content: stretch;
+  gap: 6px;
+}
+
+.install-button {
+  grid-column: 1;
+  width: 78px;
+}
+
+.power-control {
+  display: grid;
+  width: 94px;
+  min-width: 94px;
+  height: 88px;
+  grid-column: 2;
+  grid-template-rows: 14px 1fr;
+  align-items: center;
+  justify-items: center;
+  gap: 0;
+}
+
+.power-control__label {
+  display: block;
+  width: 94px;
+  height: 13px;
+  color: var(--console-ink);
+  font-size: 0;
+}
+
+.toggle-switch,
+.power-switch {
+  position: relative;
+  display: flex;
+  width: 54px;
+  min-width: 54px;
+  height: 65px;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  color: var(--console-ink);
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.toggle-switch > span:not(.raster-label),
+.external-input-button i {
+  position: relative;
+  display: block;
+  width: 46px;
+  height: 48px;
+  flex: 0 0 48px;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 140% 140%;
+  box-shadow: none;
+  transition: filter 100ms linear;
+}
+
+.toggle-switch > span:not(.raster-label)::after {
+  display: none;
+  content: none;
+}
+
+.toggle-switch[data-switch-variant="power"] > span:not(.raster-label),
+.external-input-button[data-switch-variant="power"] i {
+  background-image: url("./assets/console/switches/switch-power-stop.png");
+}
+
+.toggle-switch[data-switch-variant="tapes"] > span:not(.raster-label) {
+  background-image: url("./assets/console/switches/switch-tapes-stop.png");
+}
+
+.toggle-switch[data-switch-variant="synth"] > span:not(.raster-label) {
+  background-image: url("./assets/console/switches/switch-synth-stop.png");
+}
+
+.toggle-switch[data-switch-variant="delay"] > span:not(.raster-label) {
+  background-image: url("./assets/console/switches/switch-delay-stop.png");
+}
+
+.toggle-switch[data-switch-variant="power"][aria-checked="true"] > span:not(.raster-label),
+.external-input-button[data-switch-variant="power"].is-enabled i {
+  background-image: url("./assets/console/switches/switch-power-go.png");
+}
+
+.toggle-switch[data-switch-variant="tapes"][aria-checked="true"] > span:not(.raster-label) {
+  background-image: url("./assets/console/switches/switch-tapes-go.png");
+}
+
+.toggle-switch[data-switch-variant="synth"][aria-checked="true"] > span:not(.raster-label) {
+  background-image: url("./assets/console/switches/switch-synth-go.png");
+}
+
+.toggle-switch[data-switch-variant="delay"][aria-checked="true"] > span:not(.raster-label) {
+  background-image: url("./assets/console/switches/switch-delay-go.png");
+}
+
+.toggle-switch b,
+.power-switch b {
+  display: block;
+  width: 44px;
+  height: 10px;
+  flex: 0 0 10px;
+  color: var(--console-ink);
+  font-size: 0;
+  line-height: 1;
+}
+
+.toggle-switch .raster-label,
+.power-switch .raster-label {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 8px;
+  min-height: 0;
+  flex: none;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.toggle-switch .raster-label::after,
+.toggle-switch .raster-label span::after,
+.power-switch .raster-label::after,
+.power-switch .raster-label span::after {
+  display: none;
+  content: none;
+}
+
+.power-switch {
+  width: 94px;
+  min-width: 94px;
+  height: 52px;
+  flex-direction: row;
+}
+
+.power-switch > span:not(.raster-label) {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  background-size: 150% 150%;
+  transform: rotate(90deg);
+}
+
+.power-switch b {
+  width: 22px;
+  height: 8px;
+  flex: 0 0 22px;
+}
+
+@keyframes console-power-ready-flash {
+  0%, 46% {
+    filter: brightness(0.8325) contrast(0.92);
+  }
+
+  50%, 100% {
+    filter: brightness(1.4985) contrast(1.05) drop-shadow(0 0 4px rgba(245, 239, 216, 0.72));
+  }
+}
+
+.power-switch[aria-checked="false"]:not(:disabled),
+.power-switch[aria-checked="true"],
+.power-switch[aria-checked="true"] > span:not(.raster-label) {
+  animation: none;
+}
+
+.power-switch[aria-checked="false"]:not(:disabled) > span:not(.raster-label) {
+  animation: console-power-ready-flash 1.6s steps(1, end) infinite;
+}
+
+.output-meter > span {
+  display: block;
+  height: 8px;
+  color: var(--console-muted-ink);
+  font-size: 0;
+  line-height: 1;
+}
+
+main {
+  display: grid;
+  width: 100%;
+  height: 774px;
+  min-height: 0;
+  grid-template-rows: 28px 20px 494px 40px 160px;
+  gap: 10px;
+  margin: 0;
+  padding: 6px 10px;
+  overflow: hidden;
+  background-color: var(--console-enamel-dark);
+  background-image:
+    linear-gradient(rgba(58, 54, 46, 0.08), rgba(255, 255, 255, 0.12)),
+    url("./assets/console/enamel-white.webp");
+  background-size: auto, var(--console-enamel-texture-size);
+}
+
+.panel-grid {
+  display: grid;
+  width: 100%;
+  height: 494px;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  grid-template-rows: 182px 182px 122px;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.module {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 2px solid #59564f;
+  border-radius: 3px;
+  background-color: var(--console-enamel);
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.22), rgba(88, 83, 72, 0.06)),
+    url("./assets/console/enamel-white.webp");
+  background-size: auto, var(--console-enamel-texture-size);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.62),
+    0 2px 3px rgba(30, 28, 24, 0.32);
+}
+
+.module::after {
+  inset: 2px;
+  border-color: rgba(62, 59, 51, 0.16);
+}
+
+.module--controllers,
+.module--vco1,
+.module--vco2 {
+  grid-column: span 8;
+}
+
+.module--modulators,
+.module--mixer {
+  grid-column: span 6;
+}
+
+.module--delay {
+  grid-column: span 5;
+}
+
+.module--filter {
+  grid-column: span 7;
+}
+
+.module--envelopes {
+  grid-column: span 14;
+}
+
+.module--amplifier {
+  grid-column: span 10;
+}
+
+.module-header {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  height: 30px;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 0.58fr);
+  align-items: center;
+  gap: 8px;
+  padding: 3px 13px;
+  border: 0;
+  border-bottom: 1px solid #777268;
+  background-color: rgba(238, 233, 218, 0.72);
+  background-image: url("./assets/console/enamel-white.webp");
+  background-size: var(--console-enamel-texture-size);
+  box-shadow: inset 0 -2px rgba(70, 66, 57, 0.08);
+}
+
+.module-header .module-eyebrow,
+.module-header h2,
+.keyboard-header .module-eyebrow,
+.keyboard-header h2 {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 15px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--console-ink);
+  font-size: 0;
+  line-height: 1;
+}
+
+.module-header .module-eyebrow {
+  height: 10px;
+  margin: 0;
+}
+
+/* The title raster is 17px tall. Its host must match that fixed canvas height
+   or the bottom two pixel rows are silently clipped by the shared header rule. */
+.module-header h2 {
+  height: 17px;
+}
+
+.control-bank {
+  display: grid;
+  width: 100%;
+  height: calc(100% - 30px);
+  min-height: 0;
+  align-items: stretch;
+  align-content: stretch;
+  gap: 2px;
+  padding: 3px 7px 5px;
+  overflow: hidden;
+}
+
+.control-bank--routed {
+  align-items: stretch;
+}
+
+.module--controllers .control-bank {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.module--vco1 .control-bank,
+.module--vco2 .control-bank {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.module--modulators .control-bank {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.module--modulators .control-bank > :nth-child(1) { grid-column: 1; grid-row: 1; }
+.module--modulators .control-bank > :nth-child(2) { grid-column: 1; grid-row: 2; }
+.module--modulators .control-bank > :nth-child(3) { grid-column: 2; grid-row: 1 / 3; }
+.module--modulators .control-bank > :nth-child(4) { grid-column: 3; grid-row: 1 / 3; }
+.module--modulators .control-bank > :nth-child(5) { grid-column: 4; grid-row: 1; }
+.module--modulators .control-bank > :nth-child(6) { grid-column: 4; grid-row: 2; }
+
+.module--mixer .control-bank {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.module--delay .control-bank {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+}
+
+.module--filter .control-bank {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.module--envelopes .control-bank {
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+
+.module--amplifier .control-bank {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.parameter,
+.parameter:last-child,
+.route-control {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 1px;
+  overflow: hidden;
+  border: 0;
+  border-right: 1px solid rgba(70, 66, 57, 0.15);
+  text-align: center;
+}
+
+.parameter {
+  flex-direction: column;
+}
+
+.parameter label,
+.toggle-label,
+.external-input-title,
+.ppc-title {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 12px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: var(--console-ink);
+  font-size: 0;
+  line-height: 1;
+}
+
+.parameter output {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 11px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: #25231e;
+  font-family: var(--andoracle-font);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 11px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Choice values repeat the switch legend, but remain useful as a live-value
+   readout. Let long, word-separated states use two compact lines instead of
+   clipping them to a single column. The explicit padding reset above also
+   neutralizes the legacy stylesheet's 6px output padding, which otherwise
+   makes every 11px value box report a 17px scroll height. */
+.parameter--choice > output {
+  height: 16px;
+  min-height: 16px;
+  overflow: hidden;
+  line-height: 8px;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.dial-shell,
+.control-bank--routed .parameter--range .dial-shell {
+  position: relative;
+  display: grid;
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  flex: 0 0 56px;
+  margin: auto 0 0;
+  place-items: center;
+}
+
+.dial-shell::before {
+  position: absolute;
+  inset: 8px;
+  z-index: 0;
+  border-radius: 50%;
+  background: rgba(42, 39, 33, 0.34);
+  box-shadow: 0 2px 5px rgba(25, 23, 19, 0.46);
+  content: "";
+}
+
+.dial-scale {
+  inset: 0;
+}
+
+.dial-scale i {
+  top: 1px;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  height: 4px;
+  border-radius: 0;
+  background: #2e2c26;
+  box-shadow: none;
+  transform-origin: 0.5px 27px;
+}
+
+.dial-scale i:first-child,
+.dial-scale i:last-child {
+  height: 5px;
+  background: #171713;
+}
+
+.dial-face {
+  position: absolute;
+  inset: 3px;
+  z-index: 2;
+  display: block;
+  width: 50px;
+  height: 50px;
+  border: 0;
+  border-radius: 50%;
+  background-color: transparent;
+  background-image: url("./assets/console/knob-ivory.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  box-shadow: none;
+  pointer-events: none;
+  transform: rotate(var(--dial-angle));
+  transition: transform 35ms linear, filter 80ms ease;
+}
+
+.dial-face i {
+  display: none;
+}
+
+.dial-shell input[type="range"] {
+  position: relative;
+  z-index: 3;
+  width: 56px;
+  height: 56px;
+  margin: 0;
+  opacity: 0;
+}
+
+.dial-shell input[type="range"]:focus-visible ~ .dial-face {
+  outline: 2px solid #171713;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #eee9da;
+}
+
+.dial-shell input[type="range"]:active ~ .dial-face {
+  filter: contrast(1.06);
+}
+
+.module--controllers .dial-shell,
+.module--controllers .dial-shell input[type="range"],
+.module--delay .dial-shell,
+.module--delay .dial-shell input[type="range"] {
+  width: 43px;
+  min-width: 43px;
+  height: 43px;
+  flex-basis: 43px;
+}
+
+.module--controllers .dial-face,
+.module--delay .dial-face {
+  inset: 2px;
+  width: 39px;
+  height: 39px;
+}
+
+.module--controllers .dial-scale i,
+.module--delay .dial-scale i {
+  transform-origin: 0.5px 21px;
+}
+
+.module--controllers .parameter--toggle .toggle-switch,
+.module--delay .parameter--toggle .toggle-switch {
+  height: 51px;
+  flex: 0 0 51px;
+}
+
+.module--controllers .parameter--toggle .toggle-switch > span:not(.raster-label),
+.module--delay .parameter--toggle .toggle-switch > span:not(.raster-label) {
+  width: 42px;
+  height: 43px;
+  flex-basis: 43px;
+}
+
+.module--controllers .parameter--toggle .toggle-switch b,
+.module--delay .parameter--toggle .toggle-switch b {
+  height: 8px;
+  flex-basis: 8px;
+}
+
+/* The two short-row modulator dials use the same compact mechanism as the
+   controller bank so their rendered labels and values retain full height. */
+.module--modulators .control-bank > :nth-child(1) .dial-shell,
+.module--modulators .control-bank > :nth-child(1) .dial-shell input[type="range"],
+.module--modulators .control-bank > :nth-child(6) .dial-shell,
+.module--modulators .control-bank > :nth-child(6) .dial-shell input[type="range"] {
+  width: 43px;
+  min-width: 43px;
+  height: 43px;
+  flex-basis: 43px;
+}
+
+.module--modulators .control-bank > :nth-child(1) .dial-face,
+.module--modulators .control-bank > :nth-child(6) .dial-face {
+  inset: 2px;
+  width: 39px;
+  height: 39px;
+}
+
+.module--modulators .control-bank > :nth-child(1) .dial-scale i,
+.module--modulators .control-bank > :nth-child(6) .dial-scale i {
+  transform-origin: 0.5px 21px;
+}
+
+.parameter--choice {
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.choice-button {
+  display: flex;
+  width: calc(100% - 4px);
+  min-width: 0;
+  height: auto;
+  min-height: 27px;
+  max-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  margin: 2px 2px 0;
+  padding: 2px 4px;
+  overflow: visible;
+  border: 1px solid #36342e;
+  border-radius: 2px;
+  color: #f1ecdf;
+  background-color: #24231f;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.11), rgba(0, 0, 0, 0.28)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.14), 0 1px 0 #090908;
+  font-family: var(--andoracle-font);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.choice-button span {
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.choice-button i {
+  border-top-color: #eee9da;
+  border-right-width: 3px;
+  border-left-width: 3px;
+}
+
+.parameter--toggle {
+  min-width: 0;
+}
+
+.parameter--toggle .toggle-switch {
+  margin-top: auto;
+}
+
+.route-control {
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.route-control .parameter {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+}
+
+.route-control .parameter--choice {
+  padding-bottom: 1px;
+}
+
+.route-control .parameter--choice label,
+.route-control .parameter--range label {
+  height: 10px;
+  min-height: 0;
+  padding: 0;
+  font-size: 0;
+}
+
+.route-control label .raster-label {
+  height: 10px;
+}
+
+.route-control .choice-button,
+.route-control .parameter--choice select {
+  width: calc(100% - 2px);
+  min-height: 27px;
+  max-height: 38px;
+  margin: 1px;
+  font-size: 7.5px;
+  line-height: 1.05;
+}
+
+.route-control .parameter--range {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.route-control .parameter--range .dial-shell {
+  margin-top: auto;
+}
+
+.control-bank--routed > .parameter--range,
+.control-bank--routed > .route-control {
+  justify-content: flex-start;
+}
+
+.control-bank--routed .parameter--range output {
+  margin-top: 0;
+}
+
+.module--amplifier .route-control .choice-button {
+  min-height: 24px;
+  max-height: 24px;
+}
+
+.module--amplifier .route-control .dial-shell,
+.module--amplifier .route-control .dial-shell input[type="range"] {
+  width: 39px;
+  min-width: 39px;
+  height: 39px;
+  flex-basis: 39px;
+}
+
+.module--amplifier .route-control .dial-face {
+  inset: 2px;
+  width: 35px;
+  height: 35px;
+}
+
+.module--amplifier .route-control .dial-scale i {
+  transform-origin: 0.5px 19px;
+}
+
+.module--amplifier .route-control .parameter--range {
+  display: grid;
+  height: 43px;
+  min-height: 43px;
+  flex: 0 0 43px;
+  grid-template-columns: minmax(0, 1fr) 39px minmax(0, 1fr);
+  align-items: center;
+  overflow: visible;
+}
+
+.module--amplifier .route-control .parameter--range label {
+  height: 12px;
+  grid-column: 1;
+}
+
+.module--amplifier .route-control .parameter--range .dial-shell {
+  grid-column: 2;
+  grid-row: 1;
+  margin: 0;
+}
+
+.module--amplifier .route-control .parameter--range output {
+  height: 11px;
+  grid-column: 3;
+  grid-row: 1;
+  font-size: 7px;
+  line-height: 11px;
+}
+
+.module--amplifier .route-control .parameter--range > .visually-hidden {
+  position: absolute;
+}
+
+.module--filter .parameter output {
+  padding: 0;
+  font-size: 7px;
+  letter-spacing: -0.03em;
+}
+
+.module--filter .dial-shell,
+.module--filter .dial-shell input[type="range"] {
+  width: 50px;
+  min-width: 50px;
+  height: 50px;
+  flex-basis: 50px;
+}
+
+.module--filter .dial-face {
+  inset: 3px;
+  width: 44px;
+  height: 44px;
+}
+
+.module--filter .dial-scale i {
+  transform-origin: 0.5px 24px;
+}
+
+.ppc {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: 9px 1fr;
+  gap: 1px;
+  padding: 0;
+}
+
+.ppc-title {
+  height: 9px;
+}
+
+.ppc-pad {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 1px 3px;
+  overflow: hidden;
+  border: 1px solid #100f0d;
+  border-radius: 4px;
+  color: #eee9da;
+  background-color: #24231f;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.28)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.4), 0 1px 0 #555148;
+}
+
+.ppc-pad span {
+  font-size: 17px;
+}
+
+.ppc-pad b {
+  display: block;
+  width: 100%;
+  height: 8px;
+  font-size: 0;
+  writing-mode: initial;
+}
+
+.ppc-pad.is-pressed {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.26), rgba(255, 255, 255, 0.04)),
+    url("./assets/console/phenolic-black.webp");
+  box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.72);
+  transform: translateY(1px);
+}
+
+.external-input-control {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  padding: 1px;
+  overflow: hidden;
+  border: 0;
+}
+
+.external-input-title {
+  height: 12px;
+}
+
+.external-input-button {
+  display: flex;
+  width: 58px;
+  min-width: 58px;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--console-ink);
+  background: transparent;
+  box-shadow: none;
+}
+
+.external-input-button i {
+  width: 46px;
+  height: 48px;
+  flex-basis: 48px;
+}
+
+.external-input-button b {
+  display: block;
+  width: 58px;
+  height: 9px;
+  font-size: 0;
+}
+
+.external-input-button.is-enabled {
+  border: 0;
+  color: var(--console-ink);
+  background: transparent;
+  box-shadow: none;
+}
+
+.external-input-button.is-enabled i {
+  border: 0;
+  box-shadow: none;
+}
+
+.external-input-control small:not(.control-error) {
+  display: none;
+}
+
+.external-input-control small.control-error {
+  display: block;
+  max-height: 22px;
+  overflow: hidden;
+  color: #34211d;
+  font-size: 6px;
+  line-height: 1.1;
+}
+
+.panel-screws {
+  --panel-screw-offset: 4px;
+  z-index: 4;
+}
+
+.panel-screw {
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent url("./assets/console/screw-nickel.png") center / contain no-repeat;
+  box-shadow: none;
+  /* Keep the generated metal lighting fixed; rotating the photographed body
+     would rotate its illumination with the slot. */
+  transform: none;
+}
+
+.midi-strip {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  height: 40px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 3px 12px;
+  overflow: hidden;
+  border: 2px solid #59564f;
+  border-radius: 3px;
+  background-color: var(--console-enamel);
+  background-image: url("./assets/console/enamel-white.webp");
+  background-size: var(--console-enamel-texture-size);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.62), 0 2px 3px rgba(30, 28, 24, 0.28);
+}
+
+.midi-strip-copy {
+  display: grid;
+  min-width: 0;
+  height: 29px;
+  grid-template-columns: 205px 250px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.midi-strip-copy .module-eyebrow,
+.midi-strip-copy strong {
+  display: block;
+  width: 100%;
+  height: 11px;
+  margin: 0;
+  overflow: hidden;
+  color: var(--console-ink);
+  font-size: 0;
+}
+
+.midi-strip-copy strong {
+  height: 17px;
+}
+
+.midi-strip-copy small {
+  min-width: 0;
+  max-height: 24px;
+  overflow: hidden;
+  color: #292720;
+  font-family: var(--andoracle-font);
+  font-size: 8px;
+  line-height: 1.15;
+}
+
+.midi-strip-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 5px;
+}
+
+.midi-strip-actions .button {
+  width: 112px;
+}
+
+.keyboard-module {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  height: 160px;
+  grid-template-rows: 26px 120px 10px;
+  margin: 0;
+  overflow: hidden;
+  border: 2px solid #37352f;
+  border-radius: 3px;
+  background-color: var(--console-well);
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.28)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.05), 0 2px 3px rgba(28, 26, 22, 0.4);
+}
+
+.keyboard-header {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  height: 26px;
+  grid-template-columns: 420px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 2px 12px;
+  border: 0;
+  border-bottom: 1px solid #777268;
+  background-color: var(--console-enamel);
+  background-image: url("./assets/console/enamel-white.webp");
+  background-size: var(--console-enamel-texture-size);
+}
+
+.keyboard-title-group {
+  display: grid;
+  grid-template-columns: 170px 245px;
+  align-items: center;
+  gap: 5px;
+}
+
+.keyboard-header .module-eyebrow {
+  height: 9px;
+}
+
+.keyboard-header h2 {
+  height: 17px;
+}
+
+.keyboard-header p {
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  color: #2a2822;
+  font-family: var(--andoracle-font);
+  font-size: 7.5px;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+
+kbd {
+  min-width: 12px;
+  padding: 1px 2px;
+  font-size: 7px;
+}
+
+.keyboard-banks {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: 120px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 120px;
+  gap: 0;
+  padding: 3px 4px 4px;
+  overflow: hidden;
+  border: 0;
+  background-color: #181714;
+  background-image: url("./assets/console/phenolic-black.webp");
+  background-size: var(--console-phenolic-texture-size);
+}
+
+.keyboard-surface {
+  display: contents;
+  height: auto;
+}
+
+.piano-key {
+  position: absolute;
+  top: 0;
+  left: var(--desktop-key-left);
+  width: var(--desktop-key-width);
+  min-width: 0;
+}
+
+.piano-key--white {
+  height: 114px;
+  border: 1px solid #666157;
+  border-top: 0;
+  color: #27251f;
+  background-color: #ece7d8;
+  background-image:
+    linear-gradient(90deg, rgba(80, 75, 64, 0.16), rgba(255, 255, 255, 0.28) 16%, transparent 54%, rgba(76, 71, 61, 0.13)),
+    url("./assets/console/enamel-white.webp");
+  background-size: auto, var(--console-enamel-texture-size);
+  box-shadow: inset 0 -5px 7px rgba(45, 42, 35, 0.18);
+}
+
+.piano-key--black {
+  height: 72px;
+  border: 1px solid #050504;
+  background-color: #171613;
+  background-image:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.32), rgba(255, 255, 255, 0.06) 45%, rgba(0, 0, 0, 0.36)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+  box-shadow: 0 4px 5px rgba(0, 0, 0, 0.55), inset 0 -4px 5px rgba(0, 0, 0, 0.72);
+}
+
+.piano-key.is-active {
+  filter: brightness(0.82);
+  transform: translateY(2px);
+}
+
+.piano-key--white.is-active {
+  background-color: #ece7d8;
+  background-image:
+    linear-gradient(90deg, rgba(80, 75, 64, 0.16), rgba(255, 255, 255, 0.28) 16%, transparent 54%, rgba(76, 71, 61, 0.13)),
+    url("./assets/console/enamel-white.webp");
+  background-size: auto, var(--console-enamel-texture-size);
+}
+
+.piano-key--black.is-active {
+  background-color: #171613;
+  background-image:
+    linear-gradient(90deg, rgba(0, 0, 0, 0.32), rgba(255, 255, 255, 0.06) 45%, rgba(0, 0, 0, 0.36)),
+    url("./assets/console/phenolic-black.webp");
+  background-size: auto, var(--console-phenolic-texture-size);
+}
+
+.piano-key--white span {
+  bottom: 4px;
+  font-family: var(--andoracle-font);
+  font-size: 6px;
+}
+
+/* The legacy responsive sheet groups these keys into mobile rows. This skin
+   never reflows, so keep the interior octave captions centered even when the
+   viewport itself is narrower than an old breakpoint. */
+.piano-key--white[data-row-start="true"] span {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.piano-key--white[data-note="36"] span {
+  right: auto;
+  left: 2px;
+  transform: none;
+}
+
+.piano-key--white[data-note="72"] span {
+  right: 2px;
+  left: auto;
+  transform: none;
+}
+
+.piano-key:focus::after {
+  inset: 3px;
+  border: 2px solid #171713;
+  box-shadow: 0 0 0 1px #eee9da;
+}
+
+.allocation-legend {
+  display: flex;
+  min-height: 0;
+  height: 10px;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 1px 10px;
+  overflow: hidden;
+  border: 0;
+  color: #e8e2d4;
+  background-color: #1d1c18;
+  background-image: url("./assets/console/phenolic-black.webp");
+  background-size: var(--console-phenolic-texture-size);
+  font-family: var(--andoracle-font);
+  font-size: 6.5px;
+  line-height: 1;
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+}
+
+footer {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  height: 20px;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 10px;
+  overflow: hidden;
+  border: 0;
+  border-top: 1px solid #777268;
+  color: #dcd6c8;
+  background-color: #23221e;
+  background-image: url("./assets/console/phenolic-black.webp");
+  background-size: var(--console-phenolic-texture-size);
+  font-family: var(--andoracle-font);
+  font-size: 6.5px;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+footer span {
+  margin: 0;
+}
+
+.raster-label {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.raster-label__text {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+}
+
+.raster-label--brand {
+  height: 28px;
+}
+
+.raster-label--model {
+  height: 11px;
+}
+
+.raster-label--title {
+  height: 17px;
+}
+
+.raster-label--eyebrow {
+  height: 10px;
+}
+
+.raster-label--control {
+  height: 12px;
+}
+
+.raster-label--button {
+  height: 13px;
+}
+
+.raster-label--micro {
+  height: 8px;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+.keyboard-banks:focus-visible {
+  outline: 2px solid #171713;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #eee9da;
+}
+
+/* Module controls sit in deliberately dense, clipped hardware cells. Keep
+   their two-tone keyboard focus treatment inside the photographed control
+   itself: an outside outline is cut by compact source, toggle, external-input,
+   and bottom-row dial cells at the target desktop scale. The keyboard keys
+   already use their own inset ::after treatment. */
+.control-bank button:focus-visible {
+  outline: 2px solid #171713;
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 2px #eee9da;
+}
+
+.control-bank .dial-shell input[type="range"]:focus-visible {
+  outline: 0;
+  box-shadow: none;
+}
+
+.control-bank .dial-shell input[type="range"]:focus-visible ~ .dial-face {
+  outline: 2px solid #171713;
+  outline-offset: -4px;
+  box-shadow: inset 0 0 0 2px #eee9da;
+}
+
+.system-banner {
+  position: fixed;
+  z-index: 100;
+  top: 10px;
+  left: 50%;
+  min-height: 36px;
+  max-width: min(860px, calc(100vw - 24px));
+  transform: translateX(-50%);
+}
+
+.system-banner + .system-banner {
+  top: 52px;
+}
+
+.clipboard-toast {
+  z-index: 110;
+}
+
+.direct-entry {
+  color: var(--console-ink);
+  background-color: var(--console-enamel);
+  background-image:
+    url("./assets/console/screw-nickel.png"),
+    url("./assets/console/screw-nickel.png"),
+    url("./assets/console/screw-nickel.png"),
+    url("./assets/console/screw-nickel.png"),
+    url("./assets/console/enamel-white.webp");
+  background-position: 6px 6px, calc(100% - 6px) 6px, 6px calc(100% - 6px), calc(100% - 6px) calc(100% - 6px), center;
+  background-repeat: no-repeat, no-repeat, no-repeat, no-repeat, repeat;
+  background-size: 14px 14px, 14px 14px, 14px 14px, 14px 14px, var(--console-enamel-texture-size);
+}
+
+.direct-entry .button {
+  min-height: 38px;
+  font-size: 11px;
+}
+
+.direct-entry .button .raster-label {
+  min-width: 88px;
+}
+
+/*
+ * Photographic hardware assembly
+ *
+ * Individual overhead plate photographs supply the enamel, edge wear, and
+ * mounting hardware. They sit directly on the shared walnut surface instead
+ * of on a second whole-console chassis image. Reusable generated cutouts
+ * supply every foreground control surface.
+ */
+.app-shell {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.topbar,
+main,
+.module,
+.module-header,
+.midi-strip,
+.keyboard-module,
+.keyboard-header,
+.keyboard-banks,
+.allocation-legend,
+footer {
+  border-color: transparent;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+.module::after {
+  display: none;
+}
+
+.module-header {
+  border-bottom: 0;
+}
+
+.parameter,
+.parameter:last-child,
+.route-control {
+  border: 0;
+}
+
+.panel-screws {
+  display: none;
+}
+
+.brand {
+  border-right: 0;
+}
+
+.brand-mark {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.button,
+.button--primary,
+.button--danger,
+.button--quiet,
+.button--midi-on,
+.utility-strip .button,
+.patch-strip .button,
+.sequence-strip .button,
+.midi-strip .button,
+.choice-button,
+.ppc-pad,
+.sequence-record-button.is-active,
+.sequence-play-button.is-active,
+.sequence-pause-button.is-active {
+  border: 0;
+  border-radius: 0;
+  color: #f4efdf;
+  background-color: transparent;
+  background-image: url("./assets/console/button-phenolic-up.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-shadow: none;
+  transform: none;
+}
+
+.button:hover,
+.choice-button:hover,
+.ppc-pad:hover {
+  border-color: transparent;
+  background: transparent url("./assets/console/button-phenolic-up.png") center / 100% 100% no-repeat;
+  filter: brightness(1.08);
+}
+
+.button:active,
+.choice-button:active,
+.ppc-pad.is-pressed,
+.sequence-record-button.is-active,
+.sequence-play-button.is-active,
+.sequence-pause-button.is-active {
+  background-image: url("./assets/console/button-phenolic-up.png");
+  box-shadow: none;
+  filter: brightness(0.7) contrast(1.12);
+  transform: none;
+}
+
+.button:disabled,
+.choice-button:disabled {
+  filter: grayscale(1) brightness(0.84);
+  opacity: 0.46;
+}
+
+.sequence-strip .button,
+.sequence-icon-button,
+.ppc-pad {
+  background-image: url("./assets/console/button-phenolic-square.png");
+}
+
+.sequence-strip .button:hover,
+.sequence-icon-button:hover,
+.ppc-pad:hover,
+.sequence-strip .button:active,
+.sequence-icon-button:active,
+.ppc-pad.is-pressed,
+.sequence-record-button.is-active,
+.sequence-play-button.is-active,
+.sequence-pause-button.is-active {
+  background-image: url("./assets/console/button-phenolic-square.png");
+}
+
+/* The shared icon fill is correct for Record, Play, and Stop, but Pause needs
+   its transparent center restored after that shared photographic override. */
+.sequence-pause-button i {
+  border: 0;
+  background: linear-gradient(
+    90deg,
+    #ded8c7 0 35%,
+    transparent 35% 65%,
+    #ded8c7 65% 100%
+  );
+}
+
+.sequence-pause-button.is-active:disabled {
+  opacity: 1;
+  filter: brightness(0.7) contrast(1.12);
+}
+
+.patch-strip,
+.sequence-strip {
+  grid-template-columns: 357px minmax(0, 1fr);
+}
+
+.patch-strip select,
+.sequence-strip select,
+.library-picker select {
+  width: 280px;
+  max-width: 280px;
+  padding: 1px 27px 1px 11px;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  color: #f4efdf;
+  background-color: transparent;
+  background-image:
+    url("./assets/console/selector-arrow-photo.png"),
+    url("./assets/console/button-phenolic-up.png");
+  background-position: calc(100% - 10px) 50%, center;
+  background-repeat: no-repeat;
+  background-size: 9px 8px, 100% 100%;
+  box-shadow: none;
+  font-size: 11.5px;
+}
+
+.patch-strip select option,
+.sequence-strip select option,
+.library-picker select option,
+.patch-strip select optgroup,
+.sequence-strip select optgroup,
+.library-picker select optgroup {
+  color: #171713;
+  background: #eee7d4;
+}
+
+.choice-button i {
+  width: 9px;
+  height: 8px;
+  flex: 0 0 9px;
+  border: 0;
+  background: transparent url("./assets/console/selector-arrow-photo.png") center / contain no-repeat;
+}
+
+.dial-shell::before {
+  display: none;
+}
+
+.dial-scale {
+  /* The generated tick ring sits just inside the source canvas perimeter,
+     while the ivory knob has a deliberately broad body. Enlarge the ring
+     enough to keep its marks outside that body at every compact dial size. */
+  background: transparent url("./assets/console/dial-scale-photo.png") center / 115% 115% no-repeat;
+}
+
+.dial-scale i {
+  display: none;
+}
+
+.dial-face {
+  background-color: transparent;
+  background-image: url("./assets/console/knob-ivory.png");
+  box-shadow: none;
+}
+
+.toggle-switch > span:not(.raster-label),
+.external-input-button i,
+.power-switch > span:not(.raster-label) {
+  background-size: contain;
+  box-shadow: none;
+}
+
+.piano-key,
+.piano-key--white,
+.piano-key--black,
+.piano-key--white.is-active,
+.piano-key--black.is-active {
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-shadow: none;
+}
+
+.piano-key--white,
+.piano-key--white.is-active {
+  background-image: url("./assets/console/key-white-photo.png");
+}
+
+.piano-key--white:nth-child(even),
+.piano-key--white:nth-child(even).is-active {
+  background-image: url("./assets/console/key-white-photo-b.png");
+}
+
+.piano-key--black,
+.piano-key--black.is-active {
+  background-image: url("./assets/console/key-black-photo.png");
+}
+
+.piano-key.is-active {
+  filter: brightness(0.72) contrast(1.08);
+  transform: translateY(2px);
+}
+
+.piano-key.is-low {
+  box-shadow: inset 0 -5px 0 #34332e, inset 0 -7px 0 #aaa493;
+}
+
+.piano-key.is-high {
+  box-shadow: inset 0 -5px 0 #d5cebd, inset 0 -7px 0 #55524b;
+}
+
+.piano-key.is-low.is-high {
+  box-shadow:
+    inset 0 -4px 0 #d5cebd,
+    inset 0 -6px 0 #55524b,
+    inset 0 -10px 0 #34332e,
+    inset 0 -12px 0 #aaa493;
+}
+
+.midi-strip-actions {
+  width: auto;
+  flex: none;
+}
+
+.midi-strip-actions .button {
+  flex: 0 0 112px;
+}
+
+footer {
+  color: #24211b;
+}
+
+.direct-entry {
+  isolation: isolate;
+  border: 0;
+  border-radius: 0;
+  color: var(--console-ink);
+  background-color: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+.direct-entry::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  box-sizing: border-box;
+  border: 30px solid transparent;
+  border-image-source: url("./assets/console/panel-blank-photo.png");
+  border-image-slice: 150 fill;
+  border-image-width: 30px;
+  border-image-outset: 0;
+  border-image-repeat: stretch;
+  clip-path: inset(0);
+  content: "";
+  pointer-events: none;
+}
+
+.direct-entry > form {
+  position: relative;
+  z-index: 1;
+}
+
+.system-banner,
+.clipboard-toast {
+  border-color: transparent;
+  border-radius: 0;
+  background-color: #eee7d4;
+  background-image: url("./assets/console/panel-blank-photo.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-shadow: none;
+}
+
+/*
+ * Responsive photographic console assembly
+ *
+ * The generated surfaces remain the instrument's visual material, while the
+ * semantic controls reflow at their real CSS-pixel size. Nothing scales the
+ * complete console: small screens gain vertical length instead of tiny text
+ * and hardware.
+ */
+html,
+body,
+#root {
+  width: 100%;
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+body {
+  min-width: 0;
+  min-height: 100vh;
+  margin: 0;
+}
+
+#root {
+  position: relative;
+  min-width: 0;
+}
+
+.app-shell {
+  position: relative;
+  top: auto;
+  left: auto;
+  display: grid;
+  width: min(1880px, calc(100% - 24px));
+  min-width: 0;
+  max-width: 1880px;
+  height: auto;
+  min-height: 0;
+  grid-template-rows: none;
+  gap: 10px;
+  margin: 12px auto 24px;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  transform-origin: center top;
+}
+
+.topbar {
+  position: relative;
+  z-index: 5;
+  display: grid;
+  width: 100%;
+  height: auto;
+  min-height: 168px;
+  grid-template-columns: minmax(250px, 310px) minmax(0, 1fr) minmax(190px, 224px);
+  align-items: center;
+  gap: 16px;
+  padding: 16px 22px;
+  overflow: visible;
+  background: transparent url("./assets/console/panel-blank-photo.png") center / 100% 100% no-repeat;
+}
+
+.brand {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+  padding: 0 0 0 18px;
+  border: 0;
+}
+
+.brand-mark {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border: 0;
+  background: transparent;
+}
+
+.brand-name,
+.brand-model {
+  width: 100%;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  line-height: normal;
+  text-align: left;
+}
+
+.brand-name .raster-label,
+.brand-model .raster-label {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.brand-model {
+  margin-top: 6px;
+}
+
+.library-deck {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  grid-template-rows: repeat(3, minmax(44px, auto));
+  gap: 7px;
+}
+
+.utility-strip,
+.patch-strip,
+.sequence-strip {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.utility-strip {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.patch-strip,
+.sequence-strip {
+  grid-template-columns: minmax(290px, 0.8fr) minmax(477px, 1.2fr);
+}
+
+.sequence-strip {
+  grid-template-columns: minmax(290px, 1fr) max-content;
+}
+
+.library-actions {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.utility-actions {
+  width: min(100%, 620px);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-self: end;
+}
+
+.patch-actions {
+  width: 100%;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sequence-actions {
+  grid-template-columns: repeat(5, 44px);
+  justify-content: start;
+}
+
+.library-picker {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 94px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.library-picker label,
+.patch-strip label,
+.sequence-strip label {
+  display: flex;
+  width: auto;
+  height: auto;
+  min-height: 20px;
+  align-items: center;
+  justify-content: flex-start;
+  overflow: visible;
+  font-size: inherit;
+}
+
+.library-select-shell {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+}
+
+.library-select-shell::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  box-sizing: border-box;
+  border: 7px solid transparent;
+  border-image-source: url("./assets/console/button-phenolic-up.png");
+  border-image-slice: 88 fill;
+  border-image-width: 7px;
+  border-image-outset: 0;
+  border-image-repeat: stretch;
+  content: "";
+  pointer-events: none;
+}
+
+.library-select-shell::after {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  right: 14px;
+  width: 11px;
+  height: 9px;
+  background: transparent url("./assets/console/selector-arrow-photo.png") center / contain no-repeat;
+  content: "";
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.patch-strip select,
+.sequence-strip select,
+.library-picker select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  height: 44px;
+  min-height: 44px;
+  /* The wrapper owns the non-stretching bezel and arrow. The native select
+     stays full-size above it with a fixed 14px text inset. */
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  padding: 6px 36px 6px 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  color: #f4efdf;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--andoracle-font);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.button,
+.utility-strip .button,
+.patch-strip .button,
+.sequence-strip .button,
+.midi-strip .button {
+  width: auto;
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  padding: 7px 12px;
+  overflow: visible;
+}
+
+.sequence-strip .button,
+.sequence-icon-button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+
+.sequence-icon-button i {
+  width: 15px;
+  height: 15px;
+}
+
+.sequence-delete-button svg {
+  width: 19px;
+  height: 19px;
+}
+
+.power-strip {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 8px;
+}
+
+.install-button {
+  width: 100%;
+  max-width: 174px;
+  grid-column: auto;
+}
+
+.power-control {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  grid-column: auto;
+  grid-template-rows: auto auto;
+  justify-items: center;
+  gap: 4px;
+}
+
+.power-control__label {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 20px;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+}
+
+/* Module switches are a genuine 2x photographic control: the image itself is
+   92 × 96 CSS pixels, independent of the old whole-console scale variable. */
+.toggle-switch {
+  position: relative;
+  display: flex;
+  width: 104px;
+  min-width: 104px;
+  height: 122px;
+  min-height: 122px;
+  flex: 0 0 122px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  margin: 2px auto 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.toggle-switch > span:not(.raster-label),
+.external-input-button i {
+  display: block;
+  width: 92px;
+  min-width: 92px;
+  height: 96px;
+  min-height: 96px;
+  flex: 0 0 96px;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  /* Exact 11% lift over the previous 1.12 treatment: 1.12 × 1.11 = 1.2432.
+     Keeping it here preserves the unmodified source photographs. */
+  filter: brightness(1.2432);
+}
+
+.toggle-switch b,
+.power-switch b {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.power-switch {
+  display: flex;
+  width: 184px;
+  min-width: 184px;
+  height: 104px;
+  min-height: 104px;
+  flex: 0 0 104px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  margin: 0;
+}
+
+.power-switch > span:not(.raster-label) {
+  width: 96px;
+  min-width: 96px;
+  height: 96px;
+  min-height: 96px;
+  flex: 0 0 96px;
+  background-size: contain;
+  transform: rotate(90deg);
+}
+
+.power-switch b {
+  width: 39px;
+  min-width: 39px;
+  flex: 0 0 39px;
+}
+
+.output-meter > span {
+  display: block;
+  height: auto;
+  min-height: 14px;
+  overflow: visible;
+  font-size: inherit;
+  line-height: normal;
+}
+
+.output-meter {
+  align-content: start;
+  justify-self: end;
+  width: 100%;
+  max-width: 430px;
+  padding: 5px 7px 7px;
+}
+
+.output-vu-meter {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 698 / 260;
+  margin-top: 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.output-vu-meter__face,
+.output-vu-meter__needles {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.output-vu-meter__face {
+  z-index: 1;
+  object-fit: contain;
+}
+
+.output-vu-meter__face--on {
+  z-index: 2;
+  display: none;
+}
+
+.output-meter.is-powered .output-vu-meter__face--on {
+  display: block;
+}
+
+.output-meter.is-powered .output-vu-meter__face--off {
+  display: none;
+}
+
+.output-vu-meter__needles {
+  z-index: 3;
+}
+
+main {
+  display: grid;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  grid-template-rows: none;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+}
+
+.panel-grid {
+  display: grid;
+  width: 100%;
+  height: auto;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: none;
+  grid-auto-flow: row;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.module {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background-color: var(--console-enamel);
+  background-image: url("./assets/console/panel-blank-photo.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-shadow: none;
+}
+
+.module--controllers,
+.module--vco1,
+.module--vco2 {
+  grid-column: span 4;
+}
+
+.module--modulators,
+.module--mixer,
+.module--delay,
+.module--filter {
+  grid-column: span 3;
+}
+
+.module--envelopes {
+  grid-column: span 7;
+}
+
+.module--amplifier {
+  grid-column: span 5;
+}
+
+.module-header {
+  display: grid;
+  width: 100%;
+  height: auto;
+  min-height: 58px;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(0, 0.8fr) minmax(130px, 1.2fr);
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px 10px;
+  overflow: visible;
+  border: 0;
+  background: rgba(242, 236, 216, 0.23);
+}
+
+.module-header .module-eyebrow,
+.module-header h2,
+.keyboard-header .module-eyebrow,
+.keyboard-header h2 {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  overflow: visible;
+  font-size: inherit;
+  line-height: normal;
+}
+
+.module > .control-bank {
+  display: grid;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  grid-template-rows: none;
+  grid-auto-flow: row;
+  grid-auto-rows: auto;
+  align-items: start;
+  align-content: space-between;
+  gap: 10px;
+  padding: 12px 22px 24px;
+  overflow: visible;
+}
+
+.module--modulators .control-bank > :nth-child(n) {
+  grid-column: auto;
+  grid-row: auto;
+}
+
+.parameter,
+.parameter:last-child,
+.route-control {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  padding: 6px 2px;
+  overflow: visible;
+  border: 0;
+  text-align: center;
+}
+
+.parameter {
+  flex-direction: column;
+}
+
+.parameter label,
+.toggle-label,
+.external-input-title,
+.ppc-title,
+.route-control .parameter--choice label,
+.route-control .parameter--range label {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 2px;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: visible;
+  font-size: inherit;
+  line-height: normal;
+}
+
+.parameter output,
+.parameter--choice > output,
+.module--filter .parameter output,
+.module--amplifier .route-control .parameter--range output {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 18px;
+  height: auto;
+  margin: 2px 0 0;
+  padding: 0 2px;
+  overflow: visible;
+  color: #25231e;
+  font-family: var(--andoracle-font);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.dial-shell,
+.control-bank--routed .parameter--range .dial-shell,
+.module--controllers .dial-shell,
+.module--delay .dial-shell,
+.module--filter .dial-shell,
+.route-control .parameter--range .dial-shell,
+.module--amplifier .route-control .dial-shell {
+  position: relative;
+  display: grid;
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  min-height: 56px;
+  flex: 0 0 56px;
+  margin: 4px auto 0;
+  place-items: center;
+}
+
+.dial-shell input[type="range"],
+.module--controllers .dial-shell input[type="range"],
+.module--delay .dial-shell input[type="range"],
+.module--filter .dial-shell input[type="range"],
+.route-control .parameter--range .dial-shell input[type="range"],
+.module--amplifier .route-control .dial-shell input[type="range"] {
+  position: relative;
+  z-index: 3;
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  min-height: 56px;
+  margin: 0;
+  opacity: 0;
+}
+
+.dial-face,
+.module--controllers .dial-face,
+.module--delay .dial-face,
+.module--filter .dial-face,
+.module--amplifier .route-control .dial-face {
+  position: absolute;
+  inset: 3px;
+  z-index: 2;
+  display: block;
+  width: 50px;
+  height: 50px;
+  border: 0;
+  border-radius: 50%;
+  background-color: transparent;
+  background-image: url("./assets/console/knob-ivory.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  box-shadow: none;
+  pointer-events: none;
+  transform: rotate(var(--dial-angle));
+}
+
+.dial-scale {
+  position: absolute;
+  inset: 0;
+  background: transparent url("./assets/console/dial-scale-photo.png") center / 115% 115% no-repeat;
+}
+
+.dial-scale i,
+.dial-face i {
+  display: none;
+}
+
+.parameter--choice {
+  min-width: 0;
+  justify-content: flex-start;
+}
+
+.choice-button,
+.route-control .choice-button,
+.module--amplifier .route-control .choice-button {
+  display: flex;
+  width: calc(100% - 4px);
+  min-width: 0;
+  max-width: none;
+  min-height: 44px;
+  height: auto;
+  max-height: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 4px 2px 0;
+  padding: 7px 9px;
+  overflow: visible;
+  font-family: var(--andoracle-font);
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.choice-button span {
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.choice-button i {
+  width: 10px;
+  height: 9px;
+  flex: 0 0 10px;
+}
+
+.parameter--toggle {
+  min-width: 0;
+}
+
+.parameter--toggle .toggle-switch,
+.module--controllers .parameter--toggle .toggle-switch,
+.module--delay .parameter--toggle .toggle-switch {
+  height: 122px;
+  min-height: 122px;
+  flex: 0 0 122px;
+  margin-top: 2px;
+}
+
+.module--controllers .parameter--toggle .toggle-switch > span:not(.raster-label),
+.module--delay .parameter--toggle .toggle-switch > span:not(.raster-label) {
+  width: 92px;
+  min-width: 92px;
+  height: 96px;
+  min-height: 96px;
+  flex-basis: 96px;
+}
+
+.route-control {
+  flex-direction: column;
+}
+
+.route-control .parameter,
+.module--amplifier .route-control .parameter--range {
+  display: flex;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 0 0 auto;
+  flex-direction: column;
+  padding: 2px;
+  overflow: visible;
+}
+
+.route-control label .raster-label {
+  height: auto;
+}
+
+/* Mixed selector/dial panels use one physical selector lane per grid row.
+   A bare dial gets a blank lane of exactly the same height as a routed
+   selector, so every dial face below that lane shares a clean baseline. */
+.control-bank--selector-rows {
+  --selector-row-height: 99px;
+  --selector-row-spacer-height: 101px;
+  container-type: inline-size;
+}
+
+/* Two 108px control cells plus their 8px gap are the first width at which
+   controls can share a visual row. A one-column phone panel omits the empty
+   lane because there is no neighboring selector to align with. */
+@container (min-width: 224px) {
+  .control-bank--selector-rows > .parameter--range::before {
+    display: block;
+    width: 100%;
+    height: var(--selector-row-spacer-height);
+    min-height: var(--selector-row-spacer-height);
+    flex: 0 0 var(--selector-row-spacer-height);
+    content: "";
+  }
+
+  .control-bank--selector-rows > .route-control > .parameter--choice {
+    min-height: var(--selector-row-height);
+    padding-top: 0;
+    padding-bottom: 4px;
+  }
+
+  .control-bank--selector-rows .parameter--range > label {
+    min-height: 45px;
+  }
+
+  .control-bank--selector-rows > .route-control .parameter--range .dial-shell {
+    margin-top: 4px;
+  }
+
+}
+
+/* VCF Cutoff is the third member of the filter's opening row. It belongs
+   beside the two selectors, so it must not inherit the blank selector lane
+   used by bare dials that sit beside routed controls on later rows. Removing
+   that lane also advances every following filter row by one lane. */
+.module--filter .control-bank--selector-rows > .parameter--range:nth-child(3)::before {
+  display: none;
+}
+
+/* Keep the two VCF selectors and Cutoff together, center Resonance and HPF
+   Cutoff beneath them, then keep the three modulation routes together. This
+   preserves every dedicated selector/dial lane while removing an entire tall
+   route row from the height-setting desktop panel. Very narrow mobile panels
+   retain the shared touch-friendly wrapping. */
+@media (min-width: 360px) {
+  .module.module--filter > .control-bank.control-bank--selector-rows {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .module.module--filter > .control-bank.control-bank--selector-rows > * {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    flex: none;
+  }
+
+  .module--filter .control-bank--selector-rows > :nth-child(1) { grid-column: 1 / span 2; grid-row: 1; }
+  .module--filter .control-bank--selector-rows > :nth-child(2) { grid-column: 3 / span 2; grid-row: 1; }
+  .module--filter .control-bank--selector-rows > :nth-child(3) { grid-column: 5 / span 2; grid-row: 1; }
+  .module--filter .control-bank--selector-rows > :nth-child(4) { grid-column: 2 / span 2; grid-row: 2; }
+  .module--filter .control-bank--selector-rows > :nth-child(5) { grid-column: 4 / span 2; grid-row: 2; }
+  .module--filter .control-bank--selector-rows > :nth-child(6) { grid-column: 1 / span 2; grid-row: 3; }
+  .module--filter .control-bank--selector-rows > :nth-child(7) { grid-column: 3 / span 2; grid-row: 3; }
+  .module--filter .control-bank--selector-rows > :nth-child(8) { grid-column: 5 / span 2; grid-row: 3; }
+
+  .module--filter .control-bank--selector-rows > .parameter--range:nth-child(4)::before,
+  .module--filter .control-bank--selector-rows > .parameter--range:nth-child(5)::before {
+    display: none;
+  }
+}
+
+.module.module--filter > .control-bank.control-bank--selector-rows {
+  --selector-row-height: 84px;
+  --selector-row-spacer-height: 86px;
+  align-content: flex-start;
+  padding-top: 10px;
+  padding-bottom: 18px;
+}
+
+.module.module--filter > .control-bank.control-bank--selector-rows > .parameter,
+.module.module--filter > .control-bank.control-bank--selector-rows > .route-control {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+@container (min-width: 224px) {
+  .module--filter .control-bank--selector-rows .parameter--range > label {
+    min-height: 32px;
+  }
+}
+
+.ppc {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 154px;
+  height: auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: auto 1fr;
+  gap: 5px;
+  padding: 4px;
+}
+
+.ppc-title {
+  min-height: 26px;
+}
+
+.ppc-pad {
+  min-width: 0;
+  min-height: 112px;
+  height: auto;
+  padding: 10px 3px 7px;
+}
+
+.ppc-pad span {
+  font-size: 24px;
+}
+
+.ppc-pad b {
+  width: 100%;
+  height: auto;
+  min-height: 18px;
+}
+
+.external-input-control {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 164px;
+  height: auto;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 3px;
+  overflow: visible;
+}
+
+.external-input-title {
+  min-height: 32px;
+}
+
+.external-input-button {
+  display: flex;
+  width: 112px;
+  min-width: 112px;
+  min-height: 122px;
+  height: 122px;
+  flex: 0 0 122px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  margin: 2px auto 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+.external-input-button b {
+  display: flex;
+  width: 112px;
+  height: auto;
+  min-height: 18px;
+  align-items: center;
+  justify-content: center;
+}
+
+.external-input-control small:not(.control-error) {
+  display: none;
+}
+
+.external-input-control small.control-error {
+  display: block;
+  max-height: none;
+  overflow: visible;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.panel-screws {
+  --panel-screw-offset: 11px;
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: block;
+  pointer-events: none;
+}
+
+.panel-screw {
+  position: absolute;
+  display: block;
+  width: 13px;
+  height: 13px;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 50%;
+  background: transparent url("./assets/console/screw-nickel.png") center / contain no-repeat;
+  box-shadow: none;
+  transform: none;
+}
+
+.midi-strip {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 94px;
+  height: auto;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 18px 28px;
+  overflow: hidden;
+  border: 0;
+  background-color: var(--console-enamel);
+  background-image: url("./assets/console/panel-blank-photo.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.midi-strip-copy {
+  display: grid;
+  min-width: 0;
+  height: auto;
+  grid-template-columns: minmax(170px, 0.65fr) minmax(210px, 0.8fr) minmax(260px, 1.6fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.midi-strip-copy .module-eyebrow,
+.midi-strip-copy strong {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.midi-strip-copy small {
+  max-height: none;
+  overflow: visible;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.midi-strip-actions {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.midi-strip-actions .button {
+  width: auto;
+  min-width: 116px;
+  flex: 0 1 auto;
+}
+
+.keyboard-module {
+  --keyboard-row-height: clamp(200px, calc((min(100vw, 1880px) - 64px) * 0.243), 440px);
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  grid-template-rows: auto auto;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  background-color: var(--console-well);
+  background-image: url("./assets/console/panel-blank-photo.png");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+.keyboard-header {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 82px;
+  height: auto;
+  grid-template-columns: minmax(320px, 0.9fr) auto minmax(0, 1.6fr);
+  align-items: center;
+  gap: 18px;
+  padding: 18px 28px 12px;
+  overflow: visible;
+  border: 0;
+  background: rgba(241, 235, 215, 0.84);
+}
+
+.keyboard-title-group {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(180px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.keyboard-header-actions {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: center;
+  gap: 12px;
+}
+
+.keyboard-position-picker {
+  width: auto;
+  min-width: 196px;
+  grid-template-columns: auto 112px;
+  gap: 8px;
+}
+
+.keyboard-position-picker > label {
+  justify-content: flex-end;
+}
+
+.keyboard-position-select-shell {
+  width: 112px;
+}
+
+.keyboard-header p {
+  max-width: none;
+  margin: 0;
+  overflow: visible;
+  font-family: var(--andoracle-font);
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: right;
+  white-space: normal;
+}
+
+kbd {
+  min-width: 20px;
+  padding: 2px 4px;
+  font-size: 9px;
+}
+
+.keyboard-banks {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: var(--keyboard-row-height);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: var(--keyboard-row-height);
+  gap: 0;
+  padding: 5px 8px 0;
+  overflow: hidden;
+  background: #181714 url("./assets/console/phenolic-black.webp") center / var(--console-phenolic-texture-size);
+  touch-action: none;
+}
+
+.keyboard-surface {
+  display: contents;
+}
+
+.piano-key {
+  position: absolute;
+  top: 5px;
+  left: var(--desktop-key-left);
+  width: var(--desktop-key-width);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  box-shadow: none;
+  touch-action: none;
+}
+
+.piano-key--white {
+  z-index: 1;
+  height: calc(var(--keyboard-row-height) - 5px);
+  background-image: url("./assets/console/key-white-photo.png");
+}
+
+.piano-key--white:nth-child(even) {
+  background-image: url("./assets/console/key-white-photo-b.png");
+}
+
+.piano-key--black {
+  z-index: 3;
+  height: calc((var(--keyboard-row-height) - 5px) * 0.62);
+  background-image: url("./assets/console/key-black-photo.png");
+}
+
+.piano-key--white span {
+  bottom: 10px;
+  font-size: 9px;
+}
+
+.midi-control {
+  display: block;
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.midi-control__launcher {
+  display: inline-flex;
+  width: auto;
+  min-width: 86px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+.midi-control__lamp {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border: 1px solid #aaa496;
+  border-radius: 50%;
+  background: #34332f;
+  box-shadow: inset 0 1px 2px #11110f;
+}
+
+.midi-control__launcher.is-enabled .midi-control__lamp {
+  background: #d8d3c5;
+  box-shadow: 0 0 5px rgba(240, 236, 220, 0.72), inset 0 0 1px #fff;
+}
+
+.midi-control__launcher.has-error .midi-control__lamp {
+  background: #88847a;
+}
+
+.midi-dialog__status {
+  min-height: 58px;
+  margin: 12px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.midi-dialog__status.control-error {
+  color: #302d28;
+  font-weight: 700;
+}
+
+/* A busy MIDI operation keeps its actions focusable so assistive technology
+   can announce their state, but they must not look or point like live buttons. */
+.midi-dialog[aria-busy="true"] .button[aria-disabled="true"] {
+  cursor: wait;
+  filter: grayscale(1) brightness(0.84);
+  opacity: 0.46;
+}
+
+.midi-dialog .button:disabled {
+  cursor: not-allowed;
+}
+
+/* The dialog title receives programmatic focus only to establish an
+   accessible reading position; it is not an interactive focus target. */
+.midi-dialog h2:focus {
+  outline: none;
+}
+
+.midi-dialog__actions {
+  margin-top: 18px;
+}
+
+footer {
+  display: flex;
+  width: 100%;
+  min-height: 54px;
+  height: auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 20px;
+  /* The photographed frame places screws inside a 30px corner zone. Keep
+     every footer line beyond that hardware at every responsive width. */
+  padding: 12px 32px;
+  overflow: visible;
+  color: #24211b;
+  background: transparent url("./assets/console/panel-blank-photo.png") center / 100% 100% no-repeat;
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: normal;
+}
+
+.raster-label,
+.raster-label--brand,
+.raster-label--model,
+.raster-label--title,
+.raster-label--eyebrow,
+.raster-label--control,
+.raster-label--button,
+.raster-label--micro {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: auto;
+  align-items: center;
+  justify-content: center;
+  overflow: visible;
+  color: var(--console-ink);
+  font-family: var(--andoracle-font);
+  font-size: inherit;
+  font-weight: 800;
+  line-height: 1.15;
+  pointer-events: none;
+  text-align: center;
+}
+
+.raster-label__text {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+  text-transform: uppercase;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+}
+
+.raster-label--preserve-case .raster-label__text {
+  text-transform: none;
+}
+
+.raster-label--tone-muted { color: var(--console-muted-ink); }
+.raster-label--tone-reverse { color: #f3eee1; }
+.raster-label--brand { font-size: clamp(25px, 2vw, 34px); letter-spacing: 0.12em; }
+.raster-label--model { font-size: 12px; letter-spacing: 0.13em; }
+.raster-label--title { font-size: 17px; letter-spacing: 0.1em; }
+.raster-label--eyebrow { font-size: 11px; letter-spacing: 0.1em; }
+.raster-label--control { font-size: 13px; letter-spacing: 0.02em; }
+.raster-label--button { font-size: 13px; letter-spacing: 0.09em; }
+.raster-label--micro { font-size: 11px; letter-spacing: 0.075em; }
+
+.toggle-switch .raster-label,
+.power-switch .raster-label,
+.external-input-button .raster-label,
+.ppc-pad .raster-label {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.system-banner {
+  max-width: min(860px, calc(100vw - 40px));
+}
+
+.direct-entry {
+  width: min(520px, calc(100vw - 40px));
+  max-width: calc(100vw - 40px);
+}
+
+.direct-entry .button {
+  min-height: 44px;
+}
+
+/* Canonical module sequence. PANEL_SECTIONS uses this same order so responsive
+   reflow changes only the row breaks, never reading or keyboard-focus order. */
+.module--controllers { order: 1; }
+.module--vco1 { order: 2; }
+.module--vco2 { order: 3; }
+.module--envelopes { order: 4; }
+.module--amplifier { order: 5; }
+.module--modulators { order: 6; }
+.module--filter { order: 7; }
+.module--mixer { order: 8; }
+.module--delay { order: 9; }
+
+/* Wide panels retain the native three-column console header. Compacting the
+   control-bank gutters lets the hardware reflow sooner without shrinking its
+   44px touch targets or the approved 50px knobs. */
+@media (min-width: 1451px) {
+  .control-bank,
+  .module--controllers .control-bank,
+  .module--vco1 .control-bank,
+  .module--vco2 .control-bank,
+  .module--modulators .control-bank,
+  .module--mixer .control-bank,
+  .module--delay .control-bank,
+  .module--filter .control-bank,
+  .module--envelopes .control-bank,
+  .module--amplifier .control-bank {
+    gap: 8px;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  /* Keep the four-control AR bank and five-control ADSR bank visually intact
+     instead of leaving a lone ninth control on a nearly empty row. */
+  .module--envelopes .control-bank {
+    grid-template-columns: repeat(20, minmax(0, 1fr));
+  }
+
+  .module--envelopes .control-bank > :nth-child(-n + 4) {
+    grid-column: span 5;
+  }
+
+  .module--envelopes .control-bank > :nth-child(n + 5) {
+    grid-column: span 4;
+  }
+
+  /* Five controller columns keep its three-row footprint while giving the
+     three physical PPC pads two tracks and a full 44px target each. */
+  .module--controllers .control-bank {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .module--controllers .ppc {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 1450.98px) {
+  .topbar {
+    grid-template-columns: minmax(260px, 1fr) auto;
+  }
+
+  .brand { grid-column: 1; grid-row: 1; }
+  .power-strip { grid-column: 2; grid-row: 1; width: 210px; }
+  .library-deck { grid-column: 1 / -1; grid-row: 2; }
+
+  .module--controllers,
+  .module--vco1,
+  .module--vco2,
+  .module--modulators,
+  .module--mixer,
+  .module--delay,
+  .module--filter,
+  .module--envelopes,
+  .module--amplifier {
+    grid-column: span 6;
+  }
+
+  /* Nine modules create four complete pairs at this breakpoint. Let the
+     final output stage occupy the complete last row instead of leaving a
+     conspicuous empty half-width chassis bay. */
+  .module--amplifier {
+    grid-column: 1 / -1;
+  }
+
+  .midi-strip-copy {
+    grid-template-columns: minmax(150px, 0.7fr) minmax(190px, 0.9fr) minmax(220px, 1.5fr);
+  }
+
+  /* A single controller cell is too narrow for three adjacent PPC targets at
+     tablet and compact widths. Stack the pads inside that same cell so each
+     remains comfortably operable without consuming another module row. */
+  .module--controllers .ppc {
+    min-height: 170px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto repeat(3, minmax(44px, 1fr));
+    gap: 3px;
+  }
+
+  .module--controllers .ppc-pad {
+    min-height: 44px;
+    flex-direction: row;
+    justify-content: center;
+    gap: 8px;
+    padding: 3px 8px;
+  }
+
+  .module--controllers .ppc-pad b {
+    width: auto;
+    min-width: 34px;
+  }
+}
+
+/* A complete 3×3 bank uses the available landscape-tablet width far more
+   efficiently than four half-width pairs followed by a full-width orphan. */
+@media (min-width: 1280px) and (max-width: 1450.98px) {
+  .module--controllers,
+  .module--vco1,
+  .module--vco2,
+  .module--modulators,
+  .module--mixer,
+  .module--delay,
+  .module--filter,
+  .module--envelopes,
+  .module--amplifier {
+    grid-column: span 4;
+  }
+}
+
+/* Deterministic tablet columns avoid auto-fit cliffs where one extra narrow
+   column can make a panel taller. Internal gutters remain screw-safe. */
+@media (min-width: 841px) and (max-width: 1450.98px) {
+  .control-bank,
+  .module--controllers .control-bank,
+  .module--vco1 .control-bank,
+  .module--vco2 .control-bank,
+  .module--modulators .control-bank,
+  .module--mixer .control-bank,
+  .module--delay .control-bank,
+  .module--filter .control-bank,
+  .module--envelopes .control-bank,
+  .module--amplifier .control-bank {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .parameter,
+  .parameter:last-child,
+  .route-control {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .module--amplifier .control-bank {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1040px) and (max-width: 1279.98px) {
+  .control-bank,
+  .module--controllers .control-bank,
+  .module--vco1 .control-bank,
+  .module--vco2 .control-bank,
+  .module--modulators .control-bank,
+  .module--mixer .control-bank,
+  .module--delay .control-bank,
+  .module--filter .control-bank,
+  .module--envelopes .control-bank {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) and (max-width: 1450.98px) {
+  .module--amplifier .control-bank {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  /* Four actions remain a balanced 2×2 bank when one-line labels would no
+     longer fit; this avoids both clipping and an orphaned final button. */
+  .patch-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .patch-strip {
+    grid-template-columns: minmax(290px, 1fr) minmax(235px, 0.8fr);
+  }
+}
+
+@media (max-width: 919px) {
+  .app-shell {
+    width: calc(100% - 40px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    margin-top: 20px;
+  }
+
+  .topbar {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  /* The shell's 20px viewport gutters already provide a touch-free scroll
+     lane. Do not spend another 40px inside main on narrow screens. */
+  main {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .utility-actions {
+    width: 100%;
+  }
+
+  .midi-strip-copy {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .midi-strip-copy small {
+    grid-column: 1 / -1;
+  }
+
+  .keyboard-module {
+    --keyboard-row-height: clamp(155px, calc((100vw - 76px) * 0.382), 326px);
+  }
+
+  .keyboard-banks {
+    height: calc(var(--keyboard-row-height) * 2 + 13px);
+    grid-template-rows: repeat(2, var(--keyboard-row-height));
+    gap: 8px;
+  }
+
+  .keyboard-surface {
+    position: relative;
+    display: block;
+    width: 100%;
+    min-width: 0;
+    height: var(--keyboard-row-height);
+    overflow: hidden;
+    pointer-events: none;
+    touch-action: none;
+  }
+
+  .keyboard-surface:nth-child(-n + 2) {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .keyboard-surface:nth-child(3) {
+    grid-row: 2;
+    grid-column: 1;
+  }
+
+  .piano-key {
+    top: 0;
+    left: var(--two-row-key-left);
+    width: var(--two-row-key-width);
+  }
+
+  .piano-key--white {
+    height: var(--keyboard-row-height);
+  }
+
+  .piano-key--black {
+    height: calc(var(--keyboard-row-height) * 0.62);
+  }
+}
+
+@media (max-width: 860px) {
+  .output-meter {
+    grid-column: 1 / -1;
+    justify-self: center;
+  }
+}
+
+@media (max-width: 840.98px) {
+  .module--controllers,
+  .module--vco1,
+  .module--vco2,
+  .module--modulators,
+  .module--mixer,
+  .module--delay,
+  .module--filter,
+  .module--envelopes,
+  .module--amplifier {
+    grid-column: 1 / -1;
+  }
+
+  .panel-grid {
+    gap: 10px;
+  }
+
+  /* A 108px cell still contains the 104px switch hardware once the compact
+     two-pixel parameter insets are accounted for. This earns useful extra
+     columns without reducing the knobs, switches, or touch areas. */
+  .control-bank,
+  .module--controllers .control-bank,
+  .module--vco1 .control-bank,
+  .module--vco2 .control-bank,
+  .module--modulators .control-bank,
+  .module--mixer .control-bank,
+  .module--delay .control-bank,
+  .module--filter .control-bank,
+  .module--envelopes .control-bank,
+  .module--amplifier .control-bank {
+    grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+    gap: 8px;
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .external-input-control {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .external-input-button {
+    width: 104px;
+    min-width: 104px;
+  }
+}
+
+@media (max-width: 880px) {
+  .midi-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .midi-strip-actions {
+    justify-content: stretch;
+  }
+
+  .midi-strip-actions .button {
+    flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 760px) {
+  .keyboard-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .keyboard-title-group {
+    grid-column: 1;
+    grid-template-columns: minmax(0, 1fr) minmax(160px, 1fr);
+  }
+
+  .keyboard-header-actions {
+    grid-column: 2;
+  }
+
+  .keyboard-header p {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+}
+
+@media (max-width: 680px) {
+  .patch-strip,
+  .sequence-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 590px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .brand,
+  .power-strip,
+  .library-deck {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .power-strip {
+    width: 100%;
+  }
+
+  .sequence-actions {
+    justify-content: center;
+  }
+
+  .output-meter {
+    grid-column: 1 / -1;
+  }
+
+  .module-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding-top: 18px;
+  }
+
+  .midi-strip-copy {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .midi-strip-copy small {
+    grid-column: auto;
+  }
+
+  .keyboard-title-group {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .keyboard-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .keyboard-header-actions {
+    width: 100%;
+    grid-column: 1;
+    justify-content: center;
+  }
+
+  .keyboard-header p {
+    grid-column: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .keyboard-header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .keyboard-header-actions,
+  .keyboard-header p {
+    grid-column: 1;
+  }
+
+  .keyboard-module {
+    --keyboard-row-height: clamp(112px, calc((100vw - 68px) * 0.63), 260px);
+  }
+
+  .keyboard-banks {
+    height: calc(var(--keyboard-row-height) * 3 + 21px);
+    grid-template-rows: repeat(3, var(--keyboard-row-height));
+  }
+
+  .keyboard-surface:nth-child(n) {
+    grid-row: auto;
+    grid-column: 1;
+  }
+
+  .piano-key {
+    left: var(--three-row-key-left);
+    width: var(--three-row-key-width);
+  }
+}
+
+@media (max-width: 360px) {
+  .topbar {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .brand {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .brand-mark {
+    width: 50px;
+    height: 50px;
+  }
+
+  .sequence-actions {
+    grid-template-columns: repeat(5, minmax(40px, 1fr));
+  }
+
+  .sequence-strip .button,
+  .sequence-icon-button {
+    width: 100%;
+    min-width: 40px;
+  }
+}
+
+@media (forced-colors: active) {
+  html,
+  body,
+  .app-shell,
+  .topbar,
+  main,
+  .module,
+  .module-header,
+  .midi-strip,
+  .keyboard-module,
+  .keyboard-header,
+  .keyboard-banks,
+  .allocation-legend,
+  .piano-key,
+  .button,
+  .choice-button,
+  .ppc-pad,
+  .direct-entry,
+  .system-banner,
+  .clipboard-toast,
+  footer {
+    background-image: none;
+  }
+
+  .app-shell,
+  .topbar,
+  .module,
+  .midi-strip,
+  .keyboard-module,
+  .direct-entry,
+  .system-banner,
+  .clipboard-toast,
+  footer {
+    border-color: CanvasText;
+  }
+
+  button:focus-visible,
+  select:focus-visible,
+  input:focus-visible,
+  .keyboard-banks:focus-visible {
+    outline-color: Highlight;
+    box-shadow: none;
+  }
+
+  .piano-key:focus::after,
+  .dial-shell input[type="range"]:focus-visible ~ .dial-face {
+    border-color: Highlight;
+    outline-color: Highlight;
+    box-shadow: none;
+  }
+
+  .module-header,
+  .keyboard-header {
+    border-bottom: 1px solid CanvasText;
+  }
+
+  .button,
+  .choice-button,
+  .ppc-pad,
+  .patch-strip select,
+  .sequence-strip select,
+  .library-picker select {
+    border: 1px solid ButtonText;
+    color: ButtonText;
+    background-color: ButtonFace;
+    background-image: none;
+  }
+
+  .library-select-shell::before,
+  .library-select-shell::after {
+    display: none;
+  }
+
+  .choice-button i {
+    width: 0;
+    height: 0;
+    flex-basis: 0;
+    border: 4px solid transparent;
+    border-top: 6px solid ButtonText;
+    background: none;
+  }
+
+  .toggle-switch > span:not(.raster-label),
+  .external-input-button i,
+  .power-switch > span:not(.raster-label) {
+    border: 2px solid ButtonText;
+    background-color: ButtonFace;
+    background-image: none !important;
+  }
+
+  .toggle-switch[aria-checked="true"] > span:not(.raster-label),
+  .external-input-button.is-enabled i,
+  .power-switch[aria-checked="true"] > span:not(.raster-label) {
+    background-color: Highlight;
+  }
+
+  .power-switch[aria-checked="false"]:not(:disabled) > span:not(.raster-label) {
+    animation: none;
+    filter: none;
+  }
+
+  .dial-scale {
+    background-image: none;
+  }
+
+  .dial-scale i,
+  .dial-face i {
+    display: block;
+    background: CanvasText;
+    box-shadow: none;
+  }
+
+  .dial-face {
+    border: 1px solid CanvasText;
+    background-color: Canvas;
+    background-image: none;
+  }
+
+  .piano-key {
+    border: 1px solid ButtonText;
+    background-color: ButtonFace;
+  }
+
+  .piano-key--black {
+    background-color: ButtonText;
+  }
+
+  .sequence-icon-button i {
+    background: ButtonText;
+    box-shadow: none;
+  }
+
+  .sequence-pause-button i,
+  .sequence-pause-button.is-active i {
+    forced-color-adjust: none;
+    background: linear-gradient(
+      90deg,
+      CanvasText 0 35%,
+      transparent 35% 65%,
+      CanvasText 65% 100%
+    );
+  }
+
+  .raster-label {
+    overflow: visible;
+    font-size: 9px;
+    line-height: 1;
+  }
+
+  .raster-label--brand { font-size: 23px; }
+  .raster-label--model { font-size: 9px; }
+  .raster-label--title { font-size: 15px; }
+  .raster-label--eyebrow { font-size: 8px; }
+  .raster-label--control,
+  .raster-label--button { font-size: 9.5px; }
+  .raster-label--micro { font-size: 7.5px; }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .power-switch[aria-checked="false"]:not(:disabled) > span:not(.raster-label) {
+    animation: none;
+    filter: brightness(1.2432);
+  }
+}
+
+/*
+ * Resize the photographed plate as a nine-slice frame. The source plate's
+ * four corner fasteners live inside equal square slices, so the enamel body
+ * may grow in either direction without stretching a screw into an oval.
+ */
+:is(
+  .topbar,
+  .module,
+  .midi-strip,
+  .keyboard-module,
+  footer
+) {
+  position: relative;
+  isolation: isolate;
+  background-color: transparent;
+  background-image: none;
+}
+
+:where(
+  .topbar,
+  .module,
+  .midi-strip,
+  .keyboard-module,
+  footer
+)::before {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  box-sizing: border-box;
+  border: 30px solid transparent;
+  border-image-source: url("./assets/console/panel-blank-photo.png");
+  border-image-slice: 150 fill;
+  border-image-width: 30px;
+  border-image-outset: 0;
+  border-image-repeat: stretch;
+  clip-path: inset(0);
+  content: "";
+  pointer-events: none;
+}
+
+:where(
+  .topbar,
+  .module,
+  .midi-strip,
+  .keyboard-module,
+  footer
+) > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* The nine-slice photograph supplies the four visible fasteners. Keep the
+   semantic four-screw markup, but avoid drawing a second set over it. */
+.panel-screws {
+  display: none;
+}
+
+/* Earlier responsive rules also reorganize status and header material below
+   920px. Restore only the keyboard to its required single physical row from
+   600px upward; 481–599px remains two rows and <=480px remains three. */
+@media (min-width: 600px) and (max-width: 919px) {
+  .keyboard-module {
+    --keyboard-row-height: clamp(138px, calc((100vw - 76px) * 0.243), 326px);
+  }
+
+  .keyboard-banks {
+    height: var(--keyboard-row-height);
+    grid-template-rows: var(--keyboard-row-height);
+    gap: 0;
+  }
+
+  .keyboard-surface {
+    display: contents;
+  }
+
+  .keyboard-surface:nth-child(n) {
+    grid-row: auto;
+    grid-column: auto;
+  }
+
+  .piano-key {
+    top: 5px;
+    left: var(--desktop-key-left);
+    width: var(--desktop-key-width);
+  }
+
+  .piano-key--white {
+    height: calc(var(--keyboard-row-height) - 5px);
+  }
+
+  .piano-key--black {
+    height: calc((var(--keyboard-row-height) - 5px) * 0.62);
+  }
+}
+
+/* The old fixed canvas intentionally miniaturized two LFO-related knobs.
+   Natural responsive layout has room for the same 50px photographed dial
+   used everywhere else, which keeps the user's approved hardware size
+   consistent. */
+.module--modulators .control-bank > :nth-child(1) .dial-shell,
+.module--modulators .control-bank > :nth-child(1) .dial-shell input[type="range"],
+.module--modulators .control-bank > :nth-child(6) .dial-shell,
+.module--modulators .control-bank > :nth-child(6) .dial-shell input[type="range"] {
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  min-height: 56px;
+  flex-basis: 56px;
+}
+
+.module--modulators .control-bank > :nth-child(1) .dial-face,
+.module--modulators .control-bank > :nth-child(6) .dial-face {
+  inset: 3px;
+  width: 50px;
+  height: 50px;
+}
+
+.ppc-pad > span {
+  font-size: 24px;
+}
+
+.ppc-pad .raster-label,
+.ppc-pad .raster-label__text {
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+/* The photographed pad face optically pulls its compact legend upward.
+   Lower only that legend; keep the symbol and touch target geometrically fixed. */
+.ppc-pad > b {
+  transform: translateY(2px);
+}
+
+/* Preserve full Down/Vib/Up labels in the narrowest three-column control cell
+   without shrinking the system text. The extra four pixels go to the pads. */
+.ppc {
+  gap: 2px;
+  padding: 0;
+}
+
+.raster-label__text {
+  width: 100%;
+  min-width: 100%;
+  flex: 1 0 100%;
+}
+
+/* `styles.css` predates semantic labels and styles every descendant span in
+   a switch as if it were the lever. Explicitly return both label spans to
+   ordinary text so On/Off never grows a second black hardware body. */
+.toggle-switch .raster-label,
+.toggle-switch .raster-label__text,
+.power-switch .raster-label,
+.power-switch .raster-label__text {
+  position: static;
+  display: block;
+  width: 100%;
+  min-width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1 0 100%;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.toggle-switch .raster-label::after,
+.toggle-switch .raster-label__text::after,
+.power-switch .raster-label::after,
+.power-switch .raster-label__text::after {
+  display: none;
+  content: none;
+}
+
+@media (max-width: 360px) {
+  .raster-label--button {
+    font-size: 12px;
+    letter-spacing: 0.055em;
+  }
+
+  .sequence-actions {
+    width: 100%;
+    grid-template-columns: repeat(5, minmax(44px, 1fr));
+    gap: 1px;
+  }
+
+  .sequence-strip .button,
+  .sequence-icon-button {
+    width: 100%;
+    min-width: 44px;
+  }
+}
+
+/* Preserve readable, complete labels even in unusually narrow embedded
+   browser panes. The 20px outside gutters remain untouched. */
+@media (max-width: 310px) {
+  .topbar {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .brand {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .brand-mark {
+    width: 34px;
+    height: 42px;
+  }
+
+  .library-picker {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .sequence-actions {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 1px;
+  }
+
+  .sequence-actions > .sequence-icon-button {
+    min-width: 0;
+    grid-column: span 2;
+  }
+
+  .sequence-actions > .sequence-icon-button:nth-child(4) {
+    grid-column: 2 / span 2;
+  }
+
+  .sequence-actions > .sequence-icon-button:nth-child(5) {
+    grid-column: 4 / span 2;
+  }
+
+  .utility-actions {
+    gap: 4px;
+  }
+
+  .raster-label--brand {
+    font-size: 19px;
+    letter-spacing: 0.05em;
+    line-height: 1.3;
+  }
+
+  .raster-label--model {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  .raster-label--title {
+    font-size: 14px;
+    letter-spacing: 0.06em;
+  }
+
+  .raster-label--button {
+    font-size: 10.5px;
+    letter-spacing: 0.035em;
+  }
+
+  .button,
+  .utility-strip .button,
+  .patch-strip .button,
+  .sequence-strip .button,
+  .midi-strip .button {
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .module-header {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .control-bank,
+  .module--controllers .control-bank,
+  .module--vco1 .control-bank,
+  .module--vco2 .control-bank,
+  .module--modulators .control-bank,
+  .module--mixer .control-bank,
+  .module--delay .control-bank,
+  .module--filter .control-bank,
+  .module--envelopes .control-bank,
+  .module--amplifier .control-bank {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .power-switch {
+    width: 100%;
+    min-width: 0;
+    max-width: 174px;
+  }
+
+  .power-switch > span:not(.raster-label) {
+    width: 92px;
+    min-width: 92px;
+    height: 96px;
+    min-height: 96px;
+    flex-basis: 92px;
+  }
+
+  .power-switch b {
+    width: auto;
+    min-width: 0;
+    flex: 1 1 0;
+  }
+
+  .ppc-pad {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .ppc-pad .raster-label,
+  .ppc-pad .raster-label__text {
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+
+  .external-input-button b {
+    width: 100%;
+  }
+}
+
+@media (max-width: 240px) {
+  /* Borrow the topbar's otherwise empty inner gutter for the library only.
+     The app shell still leaves more than 20px of touch-free viewport edge. */
+  .library-deck {
+    width: calc(100% + 16px);
+    margin-right: -8px;
+    margin-left: -8px;
+  }
+
+  .patch-strip .button {
+    padding-right: 2px;
+    padding-left: 2px;
+  }
+
+  .library-picker select {
+    font-size: 12px;
+  }
+
+  .midi-strip,
+  .keyboard-header {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+
+  .brand {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .brand-mark {
+    width: 28px;
+    height: 40px;
+  }
+
+  .raster-label--brand {
+    font-size: 16px;
+    letter-spacing: 0.02em;
+  }
+
+  .raster-label--button {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+}
+
+@media (max-width: 220px) {
+  /* Preserve the complete longest module title in extremely narrow embedded
+     panes without breaking a word or sacrificing the faceplate edge gutter. */
+  .module-header {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .module-header .raster-label--title {
+    font-size: 13px;
+    letter-spacing: 0.04em;
+  }
+}
+
+@media (max-width: 200px) {
+  /* At the minimum embeddable viewport, removing decorative inter-button
+     gaps preserves a full 44px hit target without creating an orphan row. */
+  .utility-actions,
+  .sequence-actions {
+    gap: 0;
+  }
+}
+
+/*
+ * Center the complete contents of every synthesis module. Grid tracks fill an
+ * entire row even when only one or two controls remain, which leaves those
+ * final controls visibly pinned to the left. Centered flex lines preserve the
+ * established 112px control-cell minimum, allow complete rows to use the
+ * available width, and center every incomplete row as a group.
+ */
+.module-header {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  text-align: center;
+}
+
+.module-header .module-eyebrow,
+.module-header h2,
+.module-header .raster-label,
+.module-header .raster-label__text {
+  justify-content: center;
+  text-align: center;
+}
+
+.module > .control-bank {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  align-content: space-between;
+  justify-content: center;
+  gap: 8px;
+}
+
+.module > .control-bank > * {
+  width: auto;
+  max-width: 190px;
+  flex: 1 1 112px;
+}
+
+/* VCO 1 Range is the module-wide mode selector, not the first member of the
+   oscillator-control row. Give it a centered lane of its own, then allow the
+   remaining controls to form complete centered rows beneath it. */
+.module--vco1 > .control-bank > :first-child {
+  width: 100%;
+  max-width: none;
+  flex: 0 0 100%;
+}
+
+.module--vco1 > .control-bank > :first-child .choice-button {
+  width: min(190px, calc(100% - 4px));
+  margin-right: auto;
+  margin-left: auto;
+}
+
+/* Keep the AR and ADSR groups intact on the wide seven-track envelope panel. */
+@media (min-width: 1451px) {
+  /* Preserve the established five-cell controller density. The PPC occupies
+     two of those cells, and its incomplete final line is centered by flex. */
+  .module--controllers .control-bank > * {
+    max-width: none;
+    flex: 0 1 calc(20% - 6.4px);
+  }
+
+  .module--controllers .ppc {
+    max-width: none;
+    flex-basis: calc(40% - 4.8px);
+  }
+
+  /* Every controller in the five-cell row shares one label band. Reserving
+     it for choices and switches as well as dials keeps their hardware aligned
+     when labels such as Glide mode wrap to two lines. */
+  .module--controllers .parameter > label,
+  .module--controllers .toggle-label {
+    min-height: 45px;
+  }
+
+  /* Preserve the intentionally grouped four-control AR row and five-control
+     ADSR row instead of collapsing the envelope families into one flex line. */
+  .module--envelopes .control-bank {
+    display: grid;
+    grid-template-columns: repeat(20, minmax(0, 1fr));
+  }
+
+  .module--envelopes .control-bank > :nth-child(-n + 4) {
+    max-width: none;
+    grid-column: span 5;
+  }
+
+  .module--envelopes .control-bank > :nth-child(n + 5) {
+    max-width: none;
+    grid-column: span 4;
+  }
+}
+
+/* The mixer's first three controls have source selectors and its last two
+   dials do not. Flex can place both kinds on one line at some widths, so show
+   the shared selector spacer only in the column configurations where they
+   actually meet. */
+.module--mixer .control-bank--selector-rows > .parameter--range::before {
+  display: none;
+}
+
+@media (min-width: 841px) {
+  @container (min-width: 232px) and (max-width: 351.98px) {
+    .module--mixer .control-bank--selector-rows > .parameter--range:nth-child(4)::before {
+      display: block;
+    }
+  }
+
+  @container (min-width: 472px) {
+    .module--mixer .control-bank--selector-rows > .parameter--range:nth-child(4)::before {
+      display: block;
+    }
+  }
+
+  @container (min-width: 592px) {
+    .module--mixer .control-bank--selector-rows > .parameter--range:nth-child(5)::before {
+      display: block;
+    }
+  }
+}
+
+@media (max-width: 840.98px) {
+  @container (min-width: 224px) and (max-width: 339.98px) {
+    .module--mixer .control-bank--selector-rows > .parameter--range:nth-child(4)::before {
+      display: block;
+    }
+  }
+
+  @container (min-width: 456px) {
+    .module--mixer .control-bank--selector-rows > .parameter--range:nth-child(4)::before {
+      display: block;
+    }
+  }
+
+  @container (min-width: 572px) {
+    .module--mixer .control-bank--selector-rows > .parameter--range:nth-child(5)::before {
+      display: block;
+    }
+  }
+}
+
+@media (max-width: 840.98px) {
+  .module > .control-bank > * {
+    flex-basis: 108px;
+  }
+}
+
+/*
+ * Consolidated control/output plate. At the full desktop assembly this uses
+ * the former output-module height: identity and power at left, the three
+ * existing control rows in the middle, and the live VU pair at right.
+ */
+.topbar {
+  min-height: 200px;
+  height: 200px;
+  grid-template-columns: minmax(200px, 230px) minmax(0, 1fr) minmax(300px, 420px);
+  align-items: stretch;
+  gap: 16px;
+  padding: 10px 22px;
+}
+
+.console-identity-area {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  align-content: space-between;
+  justify-items: start;
+  padding: 4px 0 2px 10px;
+}
+
+.console-identity-area .brand {
+  width: auto;
+  grid-column: auto;
+  grid-row: auto;
+  padding: 0;
+}
+
+.topbar .brand-name .raster-label--brand {
+  font-size: 17px;
+}
+
+.topbar .brand-model .raster-label--model {
+  font-size: 12px;
+}
+
+.console-identity-area .power-strip {
+  width: 160px;
+  min-width: 0;
+  grid-column: auto;
+  grid-row: auto;
+  justify-items: start;
+  gap: 0;
+  margin-top: 6px;
+  padding-top: 0;
+  border: 0;
+}
+
+.console-identity-area .power-control {
+  width: 160px;
+  grid-column: auto;
+  grid-template-rows: auto 96px;
+  justify-items: start;
+  gap: 10px;
+}
+
+.console-identity-area .power-control__label {
+  width: 160px;
+  min-height: 14px;
+  justify-content: center;
+  line-height: 1;
+  transform: none;
+}
+
+.console-identity-area .power-switch {
+  width: 160px;
+  min-width: 160px;
+  height: 96px;
+  min-height: 96px;
+  flex-basis: 96px;
+  gap: 10px;
+}
+
+.console-identity-area .power-switch b {
+  width: 22px;
+  min-width: 22px;
+  flex-basis: 22px;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.topbar > .library-deck {
+  --library-label-column: 88px;
+  --library-row-gap: 8px;
+  align-self: center;
+  justify-items: start;
+  grid-column: auto;
+  grid-row: auto;
+  grid-template-rows: repeat(3, 44px);
+  gap: 8px;
+}
+
+.topbar .utility-strip,
+.topbar .patch-strip,
+.topbar .sequence-strip {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  height: 44px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.topbar .utility-strip {
+  box-sizing: border-box;
+  padding-left: calc(var(--library-label-column) + var(--library-row-gap));
+}
+
+.topbar .library-actions {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 7px;
+}
+
+.topbar .utility-actions,
+.topbar .patch-actions,
+.topbar .sequence-actions {
+  width: auto;
+  grid-template-columns: none;
+  justify-self: start;
+}
+
+.topbar .library-picker {
+  width: auto;
+  max-width: 100%;
+  grid-template-columns: var(--library-label-column) minmax(0, 300px);
+  flex: 0 1 auto;
+}
+
+.topbar .library-select-shell {
+  width: min(300px, 100%);
+  max-width: 300px;
+}
+
+.topbar .button:not(.sequence-icon-button) {
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 0 auto;
+  padding-right: 10px;
+  padding-left: 10px;
+}
+
+.topbar .button .raster-label {
+  width: auto;
+  min-width: 0;
+}
+
+.topbar .install-button {
+  width: max-content;
+  max-width: none;
+}
+
+.topbar > .output-meter {
+  align-self: center;
+  justify-self: end;
+  width: 100%;
+  max-width: 400px;
+  min-height: 169px;
+  flex: none;
+  overflow: visible;
+  padding: 2px 4px 4px;
+}
+
+.topbar > .output-meter .output-vu-meter {
+  min-height: 0;
+  flex: none;
+  overflow: visible;
+}
+
+.topbar > .output-meter :is(
+  .output-vu-meter__face,
+  .output-vu-meter__needles
+) {
+  object-fit: contain;
+}
+
+@media (max-width: 1450.98px) {
+  .topbar {
+    height: auto;
+    grid-template-columns: minmax(260px, 1fr) minmax(260px, 400px);
+    grid-template-rows: auto auto;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .console-identity-area {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .topbar > .output-meter {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .topbar > .library-deck {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 919px) {
+  .topbar {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+
+  .console-identity-area {
+    grid-column: 1;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .console-identity-area .brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .console-identity-area .power-strip {
+    grid-column: 2;
+    grid-row: 1;
+    margin-top: 0;
+    padding-top: 0;
+    padding-left: 0;
+    border: 0;
+  }
+
+  .topbar > .library-deck {
+    grid-column: 1;
+    grid-row: 2;
+    grid-template-rows: repeat(3, auto);
+    justify-items: center;
+  }
+
+  .topbar > .output-meter {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: center;
+  }
+
+  .topbar .utility-strip,
+  .topbar .patch-strip,
+  .topbar .sequence-strip {
+    height: auto;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .topbar .utility-strip {
+    padding-left: 0;
+  }
+
+  .topbar .patch-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 590px) {
+  .console-identity-area {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .console-identity-area .brand,
+  .console-identity-area .power-strip {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .console-identity-area .power-strip {
+    margin-top: 8px;
+    padding-top: 0;
+    padding-left: 0;
+    border: 0;
+  }
+
+  .topbar > .library-deck {
+    grid-template-rows: repeat(3, auto);
+  }
+
+  .topbar .utility-strip,
+  .topbar .patch-strip,
+  .topbar .sequence-strip {
+    height: auto;
+    flex-wrap: wrap;
+  }
+
+  .topbar .utility-actions,
+  .topbar .patch-actions,
+  .topbar .sequence-actions {
+    flex-wrap: wrap;
+  }
+
+  .topbar .utility-strip {
+    padding-left: 0;
+  }
+
+  .topbar .library-picker {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 4px;
+  }
+
+  .topbar .library-select-shell {
+    width: min(300px, 100%);
+  }
+}
+
+
+@media (forced-colors: active) {
+  :where(
+    .topbar,
+    .module,
+    .midi-strip,
+    .keyboard-module,
+    footer
+  )::before {
+    display: none;
+  }
+
+  .panel-screws {
+    display: block;
+  }
+}

@@ -18,20 +18,17 @@ describe("panel screw coverage", () => {
     }
   });
 
-  it("installs the shared overlay in every signal panel and both auxiliary panels", () => {
+  it("installs the shared overlay in every signal panel and the keyboard panel", () => {
     const app = readFileSync(resolve("src/App.tsx"), "utf8");
     const panelLoopStart = app.indexOf("PANEL_SECTIONS.map");
     const panelLoopEnd = app.indexOf("</div>", panelLoopStart);
     const panelLoop = app.slice(panelLoopStart, panelLoopEnd);
     const panel = readFileSync(resolve("src/components/SynthPanel.tsx"), "utf8");
-    const midi = readFileSync(resolve("src/components/MidiInputControl.tsx"), "utf8");
     const keyboard = readFileSync(resolve("src/components/Keyboard.tsx"), "utf8");
 
     expect(panelLoopStart).toBeGreaterThanOrEqual(0);
     expect(panelLoop.match(/<SynthPanel/g)).toHaveLength(1);
     expect(panel.match(/<PanelScrews \/>/g)).toHaveLength(1);
-    expect(midi).toMatch(/<section className="midi-strip"[\s\S]*?<PanelScrews \/>/);
-    expect(midi.match(/<PanelScrews \/>/g)).toHaveLength(1);
     expect(keyboard).toMatch(/<section className="keyboard-module"[\s\S]*?<PanelScrews \/>/);
     expect(keyboard.match(/<PanelScrews \/>/g)).toHaveLength(1);
   });
@@ -67,12 +64,8 @@ describe("panel screw coverage", () => {
     }
     expect(moduleRule).toMatch(/border:\s*3px solid #383838/);
     expect(moduleRule).not.toMatch(/border-top|border-left/);
-    const midiStart = styles.indexOf(".midi-strip {");
-    const midiRule = styles.slice(midiStart, styles.indexOf("\n}", midiStart));
     const keyboardStart = styles.indexOf(".keyboard-module {");
     const keyboardRule = styles.slice(keyboardStart, styles.indexOf("\n}", keyboardStart));
-    expect(midiRule).toMatch(/border:\s*3px solid #353535/);
-    expect(midiRule).not.toMatch(/border-top|border-left/);
     expect(keyboardRule).toMatch(/border:\s*3px solid #282828/);
     expect(keyboardRule).not.toMatch(/border-top|border-left/);
     const headerStart = styles.indexOf(".module-header {");
@@ -80,12 +73,12 @@ describe("panel screw coverage", () => {
     expect(headerRule).not.toContain("var(--module-accent)");
     expect(styles).toMatch(/\.module-header\s*\{[\s\S]*?padding:\s*9px 16px 8px/);
     expect(styles).toMatch(/\.control-bank\s*\{[\s\S]*?padding:\s*13px 16px 17px/);
-    expect(styles).toMatch(/\.midi-strip\s*\{[\s\S]*?padding:\s*16px 18px/);
     expect(styles).toMatch(/\.keyboard-header\s*\{[\s\S]*?padding:\s*16px 18px 10px/);
   });
 
   it("gives every retro service dialog four unobscured corner fasteners", () => {
     const styles = readFileSync(resolve("src/styles.css"), "utf8");
+    const consoleStyles = readFileSync(resolve("src/console-1968.css"), "utf8");
     const dialogStart = styles.indexOf(".direct-entry {");
     const dialogEnd = styles.indexOf(".direct-entry::backdrop", dialogStart);
     const dialog = styles.slice(dialogStart, dialogEnd);
@@ -96,10 +89,18 @@ describe("panel screw coverage", () => {
     expect(dialog).toContain("circle at 9px calc(100% - 9px)");
     expect(dialog).toContain("circle at calc(100% - 22px) calc(100% - 9px)");
 
+    const activeDialogStart = consoleStyles.indexOf(".direct-entry {");
+    const activeDialogEnd = consoleStyles.indexOf(".system-banner,", activeDialogStart);
+    const activeDialog = consoleStyles.slice(activeDialogStart, activeDialogEnd);
+    expect(activeDialog).toMatch(/\.direct-entry\s*\{[\s\S]*?isolation:\s*isolate;[\s\S]*?background-image:\s*none;/);
+    expect(activeDialog).toMatch(/\.direct-entry::before\s*\{[\s\S]*?border:\s*30px solid transparent;[\s\S]*?border-image-slice:\s*150 fill;[\s\S]*?border-image-width:\s*30px;[\s\S]*?border-image-repeat:\s*stretch;/);
+    expect(activeDialog).toMatch(/\.direct-entry > form\s*\{[\s\S]*?position:\s*relative;[\s\S]*?z-index:\s*1;/);
+
     for (const component of [
       "DeleteConfirmationDialog.tsx",
       "DirectEntryModal.tsx",
       "HelpDialog.tsx",
+      "MidiInputControl.tsx",
       "PatchLibraryDialog.tsx",
       "SequenceCommitDialog.tsx",
     ]) {

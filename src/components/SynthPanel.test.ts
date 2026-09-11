@@ -1,8 +1,12 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_PARAMS, PARAM_KEYS, type ParamKey } from "../synth/params";
 import { PANEL_SECTIONS, type PanelSectionDefinition } from "../ui/layout";
 import {
   panelParamValuesMatch,
+  SELECTOR_ROW_PANEL_IDS,
+  SynthPanel,
   synthPanelPropsMatch,
   type SynthPanelProps,
 } from "./SynthPanel";
@@ -16,6 +20,67 @@ const sectionParamKeys = (section: PanelSectionDefinition): readonly ParamKey[] 
 );
 
 describe("SynthPanel render isolation", () => {
+  it("marks every requested mixed selector/dial panel with a shared selector row", () => {
+    const onChange = vi.fn();
+    const onDirectEdit = vi.fn();
+    const onToggleExternalInput = vi.fn();
+    const onPerformance = vi.fn();
+
+    expect(SELECTOR_ROW_PANEL_IDS).toEqual([
+      "vco1",
+      "vco2",
+      "amplifier",
+      "modulators",
+      "mixer",
+      "filter",
+    ]);
+
+    for (const id of SELECTOR_ROW_PANEL_IDS) {
+      const section = PANEL_SECTIONS.find((candidate) => candidate.id === id)!;
+      const markup = renderToStaticMarkup(createElement(SynthPanel, {
+        section,
+        params: DEFAULT_PARAMS,
+        externalInputEnabled: false,
+        externalInputBusy: false,
+        externalInputError: null,
+        powerBusy: false,
+        inputResetEpoch: 0,
+        onChange,
+        onDirectEdit,
+        onToggleExternalInput,
+        onPerformance,
+      }));
+
+      expect(markup, id).toContain("control-bank--selector-rows");
+    }
+  });
+
+  it("names every module region with its visible section heading", () => {
+    const onChange = vi.fn();
+    const onDirectEdit = vi.fn();
+    const onToggleExternalInput = vi.fn();
+    const onPerformance = vi.fn();
+
+    for (const section of PANEL_SECTIONS) {
+      const markup = renderToStaticMarkup(createElement(SynthPanel, {
+        section,
+        params: DEFAULT_PARAMS,
+        externalInputEnabled: false,
+        externalInputBusy: false,
+        externalInputError: null,
+        powerBusy: false,
+        inputResetEpoch: 0,
+        onChange,
+        onDirectEdit,
+        onToggleExternalInput,
+        onPerformance,
+      }));
+
+      expect(markup, section.id).toContain(`aria-labelledby="panel-${section.id}-title"`);
+      expect(markup, section.id).toContain(`<h2 id="panel-${section.id}-title">`);
+    }
+  });
+
   it("invalidates each panel for all parameter values that it renders", () => {
     for (const section of PANEL_SECTIONS) {
       for (const key of sectionParamKeys(section)) {

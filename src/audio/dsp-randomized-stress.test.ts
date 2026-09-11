@@ -96,5 +96,11 @@ describe("deterministic DSP stress matrix", () => {
     expect(meter.sampleRate).toBe(SAMPLE_RATE);
     expect(Number.isFinite(meter.peak)).toBe(true);
     expect(Number.isFinite(meter.rms)).toBe(true);
+    expect(Number.isFinite(meter.leftRms)).toBe(true);
+    expect(Number.isFinite(meter.rightRms)).toBe(true);
+    expect(meter.leftRms).toBeGreaterThanOrEqual(0);
+    expect(meter.rightRms).toBeGreaterThanOrEqual(0);
+    expect(meter.leftRms).toBeLessThanOrEqual(1);
+    expect(meter.rightRms).toBeLessThanOrEqual(1);
   });
 });

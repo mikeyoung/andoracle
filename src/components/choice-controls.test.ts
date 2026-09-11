@@ -64,7 +64,13 @@ describe("compact selector controls", () => {
   it("keeps routed selectors compact and omits the duplicate output", () => {
     const markup = renderChoice("vco1Fm1Source", true);
 
-    expect(markup).toContain('<label for="param-vco1Fm1Source">Source</label>');
+    expect(markup).toContain('<label for="param-vco1Fm1Source">');
+    expect(markup).toContain(
+      'class="raster-label raster-label--control raster-label--tone-ink"',
+    );
+    expect(markup).toContain('<span class="raster-label__text">Source</span>');
+    expect(markup.match(/>Source<\/span>/g)).toHaveLength(1);
+    expect(markup).not.toContain("visually-hidden");
     expect(markup).toContain("LFO triangle");
     expect(markup).not.toContain("<output");
   });

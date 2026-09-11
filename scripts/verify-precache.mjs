@@ -11,10 +11,15 @@ const OFFLINE_EXTENSIONS = new Set([
   ".jpg",
   ".js",
   ".png",
+  ".webp",
   ".webmanifest",
   ".woff2",
 ]);
 const VERSION_PLACEHOLDER = "%VITE_APP_VERSION%";
+const UPDATE_BRIDGE_NAME_PATTERN = /^sw-update-bridge-(.+)\.js$/;
+const IMPORT_SCRIPT_PATTERN = /\bimportScripts\(\s*["']([^"']+)["']\s*\)/g;
+const WORKBOX_RUNTIME_NAME_PATTERN = /^workbox-[0-9a-f]+\.js$/i;
+const WORKBOX_MODULE_PATTERN = /["']\.\/(workbox-[0-9a-f]+)["']/gi;
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -65,6 +70,33 @@ export const validatePrecache = (serviceWorkerSource, requiredUrls) => {
   return urls;
 };
 
+/**
+ * Workbox's bootstrap module is loaded before the precache can run, so it is
+ * intentionally not itself a precache entry. Verify that the emitted worker
+ * nevertheless points to exactly one real local runtime file.
+ */
+export const validateWorkboxRuntime = (serviceWorkerSource, emittedUrls) => {
+  const emittedRuntimes = emittedUrls
+    .filter((url) => WORKBOX_RUNTIME_NAME_PATTERN.test(url))
+    .sort();
+  const referencedRuntimes = [
+    ...serviceWorkerSource.matchAll(WORKBOX_MODULE_PATTERN),
+  ].map((match) => `${match[1]}.js`);
+
+  if (emittedRuntimes.length !== 1) {
+    throw new Error(`Expected exactly one emitted Workbox runtime, found [${emittedRuntimes.join(", ")}].`);
+  }
+  if (
+    referencedRuntimes.length !== 1
+    || referencedRuntimes[0] !== emittedRuntimes[0]
+  ) {
+    throw new Error(
+      `Service worker Workbox runtime reference [${referencedRuntimes.join(", ")}] does not match emitted [${emittedRuntimes.join(", ")}].`,
+    );
+  }
+  return emittedRuntimes[0];
+};
+
 export const validateBuiltVersion = (html, expectedVersion) => {
   if (typeof expectedVersion !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(expectedVersion)) {
     throw new Error("The expected Andoracle version is not valid semantic version metadata.");
@@ -91,6 +123,37 @@ export const validateBuiltVersion = (html, expectedVersion) => {
   return expectedVersion;
 };
 
+export const validateUpdateBridge = (serviceWorkerSource, requiredUrls, expectedVersion) => {
+  const bridgeFiles = requiredUrls.filter((url) => UPDATE_BRIDGE_NAME_PATTERN.test(url));
+  const importedBridges = [...serviceWorkerSource.matchAll(IMPORT_SCRIPT_PATTERN)]
+    .map((match) => match[1])
+    .filter((url) => UPDATE_BRIDGE_NAME_PATTERN.test(url));
+
+  if (JSON.stringify(importedBridges) !== JSON.stringify(bridgeFiles)) {
+    throw new Error(
+      `Workbox update bridge imports differ from built bridge files: imported [${importedBridges.join(", ")}], built [${bridgeFiles.join(", ")}].`,
+    );
+  }
+  if (bridgeFiles.length === 0) {
+    if (!/\.clientsClaim\(\)/.test(serviceWorkerSource)) {
+      throw new Error("Workbox must resume clientsClaim() ownership after the update bridge is removed.");
+    }
+    return [];
+  }
+
+  const expectedBridge = `sw-update-bridge-${expectedVersion}.js`;
+  if (bridgeFiles.length !== 1 || bridgeFiles[0] !== expectedBridge) {
+    throw new Error(`Expected exactly the versioned Workbox update bridge ${expectedBridge}.`);
+  }
+  if (!/\bself\.skipWaiting\(\)/.test(serviceWorkerSource)) {
+    throw new Error("The Workbox update bridge requires skipWaiting() for prompt-worker migration.");
+  }
+  if (/\.clientsClaim\(\)/.test(serviceWorkerSource)) {
+    throw new Error("The update bridge must be the sole clients.claim() owner so it can snapshot update clients first.");
+  }
+  return bridgeFiles;
+};
+
 export const verifyBuiltPrecache = (distDirectory = resolve("dist")) => {
   const serviceWorkerPath = resolve(distDirectory, "sw.js");
   const indexPath = resolve(distDirectory, "index.html");
@@ -99,7 +162,12 @@ export const verifyBuiltPrecache = (distDirectory = resolve("dist")) => {
   const packageMetadata = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
   const version = validateBuiltVersion(readFileSync(indexPath, "utf8"), packageMetadata.version);
   const requiredUrls = requiredOfflineUrls(distDirectory);
-  const urls = validatePrecache(readFileSync(serviceWorkerPath, "utf8"), requiredUrls);
+  const emittedUrls = listFiles(distDirectory)
+    .map((path) => relative(distDirectory, path).replaceAll("\\", "/"));
+  const serviceWorkerSource = readFileSync(serviceWorkerPath, "utf8");
+  validateWorkboxRuntime(serviceWorkerSource, emittedUrls);
+  validateUpdateBridge(serviceWorkerSource, requiredUrls, version);
+  const urls = validatePrecache(serviceWorkerSource, requiredUrls);
   return { precacheCount: urls.length, requiredCount: requiredUrls.length, version };
 };
 

@@ -15,6 +15,7 @@ import {
   ToggleControl,
 } from "./ParameterControls";
 import { PpcPads } from "./PpcPads";
+import { RasterLabel } from "./RasterLabel";
 
 export interface SynthPanelProps {
   section: PanelSectionDefinition;
@@ -67,6 +68,18 @@ const createPanelRenderMetadata = (section: PanelSectionDefinition): PanelRender
 const PANEL_RENDER_METADATA = new Map(
   PANEL_SECTIONS.map((section) => [section, createPanelRenderMetadata(section)] as const),
 );
+
+/** Panels whose mixed selector/range cells share a dedicated selector lane. */
+export const SELECTOR_ROW_PANEL_IDS = [
+  "vco1",
+  "vco2",
+  "amplifier",
+  "modulators",
+  "mixer",
+  "filter",
+] as const;
+
+const SELECTOR_ROW_PANEL_ID_SET = new Set<string>(SELECTOR_ROW_PANEL_IDS);
 
 const metadataFor = (section: PanelSectionDefinition): PanelRenderMetadata => (
   PANEL_RENDER_METADATA.get(section) ?? createPanelRenderMetadata(section)
@@ -174,18 +187,22 @@ function SynthPanelComponent({
     }
   };
   const { hasRoutedFaders } = metadataFor(section);
+  const hasSelectorRows = SELECTOR_ROW_PANEL_ID_SET.has(section.id);
 
   return (
     <section
       className={`module module--${section.id}`}
+      aria-labelledby={`panel-${section.id}-title`}
       style={{ "--module-accent": section.accent } as CSSProperties}
     >
       <PanelScrews />
       <header className="module-header">
-        <span className="module-eyebrow">{section.eyebrow}</span>
-        <h2>{section.title}</h2>
+        <span className="module-eyebrow">
+          <RasterLabel text={section.eyebrow} variant="eyebrow" tone="muted" />
+        </span>
+        <h2 id={`panel-${section.id}-title`}><RasterLabel text={section.title} variant="title" /></h2>
       </header>
-      <div className={`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}`}>
+      <div className={`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}${hasSelectorRows ? " control-bank--selector-rows" : ""}`}>
         {section.items.map(renderItem)}
       </div>
     </section>

@@ -1,5 +1,13 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BACKGROUND_SOURCE,
@@ -9,10 +17,19 @@ import {
   createExtensionManifest,
   createZipBuffer,
   extensionStoreVersion,
+  listFiles,
   readZipEntries,
 } from "../scripts/extension-package-utils.mjs";
+import { validateExtensionHtml } from "../scripts/verify-extension-packages.mjs";
+import { VITE_DEV_WATCH_IGNORED } from "../vite.config";
 
 describe("browser-extension store packaging", () => {
+  it("keeps the concise store copy aligned with the desktop application identity", () => {
+    expect(EXTENSION_DESCRIPTION).toContain("desktop duophonic synthesizer");
+    expect(EXTENSION_DESCRIPTION).not.toContain("touch-first");
+    expect(EXTENSION_DESCRIPTION.length).toBeLessThanOrEqual(132);
+  });
+
   it("accepts only Chrome-store-safe numeric versions", () => {
     expect(extensionStoreVersion("1.0.15")).toBe("1.0.15");
     expect(extensionStoreVersion("1.2.3.4")).toBe("1.2.3.4");
@@ -73,6 +90,26 @@ describe("browser-extension store packaging", () => {
     expect(() => readZipEntries(corrupted)).toThrow();
   });
 
+  it("refuses to follow symbolic links into a store package", () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), "andoracle-extension-package-"));
+    const source = join(temporaryRoot, "source");
+    const linkedTarget = join(temporaryRoot, "outside-source");
+    mkdirSync(source);
+    mkdirSync(linkedTarget);
+    writeFileSync(join(linkedTarget, "private.txt"), "must not be packaged");
+    symlinkSync(
+      linkedTarget,
+      join(source, "linked-source"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    try {
+      expect(() => listFiles(source)).toThrow(/Refusing symbolic link/);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps both store archives in the normal build contract", () => {
     const packageJson = JSON.parse(readFileSync(resolve("package.json"), "utf8")) as {
       engines: Record<string, string>;
@@ -90,7 +127,34 @@ describe("browser-extension store packaging", () => {
     expect(packageJson.engines.npm).toBe(">=10.0.0");
     expect(viteConfig).toContain('source === "virtual:pwa-register" ? EXTENSION_REGISTER_MODULE_ID');
     expect(viteConfig).toContain("extensionBuild ? [extensionRegisterPlugin, extensionHtmlPlugin] : [pwaPlugin()]");
+    expect(pwaHook).toContain("if (extensionBuild) return;");
     expect(pwaHook).toContain("return extensionBuild || capable;");
     expect(app).toContain("urlWithPatch(import.meta.env.VITE_PUBLIC_APP_URL, paramsRef.current)");
+  });
+
+  it("requires the packaged application document to carry the exact release version", () => {
+    const html = (version: string) => [
+      '<meta name="application-version" content="' + version + '" />',
+      '<script type="module" src="./assets/app.js"></script>',
+    ].join("\n");
+
+    expect(() => validateExtensionHtml(html("1.0.18"), "chrome", "1.0.18")).not.toThrow();
+    expect(() => validateExtensionHtml(html("1.0.17"), "chrome", "1.0.18"))
+      .toThrow(/application version/);
+    expect(() => validateExtensionHtml(
+      '<script type="module" src="./assets/app.js"></script>',
+      "firefox",
+      "1.0.18",
+    )).toThrow(/application version/);
+  });
+
+  it("keeps generated build trees outside the live development watcher", () => {
+    expect(VITE_DEV_WATCH_IGNORED).toEqual([
+      "**/dist/**",
+      "**/store-packages/**",
+      "**/node_modules/.tmp/andoracle-extension/**",
+    ]);
+    const viteConfig = readFileSync(resolve("vite.config.ts"), "utf8");
+    expect(viteConfig).toContain("ignored: [...VITE_DEV_WATCH_IGNORED]");
   });
 });

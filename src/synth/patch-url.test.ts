@@ -4,17 +4,14 @@ import {
   PARAM_KEYS,
   PARAM_SPECS,
   type ParamKey,
-  type ParamSpec,
   type SynthParams,
 } from "./params";
 import { FACTORY_PRESETS } from "./presets";
 import {
   PATCH_CODEC_VERSION,
+  PATCH_PARAM_KEYS,
   PATCH_URL_PARAM,
-  PATCH_V1_PARAM_KEYS,
-  PATCH_V1_VALUE_SPECS,
-  PATCH_V2_PARAM_KEYS,
-  PATCH_V2_VALUE_SPECS,
+  PATCH_VALUE_SPECS,
   decodePatch,
   encodePatch,
   readPatchFromUrl,
@@ -47,16 +44,9 @@ const liveSchemaFingerprint = (keys: readonly ParamKey[]): string => fingerprint
   }),
 );
 
-const frozenV1SchemaFingerprint = (): string => fingerprint(
-  PATCH_V1_PARAM_KEYS.map((key) => {
-    const spec = PATCH_V1_VALUE_SPECS[key];
-    return [key, spec.min, spec.max, spec.step, spec.defaultValue, spec.options ?? null];
-  }),
-);
-
-const frozenV2SchemaFingerprint = (): string => fingerprint(
-  PATCH_V2_PARAM_KEYS.map((key) => {
-    const spec = PATCH_V2_VALUE_SPECS[key];
+const frozenSchemaFingerprint = (): string => fingerprint(
+  PATCH_PARAM_KEYS.map((key) => {
+    const spec = PATCH_VALUE_SPECS[key];
     return [key, spec.min, spec.max, spec.step, spec.defaultValue, spec.options ?? null];
   }),
 );
@@ -89,40 +79,22 @@ const tokenWithFirstStoredValue = (token: string, value: number): string => {
 };
 
 describe("shareable patch URL codec", () => {
-  it("keeps V1 frozen and extends it once for the complete V2 parameter set", () => {
-    expect(new Set(PATCH_V1_PARAM_KEYS).size).toBe(PATCH_V1_PARAM_KEYS.length);
-    expect(PATCH_V2_PARAM_KEYS.slice(0, PATCH_V1_PARAM_KEYS.length)).toEqual(PATCH_V1_PARAM_KEYS);
-    expect(PATCH_V2_PARAM_KEYS.at(-1)).toBe("delayTrails");
-    expect(new Set(PATCH_V2_PARAM_KEYS).size).toBe(PATCH_V2_PARAM_KEYS.length);
-    expect([...PATCH_V2_PARAM_KEYS].sort()).toEqual([...PARAM_KEYS].sort());
+  it("pins one complete current parameter order", () => {
+    expect(PATCH_PARAM_KEYS.at(-1)).toBe("delayTrails");
+    expect(new Set(PATCH_PARAM_KEYS).size).toBe(PATCH_PARAM_KEYS.length);
+    expect([...PATCH_PARAM_KEYS].sort()).toEqual([...PARAM_KEYS].sort());
   });
 
-  it("pins the complete V1 and V2 numeric schemas", () => {
+  it("pins the complete current numeric schema", () => {
     // Changing this fixture requires a new codec version. It covers every
     // min/max/step/default and selector option value used by the wire format.
-    expect(frozenV1SchemaFingerprint()).toBe("1da6a2f4");
-    expect(liveSchemaFingerprint(PATCH_V1_PARAM_KEYS)).toBe("1da6a2f4");
-    expect(frozenV2SchemaFingerprint()).toBe("e9dc335b");
-    expect(liveSchemaFingerprint(PATCH_V2_PARAM_KEYS)).toBe("e9dc335b");
+    expect(frozenSchemaFingerprint()).toBe("e9dc335b");
+    expect(liveSchemaFingerprint(PATCH_PARAM_KEYS)).toBe("e9dc335b");
   });
 
-  it("decodes an archived V1 patch with V2-only controls at their current defaults", () => {
-    const decoded = decodePatch(ARCHIVED_DEFAULT_V1_TOKEN);
-    expect(decoded).toEqual(DEFAULT_PARAMS);
-    expect(decoded?.delayTrails).toBe(0);
-  });
-
-  it("preserves non-default values from an archived V1 patch", () => {
-    expect(decodePatch(ARCHIVED_NONDEFAULT_V1_TOKEN)).toMatchObject({
-      masterVolume: 0.321,
-      masterTune: -37,
-      transpose: 24,
-      delayEnabled: 1,
-      delayTime: 777,
-      delayFeedback: 0.731,
-      delayPingPong: 0,
-      delayTrails: 0,
-    });
+  it("rejects archived V1 patch payloads", () => {
+    expect(decodePatch(ARCHIVED_DEFAULT_V1_TOKEN)).toBeNull();
+    expect(decodePatch(ARCHIVED_NONDEFAULT_V1_TOKEN)).toBeNull();
   });
 
   it("round-trips the default and every factory patch exactly", () => {
@@ -185,31 +157,6 @@ describe("shareable patch URL codec", () => {
     }
   });
 
-  it("fills a parameter added after V1 from the current default", () => {
-    const futureKey = "futureCompatibilityProbe" as ParamKey;
-    const futureSpec: ParamSpec = {
-      label: "Future compatibility probe",
-      group: "Test",
-      control: "range",
-      min: 0,
-      max: 1,
-      step: 0.001,
-      default: 0.375,
-    };
-
-    (PARAM_KEYS as ParamKey[]).push(futureKey);
-    (PARAM_SPECS as Record<string, ParamSpec>)[futureKey] = futureSpec;
-    (DEFAULT_PARAMS as Record<string, number>)[futureKey] = futureSpec.default;
-    try {
-      const decoded = decodePatch(ARCHIVED_DEFAULT_V1_TOKEN) as SynthParams & Record<string, number>;
-      expect(decoded[futureKey]).toBe(0.375);
-    } finally {
-      PARAM_KEYS.splice(PARAM_KEYS.indexOf(futureKey), 1);
-      delete (PARAM_SPECS as Record<string, ParamSpec>)[futureKey];
-      delete (DEFAULT_PARAMS as Record<string, number>)[futureKey];
-    }
-  });
-
   it("is deterministic, URL-safe, and compact", () => {
     const first = encodePatch(DEFAULT_PARAMS);
     expect(encodePatch({ ...DEFAULT_PARAMS })).toBe(first);
@@ -263,7 +210,7 @@ describe("shareable patch URL codec", () => {
     const validUrl = `https://example.test/andoracle/#${PATCH_URL_PARAM}=${encodePatch(DEFAULT_PARAMS)}`;
     expect(readPatchFromUrl(validUrl)).toEqual({ status: "valid", params: DEFAULT_PARAMS });
     expect(readPatchFromUrl(`https://example.test/andoracle/#patch=${ARCHIVED_DEFAULT_V1_TOKEN}`))
-      .toEqual({ status: "valid", params: DEFAULT_PARAMS });
+      .toEqual({ status: "unsupported", version: "v1" });
     expect(readPatchFromUrl("https://example.test/andoracle/#patch=broken")).toEqual({ status: "invalid" });
     expect(readPatchFromUrl("https://example.test/andoracle/#patch=v3.AAAA")).toEqual({
       status: "unsupported",
@@ -275,7 +222,10 @@ describe("shareable patch URL codec", () => {
     });
     expect(readPatchFromUrl("https://example.test/andoracle/#patch=v3.not+url/safe")).toEqual({ status: "invalid" });
     expect(readPatchFromUrl(`${validUrl}&patch=${encodePatch(DEFAULT_PARAMS)}`)).toEqual({ status: "invalid" });
-    expect(readPatchFromUrl(`https://example.test/#patch=v1.${"A".repeat(513)}`)).toEqual({ status: "invalid" });
+    expect(readPatchFromUrl(`https://example.test/#patch=v1.${"A".repeat(513)}`)).toEqual({
+      status: "unsupported",
+      version: "v1",
+    });
     expect(readPatchFromUrl("not a URL")).toEqual({ status: "invalid" });
   });
 

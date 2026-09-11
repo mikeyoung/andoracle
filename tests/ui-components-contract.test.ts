@@ -3,57 +3,80 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("dialog source contracts", () => {
-  it("places the playable keyboard at the bottom of the synthesizer", () => {
+  it("omits the redundant online indicator and its App-owned listeners", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
-    const indicator = source.indexOf('<div className="usage-note">');
-    const keyboard = source.indexOf("<Keyboard", indicator);
-    const signalPath = source.indexOf('<div className="signal-flow"', indicator);
-    const panelGrid = source.indexOf('<div className="panel-grid">', signalPath);
-    const midiInput = source.indexOf("<MidiInputControl", panelGrid);
-    const mainEnd = source.indexOf("</main>", midiInput);
 
-    expect(indicator).toBeGreaterThanOrEqual(0);
-    expect(signalPath).toBeGreaterThan(indicator);
-    expect(panelGrid).toBeGreaterThan(signalPath);
-    expect(midiInput).toBeGreaterThan(panelGrid);
-    expect(keyboard).toBeGreaterThan(midiInput);
-    expect(mainEnd).toBeGreaterThan(keyboard);
-    expect(source.match(/<Keyboard/g)).toHaveLength(1);
+    expect(source).not.toContain("network-status");
+    expect(source).not.toContain("navigator.onLine");
+    expect(source).not.toContain('addEventListener("offline"');
+    expect(source).not.toContain("useServiceWorkerCapability");
   });
 
-  it("describes the active cutoff or trailing delay route without stale signal-flow copy", () => {
+  it("lets the keyboard occupy either the second or final synthesizer row", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
-    const signalStart = source.indexOf('<div className="signal-flow"');
-    const signalEnd = source.indexOf("</div>", signalStart);
-    const signalFlow = source.slice(signalStart, signalEnd);
-    const trailsBranch = signalFlow.indexOf("params.delayTrails > 0.5");
-    const trailingFilter = signalFlow.indexOf("<span>VCF</span>", trailsBranch);
-    const trailingVca = signalFlow.indexOf("<span>VCA / drive</span>", trailingFilter);
-    const trailingDelay = signalFlow.indexOf("<span>delay trails</span>", trailingVca);
-    const cutoffBranch = signalFlow.indexOf("<span>keyboard-cut delay</span>", trailingDelay);
-    const cutoffFilter = signalFlow.indexOf("<span>VCF</span>", cutoffBranch);
-    const cutoffVca = signalFlow.indexOf("<span>VCA / drive</span>", cutoffFilter);
+    const headerStart = source.indexOf('<header className="topbar">');
+    const headerEnd = source.indexOf("</header>");
+    const mainStart = source.indexOf('<main ref={performanceFocusRef} tabIndex={-1}>', headerEnd);
+    const keyboardDefinition = source.indexOf("const keyboardModule = (");
+    const keyboard = source.indexOf("<Keyboard", keyboardDefinition);
+    const headerControl = source.indexOf("headerControl={midiHeaderControl}", keyboard);
+    const topPlacement = source.indexOf('{keyboardPosition === "top" && keyboardModule}', mainStart);
+    const panelGrid = source.indexOf('<div className="panel-grid">', topPlacement);
+    const bottomPlacement = source.indexOf('{keyboardPosition === "bottom" && keyboardModule}', panelGrid);
+    const mainEnd = source.indexOf("</main>", bottomPlacement);
+    const keyboardSource = readFileSync(resolve("src/components/Keyboard.tsx"), "utf8");
+    const keyboardHeader = keyboardSource.indexOf('<div className="keyboard-header">');
+    const positionControl = keyboardSource.indexOf('id="keyboard-position"', keyboardHeader);
+    const keyboardHeaderControl = keyboardSource.indexOf("{headerControl}", keyboardHeader);
+    const keyboardHeaderEnd = keyboardSource.indexOf("</div>", keyboardHeaderControl);
 
-    expect(signalStart).toBeGreaterThanOrEqual(0);
-    expect(trailsBranch).toBeGreaterThanOrEqual(0);
-    expect(trailingFilter).toBeGreaterThan(trailsBranch);
-    expect(trailingVca).toBeGreaterThan(trailingFilter);
-    expect(trailingDelay).toBeGreaterThan(trailingVca);
-    expect(cutoffBranch).toBeGreaterThan(trailingDelay);
-    expect(cutoffFilter).toBeGreaterThan(cutoffBranch);
-    expect(cutoffVca).toBeGreaterThan(cutoffFilter);
+    expect(headerStart).toBeGreaterThanOrEqual(0);
+    expect(headerEnd).toBeGreaterThanOrEqual(0);
+    expect(mainStart).toBeGreaterThan(headerEnd);
+    expect(keyboardDefinition).toBeGreaterThanOrEqual(0);
+    expect(keyboard).toBeGreaterThan(keyboardDefinition);
+    expect(headerControl).toBeGreaterThan(keyboard);
+    expect(topPlacement).toBeGreaterThan(mainStart);
+    expect(panelGrid).toBeGreaterThan(topPlacement);
+    expect(bottomPlacement).toBeGreaterThan(panelGrid);
+    expect(mainEnd).toBeGreaterThan(bottomPlacement);
+    expect(source).toContain("const midiHeaderControl = useMemo(() => (");
+    expect(source).toContain("useState<KeyboardPosition>(readKeyboardPosition)");
+    expect(source).toContain("window.localStorage.setItem(KEYBOARD_POSITION_STORAGE_KEY, position)");
+    expect(source).not.toMatch(/<\/div>\s*<MidiInputControl[\s\S]*?<Keyboard/);
+    expect(source.match(/<Keyboard\s/g)).toHaveLength(1);
+    expect(source).not.toContain("<footer");
+    expect(keyboardHeader).toBeGreaterThanOrEqual(0);
+    expect(positionControl).toBeGreaterThan(keyboardHeader);
+    expect(keyboardHeaderControl).toBeGreaterThan(positionControl);
+    expect(keyboardHeaderControl).toBeGreaterThan(keyboardHeader);
+    expect(keyboardHeaderEnd).toBeGreaterThan(keyboardHeaderControl);
+    expect(keyboardSource).toContain('<option value="top">Top</option>');
+    expect(keyboardSource).toContain('<option value="bottom">Bottom</option>');
+    expect(keyboardSource).toContain("positionFocusRelease.current?.watchPointerPicker");
+    expect(keyboardSource).not.toContain("keyboard-footer");
+    expect(keyboardSource).not.toContain("allocation-legend");
+    expect(source).not.toContain('className="usage-note"');
+    expect(source).not.toContain('className="status-deck"');
+  });
+
+  it("omits the signal-flow plate while retaining contextual delay-route notices", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    expect(source).not.toContain('className="signal-flow"');
+    expect(source).not.toContain("VCO 1 / VCO 2 / noise / ring");
     expect(source).toContain("paramsRef.current.delayTrails > 0.5");
     expect(source).toContain("Trails delay follows the VCA and drive.");
     expect(source).toContain("keyboard-cut delay before the VCF.");
     expect(source).toContain("Delay Trails on: repeats continue after keyboard release.");
-    expect(source).toContain("Delay Trails off: repeats cut at keyboard release and the next phrase starts clean.");
+    expect(source).toContain("Delay Trails off: repeats follow the VCA release and the next keyboard phrase starts clean.");
   });
 
   it("marks every panel containing routed faders for aligned selector spacing", () => {
     const source = readFileSync(resolve("src/components/SynthPanel.tsx"), "utf8");
 
     expect(source).toContain('item.kind === "route"');
-    expect(source).toContain('`control-bank${hasRoutedFaders ? " control-bank--routed" : ""}`');
+    expect(source).toContain('${hasRoutedFaders ? " control-bank--routed" : ""}');
+    expect(source).toMatch(/SELECTOR_ROW_PANEL_IDS\s*=\s*\[[\s\S]*?"mixer"/u);
   });
 
   it("shows a temporary toast only after the gated clipboard pipeline succeeds", () => {
@@ -201,6 +224,38 @@ describe("dialog source contracts", () => {
     expect(obsoletePlaybackGuard).toBeGreaterThan(powerSynchronized);
   });
 
+  it("lets Stop and background lifecycle revoke Play while audio startup is pending", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const playStart = source.indexOf("const playSequence = useCallback(async");
+    const playEnd = source.indexOf("const pauseSequencePlayback", playStart);
+    const play = source.slice(playStart, playEnd);
+    const pendingState = play.indexOf('setSequencePlaybackState("starting")');
+    const powerStart = play.indexOf("await engine.powerOn(paramsRef.current)");
+    const stopStart = source.indexOf("const stopSequencePlayback");
+    const stopEnd = source.indexOf("const toggleExternalInput", stopStart);
+    const stop = source.slice(stopStart, stopEnd);
+    const lifecycleStart = source.indexOf("const pauseForBackground");
+    const lifecycleEnd = source.indexOf("const resumeFromBackground", lifecycleStart);
+    const lifecycle = source.slice(lifecycleStart, lifecycleEnd);
+
+    expect(pendingState).toBeGreaterThanOrEqual(0);
+    expect(pendingState).toBeLessThan(powerStart);
+    expect(stop.indexOf("sequenceOperationRef.current += 1"))
+      .toBeLessThan(stop.indexOf("player?.isActive"));
+    expect(stop).toContain('setSequencePlaybackState("stopped")');
+    expect(lifecycle).toContain("sequenceOperationRef.current += 1");
+    expect(lifecycle).toContain('setSequencePlaybackState("stopped")');
+
+    const powerStartIndex = source.indexOf("const togglePower");
+    const powerEndIndex = source.indexOf("const playSequence", powerStartIndex);
+    const power = source.slice(powerStartIndex, powerEndIndex);
+    const pendingCancel = power.indexOf("if (powerBusy)");
+    expect(power.indexOf("sequenceOperationRef.current += 1", pendingCancel))
+      .toBeGreaterThan(pendingCancel);
+    expect(power.indexOf('setSequencePlaybackState("stopped")', pendingCancel))
+      .toBeGreaterThan(pendingCancel);
+  });
+
   it("cannot let recording idle-close a pending patch deletion", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
     const openDeleteStart = source.indexOf("const openActivePatchDeletion");
@@ -237,11 +292,33 @@ describe("dialog source contracts", () => {
     const telemetry = readFileSync(resolve("src/components/OutputMeter.tsx"), "utf8");
 
     expect(app).not.toContain("engine.onMeter(");
-    expect(app).toContain("<EngineTelemetry");
+    expect(app).toContain("<LiveOutputMeter");
     expect(telemetry).toContain("engine.onMeter((nextMeter) =>");
-    expect(telemetry).toContain("export const EngineTelemetry = memo(EngineTelemetryComponent);");
-    expect(telemetry).toContain("function LiveEngineTelemetry(");
-    expect(telemetry).toMatch(/return running \? \([\s\S]*?<LiveEngineTelemetry[\s\S]*?: \([\s\S]*?<TelemetryReadout[\s\S]*?meter=\{EMPTY_ODYSSEY_METER\}/);
+    expect(telemetry).toContain("export const LiveOutputMeter = memo(LiveOutputMeterComponent);");
+    expect(telemetry).toContain("const meter = running && snapshot.running && snapshot.engine === engine");
+    expect(telemetry).toContain("unsubscribe();");
+    expect(telemetry).toContain("<OutputMeter leftRms={meter.leftRms} rightRms={meter.rightRms} running={running} />");
+    expect(telemetry).not.toContain("TelemetryReadout");
+    expect(telemetry).not.toContain('text="VCO 1"');
+    expect(telemetry).not.toContain('text="VCO 2"');
+    expect(telemetry).not.toContain('text="Allocation"');
+    expect(telemetry.match(/window\.requestAnimationFrame\(/g)).toHaveLength(2);
+    expect(telemetry.match(/window\.cancelAnimationFrame\(/g)).toHaveLength(2);
+    expect(telemetry).toContain('document.addEventListener("visibilitychange", visibilityChanged)');
+    expect(telemetry).toContain('document.removeEventListener("visibilitychange", visibilityChanged)');
+  });
+
+  it("keeps the consolidated plate free of patch descriptions and telemetry cells", () => {
+    const app = readFileSync(resolve("src/App.tsx"), "utf8");
+    const help = readFileSync(resolve("src/components/HelpDialog.tsx"), "utf8");
+    const presets = readFileSync(resolve("src/synth/presets.ts"), "utf8");
+
+    expect(app).not.toContain("preset.description");
+    expect(app).toContain('setNotice(`${preset.name} loaded.`)');
+    expect(presets).not.toContain("description:");
+    expect(app).not.toContain('className="sample-rate"');
+    expect(app).not.toContain('className="voice-readout"');
+    expect(help).toContain("Right-click or long-press any parameter to enter its exact value and see its valid range.");
   });
 
   it("shares one cleaned-up storage listener across both local libraries", () => {
@@ -309,7 +386,7 @@ describe("dialog source contracts", () => {
   it("revokes stale delete authority on patch navigation and active-target replacement", () => {
     const source = readFileSync(resolve("src/App.tsx"), "utf8");
     const revokeStart = source.indexOf("const revokeActiveLibraryDeletion");
-    const revokeEnd = source.indexOf("const showSafariInstallHint", revokeStart);
+    const revokeEnd = source.indexOf("const {", revokeStart);
     const revoke = source.slice(revokeStart, revokeEnd);
     const navigationStart = source.indexOf("const loadPatchFromNavigation");
     const navigationEnd = source.indexOf('window.addEventListener("popstate"', navigationStart);
@@ -332,5 +409,59 @@ describe("dialog source contracts", () => {
     expect(source).toContain("activeDeleteOperationRef.current = operation");
     expect(confirmation).toContain('beginDeleteOperationAuthority("patch", signal)');
     expect(confirmation).toContain('beginDeleteOperationAuthority("recording", signal)');
+  });
+
+  it("restores one exact local patch identity on reload and URL navigation", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    expect(source).toContain("uniqueUserPatchMatchingParams(initialUserPatchesRef.current ?? [], initialPatch.params)");
+    const navigationStart = source.indexOf("const loadPatchFromNavigation");
+    const navigationEnd = source.indexOf('window.addEventListener("popstate"', navigationStart);
+    const navigation = source.slice(navigationStart, navigationEnd);
+    expect(navigation).toContain("uniqueUserPatchMatchingParams(userPatches, next)");
+    expect(navigation).toContain("setActiveUserPatchName(matchingUserPatch?.name ?? null)");
+  });
+
+  it("owns dial pointer focus through outside release and component cleanup", () => {
+    const source = readFileSync(resolve("src/components/ParameterControls.tsx"), "utf8");
+    const releaseStart = source.indexOf("export class DeferredRangePointerFocusRelease");
+    const releaseEnd = source.indexOf("export const keyboardAdjustedRangeValue", releaseStart);
+    const release = source.slice(releaseStart, releaseEnd);
+    const controlStart = source.indexOf("function RangeControlComponent");
+    const controlEnd = source.indexOf("export const RangeControl", controlStart);
+    const control = source.slice(controlStart, controlEnd);
+
+    expect(releaseStart).toBeGreaterThanOrEqual(0);
+    expect(release).toContain('addEventListener("pointerup", this.finishFromWindow, true)');
+    expect(release).toContain('addEventListener("pointercancel", this.finishFromWindow, true)');
+    expect(release).toContain('removeEventListener("pointerup", this.finishFromWindow, true)');
+    expect(release).toContain('removeEventListener("pointercancel", this.finishFromWindow, true)');
+    expect(release).toContain("this.detachPointerGesture()");
+    expect(control).toContain("beginPointerGesture(event.currentTarget, event.pointerId)");
+    expect(control).toContain("finishPointerGesture(event.pointerId)");
+    expect(control).toContain("pointerFocusRelease.current?.dispose()");
+  });
+
+  it.each(["PatchSelector.tsx", "SequenceTransport.tsx"])(
+    "returns pointer-used native selector focus to the playable page in %s",
+    (component) => {
+      const source = readFileSync(resolve("src/components", component), "utf8");
+
+      expect(source).toContain("watchPointerPicker(event.currentTarget)");
+      expect(source).toContain("hasPointerFocusReleasePending");
+      expect(source).toContain('event.key === "Escape"');
+      expect(source).toMatch(/useEffect\(\(\) => \(\) => [\s\S]*?\.dispose\(\), \[\]\)/);
+    },
+  );
+
+  it("reports a discarded recording against the sequence that is actually loaded", () => {
+    const source = readFileSync(resolve("src/App.tsx"), "utf8");
+    const discardStart = source.indexOf("onDiscard={() =>");
+    const discard = source.slice(discardStart, discardStart + 600);
+
+    expect(discardStart).toBeGreaterThanOrEqual(0);
+    expect(discard).toContain("activeSequenceName");
+    expect(discard).toContain("remains loaded");
+    expect(discard).toContain("No sequence is loaded.");
+    expect(discard).not.toContain("previously loaded sequence was kept");
   });
 });

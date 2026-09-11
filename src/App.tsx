@@ -6,13 +6,13 @@ import type { PerformanceState } from "./audio/dsp-core";
 import { DirectEntryModal } from "./components/DirectEntryModal";
 import { DeleteConfirmationDialog } from "./components/DeleteConfirmationDialog";
 import { HelpDialog } from "./components/HelpDialog";
-import { Keyboard } from "./components/Keyboard";
+import { Keyboard, type KeyboardPosition } from "./components/Keyboard";
 import {
   MidiInputControl,
   midiInputListLabel,
   type MidiInputOperation,
 } from "./components/MidiInputControl";
-import { EngineTelemetry } from "./components/OutputMeter";
+import { LiveOutputMeter } from "./components/OutputMeter";
 import {
   PatchLibraryDialog,
   type PatchLibraryMode,
@@ -25,6 +25,7 @@ import {
 } from "./components/SequenceCommitDialog";
 import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
 import { SynthPanel } from "./components/SynthPanel";
+import { RasterLabel } from "./components/RasterLabel";
 import { OperationCancellationRegistry } from "./cancellable-operation";
 import { blocksComputerKeyboardNotes, reservesComputerKeyboardChord } from "./computer-keyboard";
 import { ExclusiveOperationGuard } from "./exclusive-operation-guard";
@@ -47,7 +48,7 @@ import {
   type MidiPerformanceSources,
 } from "./midi/web-midi";
 import { recoverAfterMidiAllSoundOff } from "./midi/audio-integration";
-import { usePwaRegistration, useServiceWorkerCapability } from "./pwa/use-pwa-registration";
+import { usePwaRegistration } from "./pwa/use-pwa-registration";
 import {
   DEFAULT_PARAMS,
   PARAM_KEYS,
@@ -65,6 +66,7 @@ import {
   readUserPatches,
   replaceUserPatchSafely,
   saveUserPatchSafely,
+  uniqueUserPatchMatchingParams,
   userPatchNameKey,
   type UserPatch,
 } from "./synth/user-patches";
@@ -72,6 +74,7 @@ import {
   USER_SEQUENCES_STORAGE_KEY,
   decodeUserSequence,
   deleteUserSequenceSafely,
+  normalizeUserSequenceName,
   readUserSequences,
   replaceUserSequenceSafely,
   saveUserSequenceSafely,
@@ -88,6 +91,7 @@ import { PANEL_SECTIONS } from "./ui/layout";
 
 // Keep the pre-Andoracle key so existing users retain their last patch after the rename.
 const PATCH_STORAGE_KEY = "arpy-odyssey:last-patch:v1";
+const KEYBOARD_POSITION_STORAGE_KEY = "andoracle:keyboard-position:v1";
 const CLIPBOARD_TOAST_DURATION_MS = 2500;
 const NOOP_MIDI_HANDLERS: WebMidiHandlers = {
   noteOn: () => undefined,
@@ -102,6 +106,14 @@ const RESERVED_PATCH_NAMES = new Set([
   userPatchNameKey("Custom patch"),
   ...FACTORY_PRESETS.map((preset) => userPatchNameKey(preset.name)),
 ]);
+
+const readKeyboardPosition = (): KeyboardPosition => {
+  try {
+    return window.localStorage.getItem(KEYBOARD_POSITION_STORAGE_KEY) === "top" ? "top" : "bottom";
+  } catch {
+    return "bottom";
+  }
+};
 
 type PatchShareResult = "shared" | "copied";
 
@@ -242,11 +254,14 @@ function App() {
   const initialPatchRef = useRef<InitialPatchState | null>(null);
   const initialPatch = initialPatchRef.current ?? loadInitialPatch();
   initialPatchRef.current = initialPatch;
+  const initialUserPatchesRef = useRef<readonly UserPatch[] | null>(null);
+  initialUserPatchesRef.current ??= readUserPatches().patches;
   const engineRef = useRef<OdysseyAudioEngine | null>(null);
   if (!engineRef.current) engineRef.current = new OdysseyAudioEngine();
   const engine = engineRef.current;
   const [params, setParams] = useState<SynthParams>(initialPatch.params);
   const paramsRef = useRef(params);
+  const [keyboardPosition, setKeyboardPosition] = useState<KeyboardPosition>(readKeyboardPosition);
   const [powered, setPowered] = useState(false);
   const poweredRef = useRef(powered);
   poweredRef.current = powered;
@@ -264,7 +279,11 @@ function App() {
   const midiErrorRef = useRef<string | null>(null);
   const [midiInputs, setMidiInputs] = useState<readonly MidiInputSummary[]>([]);
   const [presetName, setPresetName] = useState(() => matchingPresetName(initialPatch.params));
-  const [activeUserPatchName, setActiveUserPatchName] = useState<string | null>(null);
+  const [activeUserPatchName, setActiveUserPatchName] = useState<string | null>(() => (
+    matchingPresetName(initialPatch.params) === "Custom patch"
+      ? uniqueUserPatchMatchingParams(initialUserPatchesRef.current ?? [], initialPatch.params)?.name ?? null
+      : null
+  ));
   const [audioStatus, setAudioStatus] = useState<AudioEngineStatus>({
     state: "uninitialized",
     requestedSampleRate: 44100,
@@ -299,7 +318,6 @@ function App() {
   const shareBusyRef = useRef(false);
   const clipboardToastTimerRef = useRef<number | null>(null);
   const updateBusyRef = useRef(false);
-  const cancelUpdateWaitRef = useRef<(() => void) | null>(null);
   const activeDeleteOperationRef = useRef<ActiveDeleteOperation | null>(null);
   const browserOperationsRef = useRef<OperationCancellationRegistry | null>(null);
   if (!browserOperationsRef.current) browserOperationsRef.current = new OperationCancellationRegistry();
@@ -321,7 +339,13 @@ function App() {
     displayScale: number;
     restoreOriginFocus: boolean;
   } | null>(null);
-  const [userPatches, setUserPatches] = useState<readonly UserPatch[]>(() => readUserPatches().patches);
+  const [userPatches, setUserPatches] = useState<readonly UserPatch[]>(() => (
+    initialUserPatchesRef.current ?? []
+  ));
+  const patchNames = useMemo(
+    () => userPatches.map((patch) => patch.name),
+    [userPatches],
+  );
   const [userSequences, setUserSequences] = useState<readonly UserNoteSequence[]>(() => readUserSequences().sequences);
   const sequenceNames = useMemo(
     () => userSequences.map((sequence) => sequence.name),
@@ -344,8 +368,6 @@ function App() {
   const [clipboardToast, setClipboardToast] = useState<string | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [online, setOnline] = useState(navigator.onLine);
-  const offlineCapable = useServiceWorkerCapability();
   const [notice, setNotice] = useState(initialPatch.notice);
   const revokeActiveLibraryDeletion = useCallback((
     message: string,
@@ -362,17 +384,6 @@ function App() {
       !kind || current?.kind === kind ? null : current
     ));
   }, []);
-  const showSafariInstallHint = useMemo(() => {
-    const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
-    if (standaloneNavigator.standalone || window.matchMedia("(display-mode: standalone)").matches) return false;
-    const userAgent = navigator.userAgent;
-    const appleTouchDevice = /iPad|iPhone|iPod/.test(userAgent)
-      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    return appleTouchDevice
-      && /AppleWebKit/.test(userAgent)
-      && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(userAgent);
-  }, []);
-
   const {
     offlineReady,
     needRefresh,
@@ -464,16 +475,46 @@ function App() {
     const storageChanged = (event: StorageEvent): void => {
       if (event.key === null || event.key === USER_PATCHES_STORAGE_KEY) {
         const result = readUserPatches();
-        if (result.status !== "storage-error") setUserPatches(result.patches);
+        if (result.status === "ok" || result.status === "recovered") {
+          setUserPatches(result.patches);
+        } else if (result.status === "unsupported-version") {
+          // A newer tab owns this library now. Do not let the ordinary
+          // missing-active-patch effect misreport a protected schema as a
+          // deletion, and do not leave stale entries selectable.
+          revokeActiveLibraryDeletion(
+            "A newer patch library replaced the deletion target.",
+            "patch",
+          );
+          setPatchLibraryDialog(null);
+          setActiveUserPatchName(null);
+          setPresetName(matchingPresetName(paramsRef.current));
+          setUserPatches([]);
+          setNotice("A newer Andoracle version updated the patch library. Your current controls were kept; update this app to access that library.");
+        }
       }
       if (event.key === null || event.key === USER_SEQUENCES_STORAGE_KEY) {
         const result = readUserSequences();
-        if (result.status !== "storage-error") setUserSequences(result.sequences);
+        if (result.status === "ok" || result.status === "recovered") {
+          setUserSequences(result.sequences);
+        } else if (result.status === "unsupported-version") {
+          revokeActiveLibraryDeletion(
+            "A newer recording library replaced the deletion target.",
+            "recording",
+          );
+          sequenceOperationRef.current += 1;
+          sequencePlayerRef.current?.stop(false);
+          activeSequenceTakeRef.current = null;
+          activeSequenceDataRef.current = null;
+          setSequencePlaybackState("stopped");
+          setActiveSequenceName(null);
+          setUserSequences([]);
+          setNotice("A newer Andoracle version updated the recording library. Playback was stopped; update this app to access that library.");
+        }
       }
     };
     window.addEventListener("storage", storageChanged);
     return () => window.removeEventListener("storage", storageChanged);
-  }, []);
+  }, [revokeActiveLibraryDeletion]);
 
   useEffect(() => {
     if (!activeUserPatchName) return;
@@ -487,6 +528,9 @@ function App() {
       );
       setActiveUserPatchName(null);
       setPresetName(matchingPresetName(paramsRef.current));
+      setNotice((current) => current.startsWith("Patch deletion cancellation was requested")
+        ? current
+        : "The loaded user patch was removed in another tab. Your current controls were kept as an unsaved patch.");
       return;
     }
     if (matchingPatch.name !== activeUserPatchName) setActiveUserPatchName(matchingPatch.name);
@@ -526,6 +570,9 @@ function App() {
         }
         activeSequenceTakeRef.current = decoded;
         activeSequenceDataRef.current = matchingSequence.data;
+        setNotice((current) => current.startsWith("That recording changed after confirmation opened")
+          ? current
+          : "The loaded sequence changed in another tab. Playback was stopped and the updated recording was loaded.");
       }
       if (matchingSequence.name !== activeSequenceName) setActiveSequenceName(matchingSequence.name);
       return;
@@ -593,7 +640,6 @@ function App() {
         clipboardToastTimerRef.current = null;
       }
       updateBusyRef.current = false;
-      cancelUpdateWaitRef.current = null;
       const deleteOperation = activeDeleteOperationRef.current;
       activeDeleteOperationRef.current = null;
       deleteOperation?.controller.abort(
@@ -625,17 +671,11 @@ function App() {
       setInstallPrompt(null);
       setNotice("Andoracle is installed and available from your app launcher.");
     };
-    const wentOnline = (): void => setOnline(true);
-    const wentOffline = (): void => setOnline(false);
     window.addEventListener("beforeinstallprompt", beforeInstall);
     window.addEventListener("appinstalled", installed);
-    window.addEventListener("online", wentOnline);
-    window.addEventListener("offline", wentOffline);
     return () => {
       window.removeEventListener("beforeinstallprompt", beforeInstall);
       window.removeEventListener("appinstalled", installed);
-      window.removeEventListener("online", wentOnline);
-      window.removeEventListener("offline", wentOffline);
     };
   }, []);
 
@@ -653,6 +693,12 @@ function App() {
       settings.ppcBendRange,
       settings.ppcVibratoRange,
     ));
+    // Hardware wheels can be the first activity after a host suspension and
+    // do not generate a browser pointer/key gesture. Recover immediately
+    // instead of waiting for the periodic keepalive watchdog.
+    if (poweredRef.current && !engine.isAudioReady) {
+      audioKeepAliveRef.current?.notifyAudioInterruption();
+    }
   }, [engine]);
 
   ensureAudioReadyRef.current = async (): Promise<void> => {
@@ -723,10 +769,19 @@ function App() {
       urlSyncBlockedRef.current = false;
       if (sharedPatch.status === "valid") {
         const next = sharedPatch.params;
+        const nextPresetName = matchingPresetName(next);
+        const matchingUserPatch = nextPresetName === "Custom patch"
+          ? uniqueUserPatchMatchingParams(userPatches, next)
+          : null;
+        // A patch save/replace operation snapshots the controls that were
+        // visible when it began. Navigating to a different patch invalidates
+        // that dialog's context; unmount it so its AbortSignal revokes any
+        // deferred cross-tab write before the new URL state becomes active.
+        setPatchLibraryDialog(null);
         paramsRef.current = next;
         setParams(next);
-        setActiveUserPatchName(null);
-        setPresetName(matchingPresetName(next));
+        setActiveUserPatchName(matchingUserPatch?.name ?? null);
+        setPresetName(nextPresetName);
         setDirectEditor(null);
         engine.setParams(next);
         syncPerformance(next);
@@ -751,7 +806,7 @@ function App() {
       window.removeEventListener("popstate", loadPatchFromNavigation);
       window.removeEventListener("hashchange", loadPatchFromNavigation);
     };
-  }, [engine, revokeActiveLibraryDeletion, syncPerformance]);
+  }, [engine, revokeActiveLibraryDeletion, syncPerformance, userPatches]);
 
   const noteOn = useCallback((source: string, note: number): void => {
     if (!Number.isFinite(note)) return;
@@ -775,6 +830,13 @@ function App() {
     }
     else engine.keyboardTrigger();
     if (visibleNotesChanged) syncActiveNotes();
+    // Web MIDI activity has no DOM gesture to wake the keepalive controller.
+    // A failed real-time send marks the processor dirty; trigger its shared,
+    // deduplicated recovery path now so the held-note replay is not delayed by
+    // the watchdog interval.
+    if (poweredRef.current && !engine.isAudioReady) {
+      audioKeepAliveRef.current?.notifyAudioInterruption();
+    }
   }, [engine, syncActiveNotes]);
 
   const noteOff = useCallback((source: string): void => {
@@ -787,6 +849,9 @@ function App() {
     if (noteOwnerCounts.current.remove(note)) {
       engine.noteOff(note);
       syncActiveNotes();
+    }
+    if (poweredRef.current && !engine.isAudioReady) {
+      audioKeepAliveRef.current?.notifyAudioInterruption();
     }
   }, [engine, syncActiveNotes]);
 
@@ -902,12 +967,30 @@ function App() {
       // timers are not reliable while a document is frozen or backgrounded.
       sequenceOperationRef.current += 1;
       const player = sequencePlayerRef.current;
-      if (!player?.pause()) return;
+      // A user-paused sequence is already safe for suspension, but it is not
+      // stopped. Preserve that distinction so Stop remains available to
+      // rewind it and Play still advertises a resume after the tab returns.
+      if (player?.isPaused) {
+        if (mountedRef.current) setSequencePlaybackState("paused");
+        return;
+      }
+      if (!player?.pause()) {
+        // A Play request can still be waiting for audio startup with no player
+        // timer to pause. Its operation token was revoked above; also release
+        // the visible pending transport state.
+        if (mountedRef.current) setSequencePlaybackState("stopped");
+        return;
+      }
       sequenceLifecyclePausedRef.current = true;
       if (mountedRef.current) setSequencePlaybackState("paused");
     };
     const resumeFromBackground = (): void => {
       if (!sequenceLifecyclePausedRef.current) return;
+      // `pageshow` and the Page Lifecycle `resume` event can run while a tab
+      // is still backgrounded (for example, a BFCache restore into an
+      // inactive tab). Keep the sequence frozen until visibility is actually
+      // restored so overdue timers never burst through a hidden audio graph.
+      if (document.hidden) return;
       sequenceLifecyclePausedRef.current = false;
       const player = sequencePlayerRef.current;
       if (!poweredRef.current || !player?.isPaused) return;
@@ -918,11 +1001,15 @@ function App() {
       else resumeFromBackground();
     };
     document.addEventListener("visibilitychange", visibilityChanged);
+    document.addEventListener("freeze", pauseForBackground);
+    document.addEventListener("resume", resumeFromBackground);
     window.addEventListener("pagehide", pauseForBackground);
     window.addEventListener("pageshow", resumeFromBackground);
     return () => {
       sequenceLifecyclePausedRef.current = false;
       document.removeEventListener("visibilitychange", visibilityChanged);
+      document.removeEventListener("freeze", pauseForBackground);
+      document.removeEventListener("resume", resumeFromBackground);
       window.removeEventListener("pagehide", pauseForBackground);
       window.removeEventListener("pageshow", resumeFromBackground);
     };
@@ -933,6 +1020,10 @@ function App() {
     if (!recorder) return;
     if (recorder.isRecording) {
       finishSequenceRecording("manual");
+      return;
+    }
+    if (updateBusyRef.current) {
+      setNotice("Wait for the app update to finish before starting a recording.");
       return;
     }
 
@@ -990,6 +1081,29 @@ function App() {
   ): Promise<SequenceSaveOutcome> => {
     const take = sequenceTake?.take;
     if (!take) return "That recording is no longer available.";
+    // A replacement is a deliberate two-step UI path. Resolve a duplicate
+    // from the already-validated library state before compacting an unlimited
+    // take, so confirmation does not encode every event once for Save and a
+    // second time for Replace. The locked storage operation remains the final
+    // authority and still catches a duplicate created by another tab.
+    const normalizedName = normalizeUserSequenceName(name);
+    const existingSequence = normalizedName
+      ? userSequences.find(
+        (sequence) => userSequenceNameKey(sequence.name) === userSequenceNameKey(normalizedName),
+      )
+      : null;
+    if (existingSequence) {
+      return {
+        status: "duplicate",
+        existingSequence: {
+          name: existingSequence.name,
+          data: existingSequence.data,
+          durationMs: existingSequence.durationMs,
+          noteCount: existingSequence.noteCount,
+          eventCount: existingSequence.eventCount,
+        },
+      };
+    }
     const cancellation = browserOperations.begin(
       "sequence-save",
       "Sequence save was cancelled because Andoracle closed.",
@@ -1115,7 +1229,7 @@ function App() {
     if (key === "delayTrails") {
       setNotice(normalizedValue > 0.5
         ? "Delay Trails on: repeats continue after keyboard release."
-        : "Delay Trails off: repeats cut at keyboard release and the next phrase starts clean.");
+        : "Delay Trails off: repeats follow the VCA release and the next keyboard phrase starts clean.");
     }
   }, [engine, syncPerformance]);
 
@@ -1143,7 +1257,7 @@ function App() {
     setPresetName(preset.name);
     engine.setParams(next);
     syncPerformance(next);
-    setNotice(`${preset.name}: ${preset.description}`);
+    setNotice(`${preset.name} loaded.`);
   }, [engine, syncPerformance]);
 
   const openPatchLibrary = (mode: PatchLibraryMode, origin: HTMLElement): void => {
@@ -1548,6 +1662,8 @@ function App() {
       // A short power-down ramp does not need interruption, but a browser can
       // otherwise leave AudioWorklet startup pending indefinitely.
       if (powered) return;
+      sequenceOperationRef.current += 1;
+      setSequencePlaybackState("stopped");
       const operation = ++powerOperationRef.current;
       setNotice("Cancelling audio startup…");
       audioKeepAliveRef.current?.disable();
@@ -1610,7 +1726,9 @@ function App() {
     const resuming = player.isPaused;
 
     const sequence = activeSequenceName
-      ? userSequences.find((candidate) => candidate.name === activeSequenceName)
+      ? userSequences.find(
+        (candidate) => userSequenceNameKey(candidate.name) === userSequenceNameKey(activeSequenceName),
+      )
       : null;
     if (!sequence) {
       sequenceOperationRef.current += 1;
@@ -1643,6 +1761,7 @@ function App() {
     const sequenceOperation = ++sequenceOperationRef.current;
     if (!powered) {
       const powerOperation = ++powerOperationRef.current;
+      setSequencePlaybackState("starting");
       setPowerBusy(true);
       audioKeepAliveRef.current?.enableFromUserGesture();
       try {
@@ -1659,6 +1778,7 @@ function App() {
         if (!mountedRef.current || powerOperation !== powerOperationRef.current) return;
         audioKeepAliveRef.current?.disable();
         setPowered(false);
+        setSequencePlaybackState("stopped");
         setNotice(error instanceof Error && error.name === "AbortError"
           ? "Sequence playback was cancelled."
           : error instanceof Error ? error.message : "Audio could not start for sequence playback.");
@@ -1697,9 +1817,11 @@ function App() {
 
   const stopSequencePlayback = useCallback((): void => {
     const player = sequencePlayerRef.current;
-    if (!player?.isActive) return;
+    // Revoke even before NoteSequencePlayer is active so Stop can cancel a
+    // Play request that is still awaiting AudioContext startup.
     sequenceOperationRef.current += 1;
-    player.stop();
+    if (player?.isActive) player.stop();
+    else setNotice("Sequence playback stopped and returned to the beginning.");
     setSequencePlaybackState("stopped");
   }, []);
 
@@ -1802,15 +1924,12 @@ function App() {
       setExternalInputError(message);
       setNotice(message);
     } finally {
-      if (operation === externalInputOperationRef.current) {
-        externalInputStartedPowerRef.current = false;
-        if (mountedRef.current) setExternalInputBusy(false);
-      }
+      if (mountedRef.current && operation === externalInputOperationRef.current) setExternalInputBusy(false);
     }
   }, [
     engine,
-    externalInputBusy,
     externalInputCancellationGuard,
+    externalInputBusy,
     externalInputEnabled,
     powerBusy,
     powered,
@@ -1825,7 +1944,13 @@ function App() {
     setInputResetEpoch((epoch) => epoch + 1);
     releasePhysicalNotes();
     if (paramsRef.current.autoRun > 0.5) changeParam("autoRun", 0);
-    setNotice("All notes and performance controls released.");
+    // PANIC is a full-console reset, not merely All Notes Off. Leave the DSP
+    // hard-muted after clearing oscillator/envelope/filter/drive state and
+    // both delay rings. A subsequent note-on reopens it automatically; an
+    // unconditional resume here would let a patch with Initial Gain (notably
+    // Auto Drone) start sounding again immediately after Panic.
+    engine.allSoundOff();
+    setNotice("Panic cleared all notes, synth state, delay, and performance controls.");
   };
 
   const clearClipboardToast = (): void => {
@@ -1851,9 +1976,12 @@ function App() {
     if (shareBusyRef.current) return;
     clearClipboardToast();
 
-    if (urlSyncTimerRef.current !== null) window.clearTimeout(urlSyncTimerRef.current);
-    urlSyncTimerRef.current = null;
     urlSyncBlockedRef.current = false;
+    // A user can Share inside the trailing persistence window after a dial
+    // gesture. Flush both local storage and the URL before starting the native
+    // share operation; merely clearing that timer would lose the latest
+    // auto-restored patch snapshot on the next launch.
+    persistPatchState(false);
     try {
       replacePatchUrl(paramsRef.current);
       lastHandledPatchHrefRef.current = window.location.href;
@@ -1938,6 +2066,9 @@ function App() {
       noteSources.current.values(),
       paramsRef.current.autoRun > 0.5 || externalInputEnabledRef.current,
     );
+    if (poweredRef.current && !engine.isAudioReady) {
+      audioKeepAliveRef.current?.notifyAudioInterruption();
+    }
   }, [engine]);
 
   if (!midiSessionRef.current) {
@@ -2084,10 +2215,17 @@ function App() {
 
   const reloadUpdate = async (): Promise<void> => {
     if (updateBusyRef.current) return;
+    if (sequenceRecorderRef.current?.isRecording) {
+      setNotice("Stop and save or discard the current recording before reloading the app update.");
+      return;
+    }
     updateBusyRef.current = true;
     setUpdateBusy(true);
+    // The service worker owns the navigation and may replace this document
+    // before ordinary trailing persistence runs. Snapshot the latest controls
+    // synchronously so an update never loses the final drag or key adjustment.
+    persistPatchState(false);
     const cancellation = browserOperations.begin("pwa-update", "App update wait was cancelled.");
-    cancelUpdateWaitRef.current = cancellation.cancel;
     const deadline = createHostOperationDeadline(
       cancellation.cancel,
       HOST_OPERATION_UI_TIMEOUT_MS,
@@ -2105,9 +2243,6 @@ function App() {
       }
     } finally {
       deadline.dispose();
-      if (cancelUpdateWaitRef.current === cancellation.cancel) {
-        cancelUpdateWaitRef.current = null;
-      }
       browserOperations.finish("pwa-update", cancellation);
       updateBusyRef.current = false;
       if (mountedRef.current) setUpdateBusy(false);
@@ -2127,16 +2262,85 @@ function App() {
       ? physicalNoteExtremes.high
       : allocatedLow
     : null;
-  const sampleRateOkay = audioStatus.actualSampleRate === null || audioStatus.actualSampleRate === 44100;
+  const midiHeaderControl = useMemo(() => (
+    <MidiInputControl
+      supported={midiAvailability.supported}
+      unsupportedReason={midiAvailability.reason}
+      enabled={midiEnabled}
+      operation={midiOperation}
+      error={midiError}
+      inputs={midiInputs}
+      onToggle={toggleMidi}
+      onRefresh={refreshMidi}
+    />
+  ), [
+    midiAvailability.reason,
+    midiAvailability.supported,
+    midiEnabled,
+    midiError,
+    midiInputs,
+    midiOperation,
+    refreshMidi,
+    toggleMidi,
+  ]);
+  const changeKeyboardPosition = useCallback((position: KeyboardPosition): void => {
+    setKeyboardPosition(position);
+    try {
+      window.localStorage.setItem(KEYBOARD_POSITION_STORAGE_KEY, position);
+    } catch {
+      // The layout still changes for this session when storage is unavailable.
+    }
+  }, []);
+  const keyboardModule = (
+    <Keyboard
+      activeNotes={activeNotes}
+      allocatedLow={allocatedLow}
+      allocatedHigh={allocatedHigh}
+      resetEpoch={inputResetEpoch}
+      onNoteOn={noteOn}
+      onNoteOff={noteOff}
+      position={keyboardPosition}
+      onPositionChange={changeKeyboardPosition}
+      headerControl={midiHeaderControl}
+    />
+  );
 
   return (
-    <div className="app-shell">
+    <>
+      <div className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">A</span>
-          <div>
-            <div className="brand-name">Andoracle</div>
-            <div className="brand-model">Duophonic · Model 2800</div>
+        <div className="console-identity-area">
+          <div className="brand">
+            <div>
+              <div className="brand-name"><RasterLabel text="Andoracle" variant="brand" preserveCase /></div>
+              <div className="brand-model"><RasterLabel text="Duophonic · Model 2800" variant="model" /></div>
+            </div>
+          </div>
+          <div className="power-strip">
+            <div className="power-control">
+              <span className="power-control__label" aria-hidden="true"><RasterLabel text="Power" variant="control" /></span>
+              <button
+                type="button"
+                className="toggle-switch power-switch"
+                data-switch-variant="power"
+                role="switch"
+                aria-checked={powered}
+                aria-busy={powerBusy || externalInputBusy}
+                aria-label={externalInputBusy
+                  ? "Audio operation in progress"
+                  : powerBusy && !powered
+                    ? "Cancel audio startup"
+                    : powerBusy
+                      ? "Audio power operation in progress"
+                      : powered ? "Power off" : "Power on"}
+                disabled={externalInputBusy || (powerBusy && powered)}
+                onClick={togglePower}
+              >
+                <b aria-hidden="true"><RasterLabel text="Off" variant="micro" /></b>
+                <span aria-hidden="true" />
+                <b aria-hidden="true"><RasterLabel text="On" variant="micro" /></b>
+              </button>
+            </div>
           </div>
         </div>
         <div className="library-deck">
@@ -2145,10 +2349,10 @@ function App() {
               <button
                 type="button"
                 className="button button--danger"
-                aria-label="Panic: all notes off"
+                aria-label="Panic: clear synth, delay, and all notes"
                 onClick={panic}
               >
-                Panic
+                <RasterLabel text="Panic" variant="button" tone="reverse" />
               </button>
               <button
                 type="button"
@@ -2161,7 +2365,7 @@ function App() {
                   setHelpDialogOrigin(event.currentTarget);
                 }}
               >
-                Help
+                <RasterLabel text="Help" variant="button" tone="reverse" />
               </button>
               <button
                 type="button"
@@ -2169,13 +2373,16 @@ function App() {
                 disabled={shareBusy}
                 onClick={() => void sharePatch()}
               >
-                {shareBusy ? "Sharing…" : "Share Patch"}
+                <RasterLabel text={shareBusy ? "Sharing…" : "Share Patch"} variant="button" tone="reverse" />
               </button>
+              {installPrompt && <button type="button" className="button button--quiet install-button" onClick={install}>
+                <RasterLabel text="Install app" variant="button" tone="reverse" />
+              </button>}
             </div>
           </div>
           <div className="patch-strip">
             <div className="library-picker patch-picker">
-              <label htmlFor="preset">Patch</label>
+              <label htmlFor="preset"><RasterLabel text="Patch" variant="control" /></label>
               <PatchSelector
                 userPatches={userPatches}
                 activeUserPatchName={activeUserPatchName}
@@ -2191,7 +2398,7 @@ function App() {
                 aria-haspopup="dialog"
                 onClick={(event) => openPatchLibrary("save", event.currentTarget)}
               >
-                Save
+                <RasterLabel text="Save" variant="button" tone="reverse" />
               </button>
               <button
                 type="button"
@@ -2199,7 +2406,7 @@ function App() {
                 aria-haspopup="dialog"
                 onClick={(event) => openPatchLibrary("load", event.currentTarget)}
               >
-                Load
+                <RasterLabel text="Load" variant="button" tone="reverse" />
               </button>
               <button
                 type="button"
@@ -2214,9 +2421,11 @@ function App() {
                   : "Built-in and unsaved patches cannot be deleted or modified"}
                 onClick={(event) => openActivePatchDeletion(event.currentTarget)}
               >
-                Delete
+                <RasterLabel text="Delete" variant="button" tone="reverse" />
               </button>
-              <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>Initialize</button>
+              <button type="button" className="button button--quiet" onClick={() => applyPatch("Init Andoracle")}>
+                <RasterLabel text="Initialize" variant="button" tone="reverse" />
+              </button>
             </div>
           </div>
           <SequenceTransport
@@ -2233,46 +2442,34 @@ function App() {
             onDelete={openActiveRecordingDeletion}
           />
         </div>
-        <div className="power-strip">
-          {installPrompt && <button type="button" className="button button--quiet install-button" onClick={install}>Install app</button>}
-          <div className="power-control">
-            <span className="power-control__label" aria-hidden="true">Power</span>
-            <button
-              type="button"
-              className="toggle-switch power-switch"
-              role="switch"
-              aria-checked={powered}
-              aria-busy={powerBusy || externalInputBusy}
-              aria-label={externalInputBusy
-                ? "Audio operation in progress"
-                : powerBusy && !powered
-                  ? "Cancel audio startup"
-                  : powerBusy
-                    ? "Audio power operation in progress"
-                    : powered ? "Power off" : "Power on"}
-              disabled={externalInputBusy || (powerBusy && powered)}
-              onClick={togglePower}
-            >
-              <b aria-hidden="true">OFF</b>
-              <span aria-hidden="true" />
-              <b aria-hidden="true">ON</b>
-            </button>
-          </div>
-        </div>
+        <LiveOutputMeter engine={engine} running={powered} />
       </header>
 
-      <div className="status-deck">
-        <div className={`sample-rate${sampleRateOkay ? "" : " has-warning"}`}>
-          <span>ENGINE</span>
-          <strong>{audioStatus.actualSampleRate ? `${(audioStatus.actualSampleRate / 1000).toFixed(1)} kHz` : "44.1 kHz requested"}</strong>
+      <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">{notice}</div>
+
+      <main ref={performanceFocusRef} tabIndex={-1}>
+        <h1 className="visually-hidden">Andoracle — ARP Odyssey-Inspired Duophonic Synthesizer</h1>
+        {keyboardPosition === "top" && keyboardModule}
+        <div className="panel-grid">
+          {PANEL_SECTIONS.map((section) => (
+            <SynthPanel
+              key={section.id}
+              section={section}
+              params={params}
+              externalInputEnabled={externalInputEnabled}
+              externalInputBusy={externalInputBusy}
+              externalInputError={externalInputError}
+              powerBusy={powerBusy}
+              inputResetEpoch={inputResetEpoch}
+              onChange={changeParam}
+              onDirectEdit={openDirectEditor}
+              onToggleExternalInput={toggleExternalInput}
+              onPerformance={performance}
+            />
+          ))}
         </div>
-        <EngineTelemetry
-          engine={engine}
-          running={powered}
-          allocatedLow={allocatedLow}
-          allocatedHigh={allocatedHigh}
-        />
-        <div className="network-status"><i className={online ? "is-online" : ""} />{online ? "Online" : offlineCapable ? "Offline ready" : "Offline unavailable"}</div>
+        {keyboardPosition === "bottom" && keyboardModule}
+      </main>
       </div>
 
       {clipboardToast && (
@@ -2294,12 +2491,18 @@ function App() {
               <button type="button" disabled={updateBusy} onClick={() => void reloadUpdate()}>{updateBusy ? "Reloading…" : "Reload update"}</button>
               <button
                 type="button"
+                disabled={updateBusy}
                 onClick={() => {
-                  cancelUpdateWaitRef.current?.();
-                  cancelUpdateWaitRef.current = null;
-                  updateBusyRef.current = false;
-                  setUpdateBusy(false);
+                  // Service-worker activation is browser-owned and cannot be
+                  // cancelled once Reload update has begun. Keep “Later” from
+                  // promising a postponement that the browser may ignore.
+                  if (updateBusyRef.current) return;
                   setNeedRefresh(false);
+                  // `offlineReady` can still be latched from the first-install
+                  // callback when a later update arrives. “Later” dismisses
+                  // the status area as one action instead of immediately
+                  // revealing a second, stale offline-ready banner.
+                  setOfflineReady(false);
                 }}
               >
                 Later
@@ -2308,70 +2511,6 @@ function App() {
           ) : <button type="button" onClick={() => setOfflineReady(false)}>Dismiss</button>}
         </aside>
       )}
-
-      <main ref={performanceFocusRef} tabIndex={-1}>
-        <h1 className="visually-hidden">Andoracle — ARP Odyssey-Inspired Duophonic Synthesizer</h1>
-        <div className="usage-note">
-          <span role="status" aria-live="polite" aria-atomic="true">{notice}</span>
-          <span><b>Tip:</b> right-click or long-press any parameter to enter its exact value and see its valid range.</span>
-        </div>
-        <div className="signal-flow"
-          role="group"
-          aria-label={`Synthesizer signal flow; delay Trails ${params.delayTrails > 0.5 ? "on" : "off"}`}
-        >
-          <span>VCO 1 / VCO 2 / noise / ring</span><i>→</i><span>mixer</span><i>→</i>
-          {params.delayTrails > 0.5 ? (
-            <><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA / drive</span><i>→</i><span>delay trails</span></>
-          ) : (
-            <><span>keyboard-cut delay</span><i>→</i><span>VCF</span><i>→</i><span>HPF</span><i>→</i><span>VCA / drive</span></>
-          )}
-          <i>→</i><span>output</span>
-        </div>
-        <div className="panel-grid">
-          {PANEL_SECTIONS.map((section) => (
-            <SynthPanel
-              key={section.id}
-              section={section}
-              params={params}
-              externalInputEnabled={externalInputEnabled}
-              externalInputBusy={externalInputBusy}
-              externalInputError={externalInputError}
-              powerBusy={powerBusy}
-              inputResetEpoch={inputResetEpoch}
-              onChange={changeParam}
-              onDirectEdit={openDirectEditor}
-              onToggleExternalInput={toggleExternalInput}
-              onPerformance={performance}
-            />
-          ))}
-        </div>
-
-        <MidiInputControl
-          supported={midiAvailability.supported}
-          unsupportedReason={midiAvailability.reason}
-          enabled={midiEnabled}
-          operation={midiOperation}
-          error={midiError}
-          inputs={midiInputs}
-          onToggle={toggleMidi}
-          onRefresh={refreshMidi}
-        />
-
-        <Keyboard
-          activeNotes={activeNotes}
-          allocatedLow={allocatedLow}
-          allocatedHigh={allocatedHigh}
-          resetEpoch={inputResetEpoch}
-          onNoteOn={noteOn}
-          onNoteOff={noteOff}
-        />
-      </main>
-
-      <footer>
-        <span>Shared VCF / VCA duophony · pulse-XOR ring modulation · three filter characters</span>
-        {showSafariInstallHint && <span>Install on Safari: Share → Add to Home Screen.</span>}
-        <span>The current patch auto-restores · named patches and note sequences stay on this device · patch URLs are shareable.</span>
-      </footer>
 
       {directEditor && (
         <DirectEntryModal
@@ -2388,7 +2527,7 @@ function App() {
       {patchLibraryDialog && (
         <PatchLibraryDialog
           mode={patchLibraryDialog.mode}
-          patchNames={userPatches.map((patch) => patch.name)}
+          patchNames={patchNames}
           origin={patchLibraryDialog.origin}
           onSave={saveNamedPatch}
           onReplace={replaceNamedPatch}
@@ -2416,7 +2555,11 @@ function App() {
           onReplace={replaceSequenceTake}
           onDiscard={() => {
             setSequenceTake(null);
-            setNotice("Recording discarded. The previously loaded sequence was kept.");
+            setNotice(
+              activeSequenceName
+                ? `Recording discarded. Sequence “${activeSequenceName}” remains loaded.`
+                : "Recording discarded. No sequence is loaded.",
+            );
           }}
         />
       )}
@@ -2426,7 +2569,7 @@ function App() {
           onClose={() => setHelpDialogOrigin(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 

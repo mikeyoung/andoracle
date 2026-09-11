@@ -387,6 +387,105 @@ describe("OdysseyAudioEngine lifecycle", () => {
     },
   );
 
+  it.each(["suspended", "interrupted"] as const)(
+    "delivers a pending Panic hard-clear before controls when a %s context recovers",
+    async (state) => {
+      const engine = new OdysseyAudioEngine();
+      await engine.powerOn({ ...DEFAULT_PARAMS, delayEnabled: 1, delayTrails: 1 });
+      const port = workletNodes[0].port;
+      port.postMessage.mockClear();
+      contexts[0].transition(state);
+
+      engine.allSoundOff();
+      expect(port.postMessage).not.toHaveBeenCalled();
+      await expect(engine.ensureRunning()).resolves.toBe("resumed");
+
+      const messages = port.postMessage.mock.calls.map(([message]) => message.type);
+      expect(messages.slice(0, 3)).toEqual(["all-sound-off", "params", "performance"]);
+      expect(messages).not.toContain("all-notes-off");
+      await engine.dispose();
+    },
+  );
+
+  it("restores non-note sources only after a suspended Panic has cleared the delay", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn({ ...DEFAULT_PARAMS, delayEnabled: 1, delayTrails: 1 });
+    const port = workletNodes[0].port;
+    port.postMessage.mockClear();
+    contexts[0].transition("suspended");
+
+    engine.allSoundOff();
+    engine.resumeSound();
+    expect(port.postMessage).not.toHaveBeenCalled();
+    await expect(engine.ensureRunning()).resolves.toBe("resumed");
+
+    expect(port.postMessage.mock.calls.map(([message]) => message.type).slice(0, 4)).toEqual([
+      "all-sound-off",
+      "params",
+      "performance",
+      "resume-sound",
+    ]);
+    await engine.dispose();
+  });
+
+  it("orders a newly attached live source after a deferred hard-clear", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn({ ...DEFAULT_PARAMS, delayEnabled: 1, delayTrails: 1 });
+    const port = workletNodes[0].port;
+    port.postMessage.mockClear();
+    contexts[0].transition("suspended");
+    engine.allSoundOff();
+    contexts[0].transition("running");
+    const stream = new FakeStream();
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => stream as unknown as MediaStream),
+      },
+    });
+
+    await engine.enableExternalInput();
+    expect(port.postMessage).not.toHaveBeenCalled();
+    await expect(engine.ensureRunning()).resolves.toBe("resumed");
+    expect(port.postMessage.mock.calls.map(([message]) => message.type).slice(0, 4)).toEqual([
+      "all-sound-off",
+      "params",
+      "performance",
+      "resume-sound",
+    ]);
+    await engine.dispose();
+  });
+
+  it("cancels a deferred live-source resume when that source disconnects", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn({
+      ...DEFAULT_PARAMS,
+      autoRun: 0,
+      delayEnabled: 1,
+      delayTrails: 1,
+      vcaInitialGain: 1,
+    });
+    const port = workletNodes[0].port;
+    port.postMessage.mockClear();
+    contexts[0].transition("suspended");
+    engine.allSoundOff();
+    contexts[0].transition("running");
+    const stream = new FakeStream();
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: vi.fn(async () => stream as unknown as MediaStream),
+      },
+    });
+
+    await engine.enableExternalInput();
+    engine.disableExternalInput();
+    await expect(engine.ensureRunning()).resolves.toBe("resumed");
+    const messageTypes = port.postMessage.mock.calls.map(([message]) => message.type);
+    expect(messageTypes.slice(0, 3)).toEqual(["all-sound-off", "params", "performance"]);
+    expect(messageTypes).not.toContain("resume-sound");
+    expect(stream.track.stop).toHaveBeenCalledTimes(1);
+    await engine.dispose();
+  });
+
   it("recreates an unexpectedly closed context while logical power remains on", async () => {
     installAudioFakes({}, {});
     const engine = new OdysseyAudioEngine();
@@ -443,21 +542,35 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
-  it("clears a transient recovery error when the host resumes spontaneously", async () => {
+  it("resynchronizes a spontaneously resumed host after a transient recovery error", async () => {
     const engine = new OdysseyAudioEngine();
     const statuses: Array<{ state: AudioContextState | "uninitialized"; error: string | null }> = [];
     engine.onStatus((status) => statuses.push({ state: status.state, error: status.error }));
     await engine.powerOn(DEFAULT_PARAMS);
+    const port = workletNodes[0].port;
+    port.postMessage.mockClear();
     contexts[0].setup.resume = async () => {
       throw new Error("temporary host refusal");
     };
     contexts[0].transition("interrupted");
+    engine.setParams({ vco1Fine: 37 });
 
     await expect(engine.ensureRunning()).rejects.toThrow("temporary host refusal");
     expect(statuses.at(-1)?.error).toBe("temporary host refusal");
     contexts[0].transition("running");
     expect(statuses.at(-1)).toMatchObject({ state: "running", error: null });
-    await expect(engine.ensureRunning()).resolves.toBe("already-running");
+    expect(engine.isAudioReady).toBe(false);
+    contexts[0].setup.resume = async (context) => {
+      context.state = "running";
+      context.onstatechange?.(new Event("statechange"));
+    };
+    await expect(engine.ensureRunning()).resolves.toBe("resumed");
+    expect(port.postMessage).toHaveBeenCalledWith({ type: "all-notes-off" });
+    expect(port.postMessage).toHaveBeenCalledWith({
+      type: "params",
+      params: expect.objectContaining({ vco1Fine: 37 }),
+    });
+    expect(engine.isAudioReady).toBe(true);
     await engine.dispose();
   });
 
@@ -1165,7 +1278,7 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
-  it("does not queue controls while suspended and resynchronizes state on power-on", async () => {
+  it("does not queue ordinary controls while suspended and preserves hard-clear intent on power-on", async () => {
     vi.useFakeTimers();
     const engine = new OdysseyAudioEngine();
     await engine.powerOn(DEFAULT_PARAMS);
@@ -1176,7 +1289,7 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await poweringOff;
     port.postMessage.mockClear();
 
-    engine.setParams({ vco1Fine: 0.25 });
+    engine.setParams({ vco1Fine: 1 });
     engine.setPerformance({ bendSemitones: 3 });
     engine.noteOn(60);
     engine.noteOff(60);
@@ -1186,11 +1299,13 @@ describe("OdysseyAudioEngine lifecycle", () => {
     engine.resumeSound();
     expect(port.postMessage).not.toHaveBeenCalled();
 
-    await engine.powerOn({ ...DEFAULT_PARAMS, vco1Fine: 0.25 });
-    expect(port.postMessage).toHaveBeenCalledWith({ type: "all-notes-off" });
+    await engine.powerOn({ ...DEFAULT_PARAMS, vco1Fine: 1 });
+    expect(port.postMessage).toHaveBeenCalledWith({ type: "all-sound-off" });
+    expect(port.postMessage).toHaveBeenCalledWith({ type: "resume-sound" });
+    expect(port.postMessage).not.toHaveBeenCalledWith({ type: "all-notes-off" });
     expect(port.postMessage).toHaveBeenCalledWith({
       type: "params",
-      params: expect.objectContaining({ vco1Fine: 0.25 }),
+      params: expect.objectContaining({ vco1Fine: 1 }),
     });
     expect(port.postMessage).toHaveBeenCalledWith({
       type: "performance",
@@ -1232,6 +1347,61 @@ describe("OdysseyAudioEngine lifecycle", () => {
     await engine.dispose();
   });
 
+  it("keeps the recovery cache aligned with DSP validation for malformed performance reports", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn(DEFAULT_PARAMS);
+    const firstPort = workletNodes[0].port;
+    engine.setPerformance({ bendSemitones: 3, vibratoSemitones: 2 });
+    firstPort.postMessage.mockClear();
+
+    engine.setPerformance({
+      bendSemitones: Number.NaN,
+      vibratoSemitones: Number.POSITIVE_INFINITY,
+    });
+    expect(firstPort.postMessage).not.toHaveBeenCalled();
+
+    workletNodes[0].dispatchEvent(new Event("processorerror"));
+    await expect(engine.ensureRunning()).resolves.toBe("recreated");
+    expect(workletNodes[1].port.postMessage).toHaveBeenCalledWith({
+      type: "performance",
+      performance: { bendSemitones: 3, vibratoSemitones: 2 },
+    });
+
+    const recoveredPort = workletNodes[1].port;
+    recoveredPort.postMessage.mockClear();
+    engine.setPerformance({ bendSemitones: 100, vibratoSemitones: -5 });
+    engine.setPerformance({ bendSemitones: 24, vibratoSemitones: 0 });
+    expect(recoveredPort.postMessage.mock.calls).toEqual([[
+      {
+        type: "performance",
+        performance: { bendSemitones: 24, vibratoSemitones: 0 },
+      },
+    ]]);
+    await engine.dispose();
+  });
+
+  it("rejects non-parameter fields without poisoning the processor recovery snapshot", async () => {
+    const engine = new OdysseyAudioEngine();
+    await engine.powerOn({ ...DEFAULT_PARAMS, masterVolume: 0.25 });
+    const firstPort = workletNodes[0].port;
+    firstPort.postMessage.mockClear();
+
+    engine.setParams({
+      masterVolume: "invalid",
+      toString: 1,
+    } as unknown as Partial<typeof DEFAULT_PARAMS>);
+    expect(firstPort.postMessage).not.toHaveBeenCalled();
+
+    workletNodes[0].dispatchEvent(new Event("processorerror"));
+    await expect(engine.ensureRunning()).resolves.toBe("recreated");
+    const paramsMessage = workletNodes[1].port.postMessage.mock.calls
+      .map(([message]) => message)
+      .find((message) => message.type === "params");
+    expect(paramsMessage?.params).toMatchObject({ masterVolume: 0.25 });
+    expect(Object.hasOwn(paramsMessage?.params ?? {}, "toString")).toBe(false);
+    await engine.dispose();
+  });
+
   it("keeps parameter and performance caches isolated while merging startup updates", async () => {
     const moduleLoad = deferred<void>();
     installAudioFakes({ addModule: () => moduleLoad.promise });
@@ -1240,7 +1410,7 @@ describe("OdysseyAudioEngine lifecycle", () => {
     const callerPerformance = { bendSemitones: 3 };
     const starting = engine.powerOn(callerParams);
 
-    engine.setParams({ vco1Fine: 0.25 });
+    engine.setParams({ vco1Fine: 1 });
     engine.setParams({ delayMix: 0.8 });
     engine.setPerformance(callerPerformance);
     engine.setPerformance({ vibratoSemitones: 2 });
@@ -1255,7 +1425,7 @@ describe("OdysseyAudioEngine lifecycle", () => {
     expect(messages).toContainEqual({
       type: "params",
       params: expect.objectContaining({
-        vco1Fine: 0.25,
+        vco1Fine: 1,
         delayMix: 0.8,
       }),
     });

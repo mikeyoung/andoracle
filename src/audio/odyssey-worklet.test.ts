@@ -63,25 +63,41 @@ describe("AndoracleProcessor", () => {
       processor.port.onmessage?.({ data: { type: "request-meter" } } as MessageEvent);
     };
 
-    for (let block = 0; block < 17; block += 1) processBlock();
-    expect(processor.port.postMessage).not.toHaveBeenCalled();
-
     requestMeter();
     requestMeter();
-    for (let block = 0; block < 15; block += 1) processBlock();
-    expect(processor.port.postMessage).not.toHaveBeenCalled();
     processBlock();
     expect(processor.port.postMessage).toHaveBeenCalledTimes(1);
     expect(processor.port.postMessage).toHaveBeenLastCalledWith({
       type: "meter",
-      meter: expect.objectContaining({ sampleRate: 44100 }),
+      meter: expect.objectContaining({
+        sampleRate: 44100,
+        leftRms: expect.any(Number),
+        rightRms: expect.any(Number),
+      }),
     });
 
-    for (let block = 0; block < 32; block += 1) processBlock();
+    for (let block = 0; block < 10; block += 1) processBlock();
     expect(processor.port.postMessage).toHaveBeenCalledTimes(1);
     requestMeter();
-    for (let block = 0; block < 16; block += 1) processBlock();
+    requestMeter();
+    processBlock();
     expect(processor.port.postMessage).toHaveBeenCalledTimes(2);
+
+    for (let block = 0; block < 10; block += 1) processBlock();
+    requestMeter();
+    processBlock();
+    expect(processor.port.postMessage).toHaveBeenCalledTimes(3);
+
+    for (let block = 0; block < 11; block += 1) processBlock();
+    requestMeter();
+    processBlock();
+    expect(processor.port.postMessage).toHaveBeenCalledTimes(4);
+
+    for (let block = 0; block < 30; block += 1) processBlock();
+    expect(processor.port.postMessage).toHaveBeenCalledTimes(4);
+    requestMeter();
+    for (let block = 0; block < 12; block += 1) processBlock();
+    expect(processor.port.postMessage).toHaveBeenCalledTimes(5);
   });
 
   it("routes every engine command and right-only stereo input through the worklet bridge", async () => {

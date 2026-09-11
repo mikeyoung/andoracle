@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, type Ref } from "react";
 import { DeferredSelectFocusRelease, type SelectInteractionModality } from "./select-focus";
+import { RasterLabel } from "./RasterLabel";
 
-export type SequencePlaybackState = "stopped" | "playing" | "paused";
+export type SequencePlaybackState = "stopped" | "starting" | "playing" | "paused";
 
 interface SequenceTransportProps {
   sequenceNames: readonly string[];
@@ -32,8 +33,9 @@ function SequenceTransportComponent({
   onDelete,
 }: SequenceTransportProps) {
   const playing = playbackState === "playing";
+  const starting = playbackState === "starting";
   const paused = playbackState === "paused";
-  const playbackActive = playing || paused;
+  const playbackActive = starting || playing || paused;
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const selectInteractionModality = useRef<SelectInteractionModality>("keyboard");
   const selectFocusRelease = useRef<DeferredSelectFocusRelease | null>(null);
@@ -44,32 +46,51 @@ function SequenceTransportComponent({
   };
 
   return (
-    <div className="sequence-strip" role="group" aria-label="Sequence transport">
+    <div
+      className="sequence-strip"
+      role="group"
+      aria-label="Sequence transport"
+      aria-busy={starting || undefined}
+    >
       <div className="library-picker sequence-picker">
-        <label htmlFor="sequence-select">Sequence</label>
-        <select
-          id="sequence-select"
-          aria-label="Sequence"
-          value={activeName ?? ""}
-          disabled={recording}
-          onPointerDown={() => {
-            selectInteractionModality.current = "pointer";
-          }}
-          onKeyDown={() => {
-            selectInteractionModality.current = "keyboard";
-          }}
-          onChange={(event) => {
-            onSelect(event.target.value);
-            selectFocusRelease.current?.finish(
-              event.currentTarget,
-              selectInteractionModality.current,
-            );
-            selectInteractionModality.current = "keyboard";
-          }}
-        >
-          <option value="">{sequenceNames.length > 0 ? "None loaded" : "No sequences"}</option>
-          {sequenceNames.map((name) => <option key={name} value={name}>{name}</option>)}
-        </select>
+        <label htmlFor="sequence-select"><RasterLabel text="Sequence" variant="control" /></label>
+        <div className="library-select-shell">
+          <select
+            id="sequence-select"
+            aria-label="Sequence"
+            value={activeName ?? ""}
+            disabled={recording}
+            onPointerDown={() => {
+              selectFocusRelease.current?.dispose();
+              selectInteractionModality.current = "pointer";
+            }}
+            onKeyDown={(event) => {
+              if (selectFocusRelease.current?.hasPointerFocusReleasePending) return;
+              if (selectInteractionModality.current === "pointer" && event.key === "Escape") {
+                selectFocusRelease.current?.finish(event.currentTarget, "pointer");
+                return;
+              }
+              selectFocusRelease.current?.dispose();
+              selectInteractionModality.current = "keyboard";
+            }}
+            onClick={(event) => {
+              if (selectInteractionModality.current === "pointer") {
+                selectFocusRelease.current?.watchPointerPicker(event.currentTarget);
+              }
+            }}
+            onChange={(event) => {
+              onSelect(event.target.value);
+              selectFocusRelease.current?.finish(
+                event.currentTarget,
+                selectInteractionModality.current,
+              );
+              selectInteractionModality.current = "keyboard";
+            }}
+          >
+            <option value="">{sequenceNames.length > 0 ? "None loaded" : "No sequences"}</option>
+            {sequenceNames.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </div>
       </div>
       <div className="library-actions sequence-actions">
         <button
@@ -87,10 +108,10 @@ function SequenceTransportComponent({
           ref={playButtonRef}
           type="button"
           className={`button sequence-icon-button sequence-play-button${playing ? " is-active" : ""}`}
-          aria-label={paused ? "Resume sequence" : "Play loaded sequence"}
-          title={paused ? "Resume sequence" : "Play loaded sequence"}
+          aria-label={starting ? "Starting sequence" : paused ? "Resume sequence" : "Play loaded sequence"}
+          title={starting ? "Starting sequence" : paused ? "Resume sequence" : "Play loaded sequence"}
           aria-pressed={playing}
-          disabled={!activeName || recording || playing}
+          disabled={!activeName || recording || starting || playing}
           onClick={onPlay}
         >
           <i aria-hidden="true" />

@@ -37,22 +37,69 @@ describe("parameter schema", () => {
     }
   });
 
-  it("places the complete delay panel between the mixer and final filters", () => {
+  it("keeps every module and control in the canonical widest-desktop sequence", () => {
     const sectionIds = PANEL_SECTIONS.map((section) => section.id);
-    expect(sectionIds.indexOf("delay")).toBe(sectionIds.indexOf("mixer") + 1);
-    expect(sectionIds.indexOf("filter")).toBe(sectionIds.indexOf("delay") + 1);
-
-    const delay = PANEL_SECTIONS.find((section) => section.id === "delay");
-    expect(delay?.items.map((item) => "param" in item ? item.param : item.kind)).toEqual([
-      "delayEnabled",
-      "delayTime",
-      "delayFeedback",
-      "delayMix",
-      "delayTone",
-      "delaySpread",
-      "delayPingPong",
-      "delayTrails",
+    expect(sectionIds).toEqual([
+      "controllers",
+      "vco1",
+      "vco2",
+      "envelopes",
+      "amplifier",
+      "modulators",
+      "filter",
+      "mixer",
+      "delay",
     ]);
+
+    const itemOrder = Object.fromEntries(PANEL_SECTIONS.map((section) => [
+      section.id,
+      section.items.flatMap((item) => {
+        if (item.kind === "route") return [item.source, item.amount];
+        if (item.kind === "external" || item.kind === "ppc") return [item.kind];
+        return [item.param];
+      }),
+    ]));
+
+    expect(itemOrder).toEqual({
+      controllers: [
+        "transpose", "portamento", "portamentoMode", "portamentoFootswitch", "masterTune",
+        "autoRun", "autoNote", "ppcBendRange", "ppcVibratoRange", "pedalConnected",
+        "pedalPosition", "ppc",
+      ],
+      vco1: [
+        "vco1Mode", "vco1Coarse", "vco1Fine", "vco1Fm1Source", "vco1Fm1Amount",
+        "vco1Fm2Source", "vco1Fm2Amount", "vco1PulseWidth", "vco1PwmSource", "vco1PwmAmount",
+      ],
+      vco2: [
+        "vco2Sync", "vco2Coarse", "vco2Fine", "vco2Fm1Source", "vco2Fm1Amount",
+        "vco2Fm2Source", "vco2Fm2Amount", "vco2PulseWidth", "vco2PwmSource", "vco2PwmAmount",
+      ],
+      envelopes: [
+        "repeatMode", "arSource", "arAttack", "arRelease", "adsrSource", "adsrAttack",
+        "adsrDecay", "adsrSustain", "adsrRelease",
+      ],
+      amplifier: [
+        "driveEnabled", "driveAmount", "vcaInitialGain", "vcaEnvelopeSource",
+        "vcaEnvelopeAmount", "masterVolume",
+      ],
+      modulators: [
+        "lfoRate", "noiseColor", "shInput1Source", "shInput1Level", "shInput2Source",
+        "shInput2Level", "shClockSource", "shLag",
+      ],
+      filter: [
+        "filterType", "filter4075Mode", "filterCutoff", "filterResonance", "hpfCutoff",
+        "filterMod1Source", "filterMod1Amount", "filterMod2Source", "filterMod2Amount",
+        "filterMod3Source", "filterMod3Amount",
+      ],
+      mixer: [
+        "mixer1Source", "mixer1Level", "mixer2Source", "mixer2Level", "mixer3Source",
+        "mixer3Level", "externalLevel", "outputFeedback", "external",
+      ],
+      delay: [
+        "delayEnabled", "delayTime", "delayFeedback", "delayMix", "delayTone", "delaySpread",
+        "delayPingPong", "delayTrails",
+      ],
+    });
   });
 
   it("maps logarithmic midpoint geometrically", () => {

@@ -21,10 +21,26 @@ export const PWA_INCLUDE_ASSETS = [
 
 export const PWA_WORKBOX_GLOB_PATTERNS = [
   "**/*.{js,css,html,woff2}",
+  "assets/**/*.{png,webp}",
 ] as const;
 
 export const PWA_WORKBOX_IMPORT_SCRIPTS = [
-  "sw-update-bridge-1.0.18.js",
+  "sw-update-bridge-1.0.19.js",
+] as const;
+
+// The one-release bridge snapshots already-controlled update clients before
+// claiming the scope, which prevents a first install from reloading itself.
+// Restore Workbox ownership when the bridge is removed in a later release.
+export const PWA_WORKBOX_CLIENTS_CLAIM = false;
+export const PWA_INJECT_REGISTER = false;
+
+// Normal builds replace these generated trees. Excluding them from the dev
+// watcher prevents a simultaneous extension build from racing Vite's Windows
+// file handles and crashing the live development server with EBUSY.
+export const VITE_DEV_WATCH_IGNORED = [
+  "**/dist/**",
+  "**/store-packages/**",
+  "**/node_modules/.tmp/andoracle-extension/**",
 ] as const;
 
 export const PWA_MANIFEST_ICONS = [
@@ -47,18 +63,22 @@ const EXTENSION_REGISTER_MODULE_ID = "\0andoracle-extension-register-sw";
 
 const pwaPlugin = () => VitePWA({
       registerType: "autoUpdate",
+      // The application owns registration through virtual:pwa-register.
+      // Keeping this explicit also prevents vite-plugin-pwa's auto-register
+      // normalization from overriding the bridge-owned clientsClaim setting.
+      injectRegister: PWA_INJECT_REGISTER,
       // Root install artwork is supplied here or by manifest.icons. Keeping
       // root images out of Workbox's glob prevents duplicate precache URLs.
       includeAssets: [...PWA_INCLUDE_ASSETS],
       manifest: {
         name: "Andoracle",
         short_name: "Andoracle",
-        description: "Andoracle is an offline-capable, touch-first duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.",
+        description: "Andoracle is an offline-capable desktop duophonic synthesizer PWA that recreates the ARP Odyssey signal flow with MIDI, note sequencing, delay, and patch sharing.",
         id: "./",
         lang: "en",
         dir: "ltr",
-        theme_color: "#a3a3a3",
-        background_color: "#292929",
+        theme_color: "#4a2c1c",
+        background_color: "#4a2c1c",
         display: "standalone",
         orientation: "any",
         start_url: "./",
@@ -74,7 +94,7 @@ const pwaPlugin = () => VitePWA({
         globPatterns: [...PWA_WORKBOX_GLOB_PATTERNS],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
-        clientsClaim: true,
+        clientsClaim: PWA_WORKBOX_CLIENTS_CLAIM,
         skipWaiting: true
       }
     });
@@ -112,6 +132,11 @@ export default defineConfig(({ mode }) => {
     // extension pages valid without knowing their final origin in advance.
     base: "./",
     publicDir: extensionBuild ? false : "public",
+    server: {
+      watch: {
+        ignored: [...VITE_DEV_WATCH_IGNORED],
+      },
+    },
     build: extensionBuild ? {
       outDir: EXTENSION_BUILD_DIRECTORY,
       emptyOutDir: true,
