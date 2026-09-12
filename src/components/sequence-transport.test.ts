@@ -62,12 +62,12 @@ describe("SequenceTransport", () => {
     const stop = buttonMarkup(markup, "Stop sequence and return to beginning");
     const remove = buttonMarkup(markup, "Delete active recording");
 
-    expect(record).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
+    expect(record).toContain('<img class="sequence-transport-icon" src="data:image/svg+xml,');
     expect(record).toContain("sequence-icon-button sequence-record-button");
-    expect(play).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
-    expect(pause).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
-    expect(stop).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
-    expect(remove).toContain('<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">');
+    expect(play).toContain('<img class="sequence-transport-icon" src="data:image/svg+xml,');
+    expect(pause).toContain('<img class="sequence-transport-icon" src="data:image/svg+xml,');
+    expect(stop).toContain('<img class="sequence-transport-icon" src="data:image/svg+xml,');
+    expect(remove).toContain('<img class="sequence-transport-icon sequence-transport-icon--delete" src="data:image/svg+xml,');
     expect(remove).not.toMatch(/>\s*Delete\s*</);
     expect(record).not.toMatch(/>\s*Record\s*</);
   });
@@ -91,7 +91,7 @@ describe("SequenceTransport", () => {
     expect(markup).toContain('id="sequence-select" aria-label="Sequence" disabled=""');
     expect(markup).toContain('sequence-record-button is-active');
     expect(buttonTag(markup, "Stop recording")).toContain('aria-pressed="true"');
-    expect(buttonMarkup(markup, "Stop recording")).toMatch(/<i aria-hidden="true"><\/i><\/button>$/);
+    expect(buttonMarkup(markup, "Stop recording")).toContain('<img class="sequence-transport-icon" src="data:image/svg+xml,');
     expect(buttonTag(markup, "Play loaded sequence")).toContain('aria-pressed="false"');
     expect(buttonTag(markup, "Play loaded sequence")).toContain("disabled");
     expect(buttonTag(markup, "Pause sequence")).toContain('aria-pressed="false"');

@@ -3436,7 +3436,33 @@ footer {
    turns it into a low-contrast gray slab on the light faceplate. */
 .topbar .sequence-actions .sequence-icon-button:disabled {
   opacity: 1;
-  filter: grayscale(1) brightness(0.72) contrast(1.18);
+  filter: none;
+}
+
+.sequence-transport-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sequence-transport-icon--delete {
+  width: 19px;
+  height: 19px;
+  flex-basis: 19px;
+}
+
+.sequence-icon-button:disabled .sequence-transport-icon {
+  opacity: 0.78;
+}
+
+.help-dialog :is(.modal-kicker, h2, .modal-current),
+.help-interface-list li > strong,
+.help-interface-list li > span {
+  filter: brightness(0);
 }
 .raster-label--brand { font-size: clamp(25px, 2vw, 34px); letter-spacing: 0.12em; }
 .raster-label--model { font-size: 12px; letter-spacing: 0.13em; }

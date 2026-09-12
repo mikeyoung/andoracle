@@ -1,6 +1,11 @@
 import { memo, useEffect, useRef, type Ref } from "react";
 import { DeferredSelectFocusRelease, type SelectInteractionModality } from "./select-focus";
 import { RasterLabel } from "./RasterLabel";
+import recordIcon from "../assets/console/icons/sequence-record.svg";
+import playIcon from "../assets/console/icons/sequence-play.svg";
+import pauseIcon from "../assets/console/icons/sequence-pause.svg";
+import stopIcon from "../assets/console/icons/sequence-stop.svg";
+import deleteIcon from "../assets/console/icons/sequence-delete.svg";
 
 export type SequencePlaybackState = "stopped" | "starting" | "playing" | "paused";
 
@@ -102,7 +107,7 @@ function SequenceTransportComponent({
           aria-pressed={recording}
           onClick={onRecord}
         >
-          <i aria-hidden="true" />
+          <img className="sequence-transport-icon" src={recordIcon} alt="" aria-hidden="true" draggable={false} />
         </button>
         <button
           ref={playButtonRef}
@@ -114,7 +119,7 @@ function SequenceTransportComponent({
           disabled={!activeName || recording || starting || playing}
           onClick={onPlay}
         >
-          <i aria-hidden="true" />
+          <img className="sequence-transport-icon" src={playIcon} alt="" aria-hidden="true" draggable={false} />
         </button>
         <button
           type="button"
@@ -128,7 +133,7 @@ function SequenceTransportComponent({
             returnFocusToPlay();
           }}
         >
-          <i aria-hidden="true" />
+          <img className="sequence-transport-icon" src={pauseIcon} alt="" aria-hidden="true" draggable={false} />
         </button>
         <button
           type="button"
@@ -141,7 +146,7 @@ function SequenceTransportComponent({
             returnFocusToPlay();
           }}
         >
-          <i aria-hidden="true" />
+          <img className="sequence-transport-icon" src={stopIcon} alt="" aria-hidden="true" draggable={false} />
         </button>
         <button
           type="button"
@@ -152,9 +157,7 @@ function SequenceTransportComponent({
           disabled={!activeName || recording}
           onClick={(event) => onDelete(event.currentTarget)}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 10v7m4-7v7" />
-          </svg>
+          <img className="sequence-transport-icon sequence-transport-icon--delete" src={deleteIcon} alt="" aria-hidden="true" draggable={false} />
         </button>
       </div>
     </div>
