@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 const consoleStyles = readFileSync(resolve("src/console-1968.css"), "utf8");
 const baseStyles = readFileSync(resolve("src/styles.css"), "utf8");
 const rasterLabel = readFileSync(resolve("src/components/RasterLabel.tsx"), "utf8");
+const photoSwitchHardware = readFileSync(resolve("src/components/PhotoSwitchHardware.tsx"), "utf8");
 const responsiveStyles = consoleStyles.slice(
   consoleStyles.indexOf("Responsive photographic console assembly"),
 );
@@ -63,19 +64,18 @@ describe("responsive faceplate system text", () => {
     );
   });
 
-  it("keeps semantic text available when forced colors suppress photographs", () => {
-    const forcedColors = consoleStyles.slice(consoleStyles.indexOf("@media (forced-colors: active)"));
-    expect(forcedColors).toMatch(/\.raster-label\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?font-size:\s*9px;/);
-    expect(rasterLabel).toContain("raster-label--tone-");
-    expect(rasterLabel).toContain('preserveCase ? "raster-label--preserve-case" : null');
+  it("does not install alternate forced-color or motion presentation modes", () => {
+    expect(consoleStyles).not.toContain("@media (forced-colors: active)");
+    expect(consoleStyles).not.toContain("@media (prefers-reduced-motion: reduce)");
+    expect(baseStyles).not.toContain("@media (forced-colors: active)");
+    expect(baseStyles).not.toContain("@media (prefers-reduced-motion: reduce)");
   });
 
-  it("keeps photographic controls identifiable in forced colors", () => {
-    const forcedColors = consoleStyles.slice(consoleStyles.indexOf("@media (forced-colors: active)"));
-    expect(forcedColors).toMatch(/\.button,[\s\S]*?\.library-picker select\s*\{[\s\S]*?border:\s*1px solid ButtonText;[\s\S]*?background-color:\s*ButtonFace;/);
-    expect(forcedColors).toMatch(/\.toggle-switch > span:not\(\.raster-label\),[\s\S]*?background-image:\s*none !important;/);
-    expect(forcedColors).toMatch(/\.dial-scale i,\s*\.dial-face i\s*\{[\s\S]*?display:\s*block;[\s\S]*?background:\s*CanvasText;/);
-    expect(forcedColors).toMatch(/\.piano-key\s*\{[\s\S]*?border:\s*1px solid ButtonText;[\s\S]*?background-color:\s*ButtonFace;/);
-    expect(forcedColors).toMatch(/button:focus-visible,[\s\S]*?\.keyboard-banks:focus-visible\s*\{[\s\S]*?outline-color:\s*Highlight;[\s\S]*?box-shadow:\s*none;/);
+  it("pins faceplate ink and uses content images for Firefox-safe switches", () => {
+    expect(consoleStyles).toMatch(/html,[\s\S]*?\.app-shell\s*\{[\s\S]*?forced-color-adjust:\s*none;/);
+    expect(consoleStyles).toMatch(/\.raster-label--tone-ink,[\s\S]*?color:\s*#171713 !important;/);
+    expect(consoleStyles).toMatch(/\.raster-label--tone-reverse,[\s\S]*?color:\s*#f3eee1 !important;/);
+    expect(photoSwitchHardware).toContain('className="photo-switch-hardware"');
+    expect(photoSwitchHardware).toContain('src={PHOTO_SWITCH_IMAGES[variant][enabled ? 1 : 0]}');
   });
 });

@@ -26,6 +26,7 @@ import {
 import { SequenceTransport, type SequencePlaybackState } from "./components/SequenceTransport";
 import { SynthPanel } from "./components/SynthPanel";
 import { RasterLabel } from "./components/RasterLabel";
+import { PhotoSwitchHardware } from "./components/PhotoSwitchHardware";
 import { OperationCancellationRegistry } from "./cancellable-operation";
 import { blocksComputerKeyboardNotes, reservesComputerKeyboardChord } from "./computer-keyboard";
 import { ExclusiveOperationGuard } from "./exclusive-operation-guard";
@@ -2337,7 +2338,7 @@ function App() {
                 onClick={togglePower}
               >
                 <b aria-hidden="true"><RasterLabel text="Off" variant="micro" /></b>
-                <span aria-hidden="true" />
+                <span aria-hidden="true"><PhotoSwitchHardware variant="power" enabled={powered} /></span>
                 <b aria-hidden="true"><RasterLabel text="On" variant="micro" /></b>
               </button>
             </div>

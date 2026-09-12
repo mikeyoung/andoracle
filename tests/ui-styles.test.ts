@@ -99,10 +99,7 @@ describe("responsive 1968 photographic console layout", () => {
     const centeringStart = responsiveStyles.indexOf(
       "Center the complete contents of every synthesis module",
     );
-    const centering = responsiveStyles.slice(
-      centeringStart,
-      responsiveStyles.indexOf("@media (forced-colors: active)", centeringStart),
-    );
+    const centering = responsiveStyles.slice(centeringStart);
 
     expect(centeringStart).toBeGreaterThanOrEqual(0);
     expect(centering).toMatch(

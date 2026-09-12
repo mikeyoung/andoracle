@@ -1,4 +1,5 @@
 import { RasterLabel } from "./RasterLabel";
+import { PhotoSwitchHardware } from "./PhotoSwitchHardware";
 
 interface ExternalInputControlProps {
   enabled: boolean;
@@ -20,7 +21,7 @@ export function ExternalInputControl({ enabled, busy, disabled = false, error, o
         disabled={disabled}
         onClick={onToggle}
       >
-        <i aria-hidden="true" />
+        <i aria-hidden="true"><PhotoSwitchHardware variant="power" enabled={enabled} /></i>
         <b><RasterLabel
           text={busy ? "Cancel connection" : enabled ? "Live input on" : "Use live input"}
           variant="micro"

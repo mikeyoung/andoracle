@@ -7,6 +7,7 @@
  */
 
 :root {
+  color-scheme: only light;
   --console-ink: #171713;
   --console-muted-ink: #504d45;
   --console-enamel: #eee9da;
@@ -16,6 +17,15 @@
   --console-scale: 1;
   --console-enamel-texture-size: 420px 420px;
   --console-phenolic-texture-size: 420px 420px;
+}
+/* Keep the photographed light console and its ink as one coherent visual
+   surface. Firefox Android can otherwise remap the text while retaining the
+   light raster faceplate, leaving white legends on white enamel. */
+html,
+body,
+#root,
+.app-shell {
+  forced-color-adjust: none;
 }
 
 html,
@@ -411,6 +421,16 @@ body {
 .toggle-switch > span:not(.raster-label)::after {
   display: none;
   content: none;
+}
+
+.photo-switch-hardware {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
 }
 
 .toggle-switch[data-switch-variant="power"] > span:not(.raster-label),
@@ -3348,6 +3368,23 @@ footer {
 
 .raster-label--tone-muted { color: var(--console-muted-ink); }
 .raster-label--tone-reverse { color: #f3eee1; }
+
+/* Explicit ink colors prevent mobile browser contrast rewriting from making
+   semantic faceplate labels unreadable against the photographed enamel. */
+.raster-label--tone-ink,
+.raster-label--tone-ink .raster-label__text {
+  color: #171713 !important;
+}
+
+.raster-label--tone-muted,
+.raster-label--tone-muted .raster-label__text {
+  color: #504d45 !important;
+}
+
+.raster-label--tone-reverse,
+.raster-label--tone-reverse .raster-label__text {
+  color: #f3eee1 !important;
+}
 .raster-label--brand { font-size: clamp(25px, 2vw, 34px); letter-spacing: 0.12em; }
 .raster-label--model { font-size: 12px; letter-spacing: 0.13em; }
 .raster-label--title { font-size: 17px; letter-spacing: 0.1em; }
@@ -3851,172 +3888,6 @@ footer {
   .sequence-icon-button {
     width: 100%;
     min-width: 40px;
-  }
-}
-
-@media (forced-colors: active) {
-  html,
-  body,
-  .app-shell,
-  .topbar,
-  main,
-  .module,
-  .module-header,
-  .midi-strip,
-  .keyboard-module,
-  .keyboard-header,
-  .keyboard-banks,
-  .allocation-legend,
-  .piano-key,
-  .button,
-  .choice-button,
-  .ppc-pad,
-  .direct-entry,
-  .system-banner,
-  .clipboard-toast,
-  footer {
-    background-image: none;
-  }
-
-  .app-shell,
-  .topbar,
-  .module,
-  .midi-strip,
-  .keyboard-module,
-  .direct-entry,
-  .system-banner,
-  .clipboard-toast,
-  footer {
-    border-color: CanvasText;
-  }
-
-  button:focus-visible,
-  select:focus-visible,
-  input:focus-visible,
-  .keyboard-banks:focus-visible {
-    outline-color: Highlight;
-    box-shadow: none;
-  }
-
-  .piano-key:focus::after,
-  .dial-shell input[type="range"]:focus-visible ~ .dial-face {
-    border-color: Highlight;
-    outline-color: Highlight;
-    box-shadow: none;
-  }
-
-  .module-header,
-  .keyboard-header {
-    border-bottom: 1px solid CanvasText;
-  }
-
-  .button,
-  .choice-button,
-  .ppc-pad,
-  .patch-strip select,
-  .sequence-strip select,
-  .library-picker select {
-    border: 1px solid ButtonText;
-    color: ButtonText;
-    background-color: ButtonFace;
-    background-image: none;
-  }
-
-  .library-select-shell::before,
-  .library-select-shell::after {
-    display: none;
-  }
-
-  .choice-button i {
-    width: 0;
-    height: 0;
-    flex-basis: 0;
-    border: 4px solid transparent;
-    border-top: 6px solid ButtonText;
-    background: none;
-  }
-
-  .toggle-switch > span:not(.raster-label),
-  .external-input-button i,
-  .power-switch > span:not(.raster-label) {
-    border: 2px solid ButtonText;
-    background-color: ButtonFace;
-    background-image: none !important;
-  }
-
-  .toggle-switch[aria-checked="true"] > span:not(.raster-label),
-  .external-input-button.is-enabled i,
-  .power-switch[aria-checked="true"] > span:not(.raster-label) {
-    background-color: Highlight;
-  }
-
-  .power-switch[aria-checked="false"]:not(:disabled) > span:not(.raster-label) {
-    animation: none;
-    filter: none;
-  }
-
-  .dial-scale {
-    background-image: none;
-  }
-
-  .dial-scale i,
-  .dial-face i {
-    display: block;
-    background: CanvasText;
-    box-shadow: none;
-  }
-
-  .dial-face {
-    border: 1px solid CanvasText;
-    background-color: Canvas;
-    background-image: none;
-  }
-
-  .piano-key {
-    border: 1px solid ButtonText;
-    background-color: ButtonFace;
-  }
-
-  .piano-key--black {
-    background-color: ButtonText;
-  }
-
-  .sequence-icon-button i {
-    background: ButtonText;
-    box-shadow: none;
-  }
-
-  .sequence-pause-button i,
-  .sequence-pause-button.is-active i {
-    forced-color-adjust: none;
-    background: linear-gradient(
-      90deg,
-      CanvasText 0 35%,
-      transparent 35% 65%,
-      CanvasText 65% 100%
-    );
-  }
-
-  .raster-label {
-    overflow: visible;
-    font-size: 9px;
-    line-height: 1;
-  }
-
-  .raster-label--brand { font-size: 23px; }
-  .raster-label--model { font-size: 9px; }
-  .raster-label--title { font-size: 15px; }
-  .raster-label--eyebrow { font-size: 8px; }
-  .raster-label--control,
-  .raster-label--button { font-size: 9.5px; }
-  .raster-label--micro { font-size: 7.5px; }
-
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .power-switch[aria-checked="false"]:not(:disabled) > span:not(.raster-label) {
-    animation: none;
-    filter: brightness(1.2432);
   }
 }
 
@@ -4873,22 +4744,5 @@ footer {
 
   .topbar .library-select-shell {
     width: min(300px, 100%);
-  }
-}
-
-
-@media (forced-colors: active) {
-  :where(
-    .topbar,
-    .module,
-    .midi-strip,
-    .keyboard-module,
-    footer
-  )::before {
-    display: none;
-  }
-
-  .panel-screws {
-    display: block;
   }
 }

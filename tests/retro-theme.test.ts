@@ -10,6 +10,7 @@ const consoleStyles = readFileSync(resolve("src/console-1968.css"), "utf8");
 const rasterLabel = readFileSync(resolve("src/components/RasterLabel.tsx"), "utf8");
 const app = readFileSync(resolve("src/App.tsx"), "utf8");
 const externalInput = readFileSync(resolve("src/components/ExternalInputControl.tsx"), "utf8");
+const photoSwitchHardware = readFileSync(resolve("src/components/PhotoSwitchHardware.tsx"), "utf8");
 const main = readFileSync(resolve("src/main.tsx"), "utf8");
 const html = readFileSync(resolve("index.html"), "utf8");
 const viteConfig = readFileSync(resolve("vite.config.ts"), "utf8");
@@ -103,20 +104,18 @@ describe("late-1960s photographic console finish", () => {
     expect(consoleStyles).toMatch(/\.dial-shell input\[type="range"\]\s*\{[\s\S]*?opacity:\s*0;/);
   });
 
-  it("flashes only the photographic power lever while off and respects reduced motion", () => {
+  it("flashes only the photographic power lever while off", () => {
     expect(consoleStyles).toMatch(/@keyframes console-power-ready-flash\s*\{/);
     expect(consoleStyles).toMatch(/brightness\(0\.8325\)[\s\S]*?brightness\(1\.4985\)/);
     expect(consoleStyles).toMatch(/\.power-switch\[aria-checked="false"\]:not\(:disabled\) > span:not\(\.raster-label\)\s*\{[\s\S]*?animation:\s*console-power-ready-flash 1\.6s/);
     expect(consoleStyles).toMatch(/\.power-switch\[aria-checked="true"\],[\s\S]*?animation:\s*none;/);
-    expect(consoleStyles).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation:\s*none;/);
+    expect(photoSwitchHardware).toContain('variant: PhotoSwitchVariant');
+    expect(app).toContain('<PhotoSwitchHardware variant="power" enabled={powered} />');
   });
 
   it("lightens every photographic switch by exactly eleven percent", () => {
     expect(consoleStyles).toMatch(
       /\.toggle-switch > span:not\(\.raster-label\),\s*\.external-input-button i\s*\{[\s\S]*?1\.12 × 1\.11 = 1\.2432[\s\S]*?filter:\s*brightness\(1\.2432\);/,
-    );
-    expect(consoleStyles).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.power-switch\[aria-checked="false"\]:not\(:disabled\) > span:not\(\.raster-label\)[\s\S]*?filter:\s*brightness\(1\.2432\);/,
     );
   });
 
@@ -135,14 +134,12 @@ describe("late-1960s photographic console finish", () => {
     expect(consoleStyles).toMatch(/\.midi-dialog h2:focus\s*\{[\s\S]*?outline:\s*none;/);
   });
 
-  it("keeps semantic system labels available when photographic rendering is unavailable", () => {
-    const forcedColors = consoleStyles.slice(consoleStyles.indexOf("@media (forced-colors: active)"));
+  it("keeps semantic system labels available over the photographic rendering", () => {
     expect(rasterLabel).toContain('<span className="raster-label__text">{text}</span>');
     expect(rasterLabel).not.toContain("<canvas");
     expect(rasterLabel).not.toContain("visually-hidden");
     expect(consoleStyles).toMatch(/\.raster-label__text\s*\{[\s\S]*?text-transform:\s*uppercase;[\s\S]*?white-space:\s*normal;/);
-    expect(forcedColors).toMatch(/\.raster-label\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?font-size:\s*9px;/);
-    expect(consoleStyles).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(consoleStyles).toMatch(/\.raster-label,[\s\S]*?overflow:\s*visible;[\s\S]*?color:\s*var\(--console-ink\);/);
   });
 
   it("keeps browser chrome and install surfaces coordinated with the console", () => {
@@ -150,6 +147,7 @@ describe("late-1960s photographic console finish", () => {
     expect(viteConfig).toContain('background_color: "#4a2c1c"');
     expect(html).toContain('<meta name="theme-color" content="#4a2c1c" />');
     expect(html).toContain('<meta name="color-scheme" content="light" />');
-    expect(baseStyles).toContain("@media (forced-colors: active)");
+    expect(baseStyles).not.toContain("@media (forced-colors: active)");
+    expect(consoleStyles).not.toContain("@media (forced-colors: active)");
   });
 });

@@ -21,6 +21,7 @@ import {
   type DirectEntryInteractionModality,
 } from "./direct-entry-focus";
 import { RasterLabel } from "./RasterLabel";
+import { PhotoSwitchHardware } from "./PhotoSwitchHardware";
 
 interface SharedControlProps {
   param: ParamKey;
@@ -807,7 +808,9 @@ function ToggleControlComponent({
         aria-labelledby={`label-${param}`}
         onClick={() => onChange(param, enabled ? 0 : 1)}
       >
-        <span aria-hidden="true" />
+        <span aria-hidden="true">
+          <PhotoSwitchHardware variant={photoSwitchVariantForParam(param)} enabled={enabled} />
+        </span>
         <b><RasterLabel text={enabled ? "On" : "Off"} variant="micro" /></b>
       </button>
     </div>
