@@ -3374,16 +3374,47 @@ footer {
 .raster-label--tone-ink,
 .raster-label--tone-ink .raster-label__text {
   color: #171713 !important;
+  -webkit-text-fill-color: #171713 !important;
 }
 
 .raster-label--tone-muted,
 .raster-label--tone-muted .raster-label__text {
   color: #504d45 !important;
+  -webkit-text-fill-color: #504d45 !important;
 }
 
 .raster-label--tone-reverse,
 .raster-label--tone-reverse .raster-label__text {
   color: #f3eee1 !important;
+  -webkit-text-fill-color: #f3eee1 !important;
+}
+
+/* Firefox Android's page-color override can ignore author `color` values
+   while leaving photographic backgrounds untouched. Pin the glyph paint for
+   the remaining native text on light plates and restore cream glyphs inside
+   the black phenolic controls. */
+:is(
+  .topbar,
+  .module,
+  .keyboard-header,
+  .midi-strip,
+  .direct-entry,
+  .system-banner,
+  .clipboard-toast,
+  footer
+) {
+  -webkit-text-fill-color: #171713;
+}
+
+:is(
+  .button,
+  .choice-button,
+  .ppc-pad,
+  .patch-strip select,
+  .sequence-strip select,
+  .library-picker select
+) {
+  -webkit-text-fill-color: #f3eee1;
 }
 .raster-label--brand { font-size: clamp(25px, 2vw, 34px); letter-spacing: 0.12em; }
 .raster-label--model { font-size: 12px; letter-spacing: 0.13em; }

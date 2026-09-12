@@ -14,9 +14,9 @@ interface ActivateEventLike {
 
 type ActivateListener = (event: ActivateEventLike) => void;
 
-describe("PWA 1.0.21 update bridge", () => {
+describe("PWA 1.0.22 update bridge", () => {
   it("claims clients before reloading only same-origin windows inside the app scope", async () => {
-    const bridgeName = "sw-update-bridge-1.0.21.js";
+    const bridgeName = "sw-update-bridge-1.0.22.js";
     expect(PWA_WORKBOX_IMPORT_SCRIPTS).toEqual([bridgeName]);
     expect(PWA_WORKBOX_CLIENTS_CLAIM).toBe(false);
     expect(PWA_INJECT_REGISTER).toBe(false);
@@ -111,9 +111,9 @@ describe("PWA 1.0.21 update bridge", () => {
   });
 
   it("reloads prior controlled clients but not a fresh-install page", async () => {
-    const bridgeName = "sw-update-bridge-1.0.21.js";
+    const bridgeName = "sw-update-bridge-1.0.22.js";
     const previousWorker = { version: "1.0.17" };
-    const activatingWorker = { version: "1.0.21" };
+    const activatingWorker = { version: "1.0.22" };
     const updateClient = {
       url: "https://mikeyoung.org/andoracle/?from=1.0.17",
       navigate: vi.fn(async () => null),
@@ -173,7 +173,7 @@ describe("PWA 1.0.21 update bridge", () => {
   });
 
   it("does not keep activation pending on a never-settling client navigation", async () => {
-    const bridgeName = "sw-update-bridge-1.0.21.js";
+    const bridgeName = "sw-update-bridge-1.0.22.js";
     const neverSettles = new Promise<null>(() => undefined);
     const client = {
       url: "https://mikeyoung.org/andoracle/",
@@ -209,7 +209,7 @@ describe("PWA 1.0.21 update bridge", () => {
   it.each(["claim", "matchAll"] as const)(
     "contains a rejected %s operation so activation still completes",
     async (failedOperation) => {
-      const bridgeName = "sw-update-bridge-1.0.21.js";
+      const bridgeName = "sw-update-bridge-1.0.22.js";
       let activate: ActivateListener | undefined;
       const claim = vi.fn(async () => {
         if (failedOperation === "claim") throw new Error("claim unavailable");

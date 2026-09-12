@@ -25,7 +25,7 @@ export const PWA_WORKBOX_GLOB_PATTERNS = [
 ] as const;
 
 export const PWA_WORKBOX_IMPORT_SCRIPTS = [
-  "sw-update-bridge-1.0.21.js",
+  "sw-update-bridge-1.0.22.js",
 ] as const;
 
 // The one-release bridge snapshots already-controlled update clients before
