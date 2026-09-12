@@ -384,6 +384,7 @@ describe("responsive 1968 photographic console layout", () => {
     expect(photographicStyles).toMatch(/\.piano-key\.is-low\s*\{[\s\S]*?box-shadow:\s*inset/);
     expect(photographicStyles).toMatch(/\.piano-key\.is-high\s*\{[\s\S]*?box-shadow:\s*inset/);
     expect(photographicStyles).toMatch(/\.piano-key\.is-low\.is-high\s*\{[\s\S]*?box-shadow:/);
+    expect(styles).toMatch(/\.topbar \.sequence-actions \.sequence-icon-button:disabled\s*\{[\s\S]*?opacity:\s*1;[\s\S]*?brightness\(0\.72\) contrast\(1\.18\);/);
   });
 
   it("keeps transient overlays outside the responsive console shell", () => {

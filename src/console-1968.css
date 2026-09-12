@@ -3389,6 +3389,20 @@ footer {
   -webkit-text-fill-color: #f3eee1 !important;
 }
 
+/* Some Firefox Android configurations repaint author ink even when both
+   `color` and text fill are fixed. Filtering only the glyph layer to black is
+   independent of its incoming color, while reverse legends remain untouched. */
+.raster-label--tone-ink .raster-label__text,
+.raster-label--tone-muted .raster-label__text,
+.parameter output,
+.external-input-control small,
+.keyboard-header p,
+.midi-dialog__status,
+.patch-library-empty,
+.modal-error {
+  filter: brightness(0);
+}
+
 /* Firefox Android's page-color override can ignore author `color` values
    while leaving photographic backgrounds untouched. Pin the glyph paint for
    the remaining native text on light plates and restore cream glyphs inside
@@ -3415,6 +3429,14 @@ footer {
   .library-picker select
 ) {
   -webkit-text-fill-color: #f3eee1;
+}
+
+/* Disabled transport controls must remain dark enough for their cream icons
+   to read. The base disabled rule fades the entire photographed button and
+   turns it into a low-contrast gray slab on the light faceplate. */
+.topbar .sequence-actions .sequence-icon-button:disabled {
+  opacity: 1;
+  filter: grayscale(1) brightness(0.72) contrast(1.18);
 }
 .raster-label--brand { font-size: clamp(25px, 2vw, 34px); letter-spacing: 0.12em; }
 .raster-label--model { font-size: 12px; letter-spacing: 0.13em; }
@@ -4776,4 +4798,5 @@ footer {
   .topbar .library-select-shell {
     width: min(300px, 100%);
   }
+
 }

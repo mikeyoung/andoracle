@@ -76,6 +76,7 @@ describe("responsive faceplate system text", () => {
     expect(consoleStyles).toMatch(/\.raster-label--tone-ink,[\s\S]*?color:\s*#171713 !important;[\s\S]*?-webkit-text-fill-color:\s*#171713 !important;/);
     expect(consoleStyles).toMatch(/\.raster-label--tone-reverse,[\s\S]*?color:\s*#f3eee1 !important;[\s\S]*?-webkit-text-fill-color:\s*#f3eee1 !important;/);
     expect(consoleStyles).toMatch(/:is\([\s\S]*?\.topbar,[\s\S]*?\.module,[\s\S]*?footer[\s\S]*?\)\s*\{[\s\S]*?-webkit-text-fill-color:\s*#171713;/);
+    expect(consoleStyles).toMatch(/\.raster-label--tone-ink \.raster-label__text,[\s\S]*?\.parameter output,[\s\S]*?filter:\s*brightness\(0\);/);
     expect(photoSwitchHardware).toContain('className="photo-switch-hardware"');
     expect(photoSwitchHardware).toContain('src={PHOTO_SWITCH_IMAGES[variant][enabled ? 1 : 0]}');
   });
