@@ -41,6 +41,17 @@ def run_command(command, description=""):
         print(f"✗ Exception occurred: {e}")
         return False
 
+def get_current_version():
+    """Get current version from package.json"""
+    try:
+        with open('package.json', 'r') as f:
+            import json
+            data = json.load(f)
+            return data.get('version', 'unknown')
+    except Exception as e:
+        print(f"⚠️  Could not read version: {e}")
+        return 'unknown'
+
 def build_store_artifacts():
     """Build browser store artifacts (Firefox add-on, Chrome extension)"""
     print("📦 Building browser store artifacts...")
@@ -91,6 +102,10 @@ def build_store_artifacts():
 def main():
     print("🚀 Starting autodeploy process with store artifacts...")
     
+    # Get current version for logging
+    current_version = get_current_version()
+    print(f"🏷️  Current application version: {current_version}")
+    
     # Build the main webapp first (Vite/TypeScript)
     print("🏗️  Building main web application...")
     success = run_command('npm install', "Updating npm dependencies")
@@ -111,11 +126,11 @@ def main():
     if not success:
         return 1
     
-    # Commit changes with timestamp
+    # Commit changes with timestamp and version info
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    commit_message = f"Fresh build and store artifacts: {timestamp}"
+    commit_message = f"Fresh build v{current_version}: {timestamp}"
     print("💾 Committing changes...")
-    success = run_command(f'git commit -m "{commit_message}"', "Committing changes")
+    success = run_command(f'git commit -m "{commit_message}"', "Committing changes with version info")
     if not success:
         return 1
     
@@ -131,6 +146,7 @@ def main():
     print("   • Firefox Add-on") 
     print("   • Chrome Extension")
     print("   • Main web application")
+    print(f"   • Version deployed: {current_version}")
     print("   - Verify the changes are live at https://mikeyoung.org/andoracle")
     
     return 0
