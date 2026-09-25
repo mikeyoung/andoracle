@@ -889,15 +889,10 @@ describe("direct-entry long-press gesture tracking", () => {
     expect(activate).not.toHaveBeenCalled();
   });
 
-  it("wires the all-pointer tracker into parameter capture handlers", () => {
-    expect(parameterControlsSource).toContain("if (!shouldStartDirectEntryLongPress(event)) return;");
+  it("wires double-click into direct entry", () => {
+    expect(parameterControlsSource).toContain("onDoubleClick:");
+    expect(parameterControlsSource).not.toContain("onContextMenu");
     expect(parameterControlsSource).not.toContain('if (event.pointerType === "mouse")');
-    expect(parameterControlsSource).toContain(
-      "longPress.current?.move(event.pointerId, event.clientX, event.clientY);",
-    );
-    expect(parameterControlsSource).toContain(
-      "if (!longPress.current?.end(event.pointerId)) return;",
-    );
   });
 });
 

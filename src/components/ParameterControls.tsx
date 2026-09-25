@@ -4,7 +4,6 @@ import {
   useRef,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 import {
   PARAM_SPECS,
@@ -34,14 +33,8 @@ interface SharedControlProps {
 }
 
 type DirectHandlers = {
-  onContextMenu: (event: ReactMouseEvent<HTMLElement>) => void;
-  onClickCapture: (event: ReactMouseEvent<HTMLElement>) => void;
+  onDoubleClick: (event: ReactMouseEvent<HTMLElement>) => void;
   onKeyDownCapture: () => void;
-  onPointerDownCapture: (event: ReactPointerEvent<HTMLElement>) => void;
-  onPointerMoveCapture: (event: ReactPointerEvent<HTMLElement>) => void;
-  onPointerUpCapture: (event: ReactPointerEvent<HTMLElement>) => void;
-  onPointerCancelCapture: (event: ReactPointerEvent<HTMLElement>) => void;
-  onLostPointerCaptureCapture: (event: ReactPointerEvent<HTMLElement>) => void;
 };
 
 interface InterruptionEventTarget {
@@ -258,93 +251,44 @@ const useDirectEntry = (
   restoreValue?: () => void,
 ): DirectHandlers => {
   const interactionModality = useRef<DirectEntryInteractionModality>("unknown");
-  const clickSuppression = useRef<LongPressClickSuppression | null>(null);
-  clickSuppression.current ??= new LongPressClickSuppression();
-  const longPress = useRef<DirectEntryLongPressTracker | null>(null);
-  longPress.current ??= new DirectEntryLongPressTracker();
-
-  const cancel = (): void => {
-    longPress.current?.cancel();
-  };
-
-  const interrupt = (): void => {
-    cancel();
-    clickSuppression.current?.reset();
-    interactionModality.current = "unknown";
-  };
-
-  const endPointerGesture = (event: ReactPointerEvent<HTMLElement>): void => {
-    if (!longPress.current?.end(event.pointerId)) return;
-    clickSuppression.current?.expireAfterGesture();
-  };
 
   useEffect(() => {
-    const unsubscribe = getDirectEntryInterruptionRegistry().subscribe(interrupt);
-    return () => {
-      cancel();
-      clickSuppression.current?.dispose();
-      unsubscribe();
-    };
+    const unsubscribe = getDirectEntryInterruptionRegistry().subscribe(() => {
+      interactionModality.current = "unknown";
+    });
+    return () => unsubscribe();
   }, []);
 
+  const openDirectEdit = (event: ReactMouseEvent<HTMLElement>): void => {
+    event.preventDefault();
+    const target = event.target as HTMLElement;
+    const editOrigin = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
+    if (
+      restoreValue
+      && editOrigin instanceof HTMLInputElement
+      && editOrigin.value !== ""
+    ) {
+      // Restore the range input's value before opening so a cancelled dialog
+      // doesn't leave the dial in a stale position.
+      const initialValue = editOrigin.value;
+      restoreValue();
+      if (editOrigin.value === initialValue) return;
+    }
+    onDirectEdit(
+      param,
+      editOrigin,
+      shouldRestoreDirectEntryOrigin(editOrigin, interactionModality.current),
+    );
+  };
+
   return {
-    onContextMenu: (event) => {
-      event.preventDefault();
-      cancel();
-      if (clickSuppression.current?.consumeContextMenu()) return;
-      const target = event.target as HTMLElement;
-      const editOrigin = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
-      onDirectEdit(
-        param,
-        editOrigin,
-        shouldRestoreDirectEntryOrigin(editOrigin, interactionModality.current),
-      );
-    },
-    onClickCapture: (event) => {
-      if (!clickSuppression.current?.consumeClick(event.detail)) return;
-      event.preventDefault();
-      event.stopPropagation();
+    onDoubleClick: (event) => {
+      interactionModality.current = "pointer";
+      openDirectEdit(event);
     },
     onKeyDownCapture: () => {
       interactionModality.current = "keyboard";
     },
-    onPointerDownCapture: (event) => {
-      if (!shouldStartDirectEntryLongPress(event)) return;
-      clickSuppression.current?.reset();
-      interactionModality.current = "pointer";
-      const target = event.target as HTMLElement;
-      const editOrigin = target.closest<HTMLElement>("input, select, button") ?? event.currentTarget;
-      const initialValue = editOrigin instanceof HTMLInputElement ? editOrigin.value : null;
-      longPress.current?.begin({
-        pointerId: event.pointerId,
-        pointerType: event.pointerType,
-        button: event.button,
-        isPrimary: event.isPrimary,
-        clientX: event.clientX,
-        clientY: event.clientY,
-      }, () => {
-        clickSuppression.current?.arm();
-        if (
-          restoreValue
-          && editOrigin instanceof HTMLInputElement
-          && initialValue !== null
-          && editOrigin.value !== initialValue
-        ) {
-          restoreValue();
-        }
-        onDirectEdit(
-          param,
-          editOrigin,
-          shouldRestoreDirectEntryOrigin(editOrigin, "pointer"),
-        );
-      });
-    },
-    onPointerMoveCapture: (event) => {
-      longPress.current?.move(event.pointerId, event.clientX, event.clientY);
-    },
-    onPointerUpCapture: endPointerGesture,
-    onPointerCancelCapture: endPointerGesture,
-    onLostPointerCaptureCapture: endPointerGesture,
   };
 };
 
