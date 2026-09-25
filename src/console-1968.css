@@ -3389,18 +3389,35 @@ footer {
   -webkit-text-fill-color: #f3eee1 !important;
 }
 
-/* Some Firefox Android configurations repaint author ink even when both
-   `color` and text fill are fixed. Filtering only the glyph layer to black is
-   independent of its incoming color, while reverse legends remain untouched. */
+/* Firefox Android can repaint CSS colors without repainting photographic
+   surfaces. Keep color correction on backgroundless glyph nodes only: a
+   filter on a card, keycap, field, or button also repaints its hardware. */
 .raster-label--tone-ink .raster-label__text,
 .raster-label--tone-muted .raster-label__text,
 .parameter output,
 .external-input-control small,
-.keyboard-header p,
-.midi-dialog__status,
-.patch-library-empty,
-.modal-error {
+.direct-entry :is(.modal-kicker, h2, .modal-current, .valid-range, .modal-error),
+.direct-entry form > label,
+.direct-entry .patch-library-list legend,
+.direct-entry .patch-library-list label > span,
+.help-interface-list li > strong,
+.surface-ink-glyph,
+.system-banner > span,
+.system-banner > button,
+footer > span,
+.piano-key--white > span {
+  color: #171713 !important;
+  -webkit-text-fill-color: #171713 !important;
   filter: brightness(0);
+}
+
+.raster-label--tone-reverse .raster-label__text,
+.surface-reverse-glyph,
+.choice-button > span,
+.ppc-pad > span {
+  color: #f3eee1 !important;
+  -webkit-text-fill-color: #f3eee1 !important;
+  filter: brightness(0) invert(0.93);
 }
 
 /* Firefox Android's page-color override can ignore author `color` values
@@ -3431,12 +3448,76 @@ footer {
   -webkit-text-fill-color: #f3eee1;
 }
 
+/* Dark input wells inherit from the light dialog unless they establish their
+   own text-fill color. Keep typed values and units cream on phenolic black. */
+.patch-name-field,
+.number-field input,
+.number-field > span {
+  color: #f3eee1 !important;
+  -webkit-text-fill-color: #f3eee1 !important;
+  caret-color: #f3eee1;
+  color-scheme: dark;
+  forced-color-adjust: none;
+}
+
+/* Native menu popups are light even though their closed selector is dark. */
+.patch-strip select :is(option, optgroup),
+.sequence-strip select :is(option, optgroup),
+.library-picker select :is(option, optgroup) {
+  color: #171713 !important;
+  -webkit-text-fill-color: #171713 !important;
+  background-color: #eee7d4;
+  color-scheme: light;
+}
+
+/* Rewrite-resistant light sub-surfaces. Firefox's page-color remapping can
+   darken CSS gradients while leaving the fixed black glyph filters intact.
+   The same photographed enamel used by the console keeps each pair coherent. */
+.direct-entry {
+  background-color: #eee9da;
+  background-image: url("./assets/console/enamel-white.webp");
+  background-size: var(--console-enamel-texture-size);
+}
+
+.help-interface-list li,
+.patch-library-list label,
+.patch-library-list label.is-selected,
+.patch-library-empty,
+.number-sign,
+kbd {
+  background-color: #ded8c7;
+  background-image: url("./assets/console/enamel-white.webp");
+  background-position: center;
+  background-repeat: repeat;
+  background-size: var(--console-enamel-texture-size);
+}
+
+/* Whole-control opacity blends dark hardware into the light faceplate and
+   destroys contrast. Darkening the photographed control preserves the label
+   and icon relationship while still communicating an unavailable action. */
+.button:disabled,
+.button[aria-disabled="true"],
+.choice-button:disabled {
+  opacity: 1;
+  filter: grayscale(1) brightness(0.72) contrast(1.08);
+}
+
+.power-switch:disabled,
+.external-input-button:disabled {
+  opacity: 1;
+  filter: grayscale(1) brightness(0.78) contrast(1.06);
+}
+
 /* Disabled transport controls must remain dark enough for their cream icons
    to read. The base disabled rule fades the entire photographed button and
    turns it into a low-contrast gray slab on the light faceplate. */
 .topbar .sequence-actions .sequence-icon-button:disabled {
   opacity: 1;
   filter: none;
+}
+
+.topbar .sequence-actions .sequence-pause-button.is-active:disabled {
+  filter: brightness(0.7) contrast(1.12);
 }
 
 .sequence-transport-icon {
@@ -3459,11 +3540,6 @@ footer {
   opacity: 0.78;
 }
 
-.help-dialog :is(.modal-kicker, h2, .modal-current),
-.help-interface-list li > strong,
-.help-interface-list li > span {
-  filter: brightness(0);
-}
 .raster-label--brand { font-size: clamp(25px, 2vw, 34px); letter-spacing: 0.12em; }
 .raster-label--model { font-size: 12px; letter-spacing: 0.13em; }
 .raster-label--title { font-size: 17px; letter-spacing: 0.1em; }

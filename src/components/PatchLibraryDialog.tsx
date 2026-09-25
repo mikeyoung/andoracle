@@ -308,13 +308,13 @@ export function PatchLibraryDialog({
                       setError("");
                     }}
                   />
-                  <span>{name}</span>
+                  <span className="surface-ink-glyph">{name}</span>
                 </label>
               ))}
             </fieldset>
           </>
         ) : (
-          <p className="patch-library-empty" role="status">No user patches have been saved on this device yet.</p>
+          <p className="patch-library-empty" role="status"><span className="surface-ink-glyph">No user patches have been saved on this device yet.</span></p>
         )}
 
         <p id="patch-library-error" className="modal-error" role="alert">{error}</p>
@@ -327,21 +327,21 @@ export function PatchLibraryDialog({
                 className="button button--quiet"
                 onClick={() => returnToNameForm()}
               >
-                Cancel
+                <span className="surface-reverse-glyph">Cancel</span>
               </button>
               <button type="submit" className="button button--danger" disabled={busy}>
-                Replace
+                <span className="surface-reverse-glyph">Replace</span>
               </button>
             </>
           ) : (
             <>
-              <button type="button" className="button button--quiet" disabled={busy} onClick={onClose}>Cancel</button>
+              <button type="button" className="button button--quiet" disabled={busy} onClick={onClose}><span className="surface-reverse-glyph">Cancel</span></button>
               <button
                 type="submit"
                 className="button button--primary"
                 disabled={busy || (!isSave && patchNames.length === 0)}
               >
-                {busy ? (isSave ? "Saving…" : "Loading…") : isSave ? "Save patch" : "Load selected"}
+                <span className="surface-reverse-glyph">{busy ? (isSave ? "Saving…" : "Loading…") : isSave ? "Save patch" : "Load selected"}</span>
               </button>
             </>
           )}

@@ -125,7 +125,7 @@ export function DirectEntryModal({
                 inputRef.current?.focus();
               }}
             >
-              +/−
+              <span className="surface-ink-glyph number-sign__glyph">+/−</span>
             </button>
           )}
           {spec.unit && <span>{spec.unit}</span>}
@@ -133,8 +133,8 @@ export function DirectEntryModal({
         <p id="direct-entry-range" className="valid-range">Valid values: {validValues}</p>
         <p id="direct-entry-error" className="modal-error" role="alert">{error}</p>
         <div className="modal-actions">
-          <button type="button" className="button button--quiet" onClick={onClose}>Cancel</button>
-          <button type="submit" className="button button--primary">Apply value</button>
+          <button type="button" className="button button--quiet" onClick={onClose}><span className="surface-reverse-glyph">Cancel</span></button>
+          <button type="submit" className="button button--primary"><span className="surface-reverse-glyph">Apply value</span></button>
         </div>
       </form>
     </dialog>

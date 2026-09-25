@@ -287,7 +287,7 @@ export function SequenceCommitDialog({
                 disabled={busy}
                 onClick={onDiscard}
               >
-                Discard recording
+                <span className="surface-reverse-glyph">Discard recording</span>
               </button>
               <button
                 ref={keepButtonRef}
@@ -296,7 +296,7 @@ export function SequenceCommitDialog({
                 disabled={busy || take.noteCount === 0}
                 onClick={() => setStage("name")}
               >
-                Save and name…
+                <span className="surface-reverse-glyph">Save and name…</span>
               </button>
             </div>
           </>
@@ -313,10 +313,10 @@ export function SequenceCommitDialog({
                 className="button button--quiet"
                 onClick={() => returnToNameForm()}
               >
-                Cancel
+                <span className="surface-reverse-glyph">Cancel</span>
               </button>
               <button type="submit" className="button button--danger" disabled={busy}>
-                Replace
+                <span className="surface-reverse-glyph">Replace</span>
               </button>
             </div>
           </>
@@ -353,10 +353,10 @@ export function SequenceCommitDialog({
                   setStage("review");
                 }}
               >
-                Back
+                <span className="surface-reverse-glyph">Back</span>
               </button>
               <button type="submit" className="button button--primary" disabled={busy}>
-                {busy ? "Saving…" : "Save sequence"}
+                <span className="surface-reverse-glyph">{busy ? "Saving…" : "Save sequence"}</span>
               </button>
             </div>
           </>

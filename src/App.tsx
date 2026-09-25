@@ -2475,7 +2475,7 @@ function App() {
 
       {clipboardToast && (
         <div className="clipboard-toast" role="status" aria-live="polite" aria-atomic="true">
-          {clipboardToast}
+          <span className="surface-ink-glyph">{clipboardToast}</span>
         </div>
       )}
 
@@ -2489,7 +2489,7 @@ function App() {
           <span>{needRefresh ? "A newer app version is ready." : "The complete synth is ready offline."}</span>
           {needRefresh ? (
             <>
-              <button type="button" disabled={updateBusy} onClick={() => void reloadUpdate()}>{updateBusy ? "Reloading…" : "Reload update"}</button>
+              <button type="button" disabled={updateBusy} onClick={() => void reloadUpdate()}><span className="surface-ink-glyph">{updateBusy ? "Reloading…" : "Reload update"}</span></button>
               <button
                 type="button"
                 disabled={updateBusy}
@@ -2506,10 +2506,10 @@ function App() {
                   setOfflineReady(false);
                 }}
               >
-                Later
+                <span className="surface-ink-glyph">Later</span>
               </button>
             </>
-          ) : <button type="button" onClick={() => setOfflineReady(false)}>Dismiss</button>}
+          ) : <button type="button" onClick={() => setOfflineReady(false)}><span className="surface-ink-glyph">Dismiss</span></button>}
         </aside>
       )}
 

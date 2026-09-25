@@ -58,40 +58,45 @@ export function HelpDialog({ origin, onClose }: HelpDialogProps) {
         <ul className="help-interface-list">
           <li>
             <strong>Screen keys</strong>
-            <span>Touch, click, or drag across the piano; PPC pads add bends and vibrato.</span>
+            <span className="surface-ink-glyph">Touch, click, or drag across the piano; PPC pads add bends and vibrato.</span>
           </li>
           <li>
             <strong>Computer keys</strong>
-            <span><kbd>A S D F G H J K L ;</kbd> play white notes; <kbd>W E T Y U O P</kbd> play black notes.</span>
+            <span>
+              <kbd><span className="surface-ink-glyph">A S D F G H J K L ;</span></kbd>
+              <span className="surface-ink-glyph"> play white notes; </span>
+              <kbd><span className="surface-ink-glyph">W E T Y U O P</span></kbd>
+              <span className="surface-ink-glyph"> play black notes.</span>
+            </span>
           </li>
           <li>
             <strong>Keyboard focus</strong>
-            <span>Click or Tab to a piano key, move with arrows, and play with Space or Enter.</span>
+            <span className="surface-ink-glyph">Click or Tab to a piano key, move with arrows, and play with Space or Enter.</span>
           </li>
           <li>
             <strong>MIDI keyboard</strong>
-            <span>Choose MIDI below the keys, then Connect MIDI; pitch and modulation wheels are recognized.</span>
+            <span className="surface-ink-glyph">Choose MIDI below the keys, then Connect MIDI; pitch and modulation wheels are recognized.</span>
           </li>
           <li>
             <strong>Live audio</strong>
-            <span>Choose Use live input for a mic or audio interface, then hold a key.</span>
+            <span className="surface-ink-glyph">Choose Use live input for a mic or audio interface, then hold a key.</span>
           </li>
           <li>
             <strong>Hands-free</strong>
-            <span>Turn on Auto gate to play without holding a key.</span>
+            <span className="surface-ink-glyph">Turn on Auto gate to play without holding a key.</span>
           </li>
           <li>
             <strong>Note sequencer</strong>
-            <span>Record keyboard notes, save or discard, then Play, Pause/resume, or Stop to rewind. Synth controls stay live.</span>
+            <span className="surface-ink-glyph">Record keyboard notes, save or discard, then Play, Pause/resume, or Stop to rewind. Synth controls stay live.</span>
           </li>
           <li>
             <strong>Exact settings</strong>
-            <span>Right-click or long-press any parameter to enter its exact value and see its valid range.</span>
+            <span className="surface-ink-glyph">Right-click or long-press any parameter to enter its exact value and see its valid range.</span>
           </li>
         </ul>
 
         <div className="modal-actions">
-          <button type="submit" className="button button--primary">Close help</button>
+          <button type="submit" className="button button--primary"><span className="surface-reverse-glyph">Close help</span></button>
         </div>
       </form>
     </dialog>

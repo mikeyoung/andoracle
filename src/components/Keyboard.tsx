@@ -402,7 +402,12 @@ function KeyboardComponent({
           </div>
           {headerControl}
         </div>
-        <p><kbd>A S D F G H J K L ;</kbd> white · <kbd>W E T Y U O P</kbd> black. Click or tap a piano key, then Space or Enter plays it · drag for glissando.</p>
+        <p>
+          <kbd><span className="surface-ink-glyph">A S D F G H J K L ;</span></kbd>
+          <span className="surface-ink-glyph"> white · </span>
+          <kbd><span className="surface-ink-glyph">W E T Y U O P</span></kbd>
+          <span className="surface-ink-glyph"> black. Click or tap a piano key, then Space or Enter plays it · drag for glissando.</span>
+        </p>
       </div>
       <div
         ref={surfaceRef}

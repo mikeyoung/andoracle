@@ -225,10 +225,10 @@ export function DeleteConfirmationDialog({
             className="button button--quiet"
             onClick={requestClose}
           >
-            Cancel
+            <span className="surface-reverse-glyph">Cancel</span>
           </button>
           <button type="submit" className="button button--danger" disabled={busy}>
-            {busy ? "Deleting…" : `Delete ${kind}`}
+            <span className="surface-reverse-glyph">{busy ? "Deleting…" : `Delete ${kind}`}</span>
           </button>
         </div>
       </form>
