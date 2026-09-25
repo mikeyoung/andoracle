@@ -38,7 +38,7 @@ describe("SequenceCommitDialog", () => {
     const markup = renderDialog({ events: [], durationMs: 0, noteCount: 0 });
     expect(markup).toContain("No notes were captured.");
     expect(markup).toContain("Play at least one note to create a savable sequence.");
-    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Save and name…<\/button>/);
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*><span class="surface-reverse-glyph">Save and name…<\/span><\/button>/);
   });
 
   it("formats long recordings without imposing a duration ceiling", () => {
@@ -95,8 +95,8 @@ describe("SequenceCommitDialog", () => {
       source.indexOf(") : (", source.indexOf(") : saveConflict ? (") + 1),
     );
     expect(confirmation).toContain('id="sequence-replace-description"');
-    expect(confirmation).toMatch(/>\s*Cancel\s*<\/button>/);
-    expect(confirmation).toMatch(/>\s*Replace\s*<\/button>/);
+    expect(confirmation).toMatch(/>\s*<span className="surface-reverse-glyph">Cancel<\/span>\s*<\/button>/);
+    expect(confirmation).toMatch(/>\s*<span className="surface-reverse-glyph">Replace<\/span>\s*<\/button>/);
     expect(confirmation).not.toMatch(/ref=\{replaceCancelRef\}[\s\S]*?disabled=\{busy\}[\s\S]*?>\s*Cancel/);
 
     const cancelStart = source.indexOf("const returnToNameForm");

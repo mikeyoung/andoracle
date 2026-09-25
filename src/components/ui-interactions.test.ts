@@ -1056,7 +1056,7 @@ describe("user patch library dialogs", () => {
     }));
 
     expect(markup).toContain("No user patches have been saved");
-    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*>Load selected<\/button>/);
+    expect(markup).toMatch(/<button[^>]*disabled=""[^>]*><span class="surface-reverse-glyph">Load selected<\/span><\/button>/);
   });
 
   it("uses a cancellable, two-stage replacement confirmation without weakening load mode", () => {
@@ -1084,8 +1084,8 @@ describe("user patch library dialogs", () => {
       source.indexOf("{saveConflict ? (", source.indexOf('className="modal-actions"')),
       source.indexOf(") : (", source.indexOf("{saveConflict ? (", source.indexOf('className="modal-actions"'))),
     );
-    expect(confirmationActions).toMatch(/>\s*Cancel\s*<\/button>/);
-    expect(confirmationActions).toMatch(/>\s*Replace\s*<\/button>/);
+    expect(confirmationActions).toMatch(/>\s*<span className="surface-reverse-glyph">Cancel<\/span>\s*<\/button>/);
+    expect(confirmationActions).toMatch(/>\s*<span className="surface-reverse-glyph">Replace<\/span>\s*<\/button>/);
     expect(confirmationActions).not.toMatch(/ref=\{replaceCancelRef\}[\s\S]*?disabled=\{busy\}[\s\S]*?>\s*Cancel/);
   });
 });
