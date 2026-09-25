@@ -405,7 +405,7 @@ function KeyboardComponent({
         <p>
           <kbd><span className="surface-ink-glyph">A S D F G H J K L ;</span></kbd>
           <span className="surface-ink-glyph"> white · </span>
-          <kbd><span className="surface-ink-glyph">W E T Y U O P</span></kbd>
+          <kbd className="kbd--black">W E T Y U O P</kbd>
           <span className="surface-ink-glyph"> black. Click or tap a piano key, then Space or Enter plays it · drag for glissando.</span>
         </p>
       </div>

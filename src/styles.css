@@ -1459,6 +1459,13 @@ kbd {
   text-align: center;
 }
 
+kbd.kbd--black {
+  color: #eaeaea;
+  background: linear-gradient(180deg, #3a3a3a, #1a1a1a);
+  border-color: #444;
+  box-shadow: 0 2px 0 #111;
+}
+
 .keyboard-banks {
   position: relative;
   display: grid;
@@ -1528,17 +1535,7 @@ kbd {
   pointer-events: none;
 }
 
-.piano-key--white[data-note="36"] span {
-  right: auto;
-  left: 2px;
-  transform: none;
-}
 
-.piano-key--white[data-note="72"] span {
-  right: 2px;
-  left: auto;
-  transform: none;
-}
 
 .piano-key--black {
   z-index: 3;

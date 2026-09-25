@@ -1524,17 +1524,7 @@ kbd {
   transform: translateX(-50%);
 }
 
-.piano-key--white[data-note="36"] span {
-  right: auto;
-  left: 2px;
-  transform: none;
-}
 
-.piano-key--white[data-note="72"] span {
-  right: 2px;
-  left: auto;
-  transform: none;
-}
 
 .piano-key:focus::after {
   inset: 3px;
@@ -3492,6 +3482,13 @@ kbd {
   background-position: center;
   background-repeat: repeat;
   background-size: var(--console-enamel-texture-size);
+}
+
+kbd.kbd--black {
+  background-color: #1b1a17 !important;
+  background-image: url("./assets/console/phenolic-black.webp") !important;
+  color: #f4efdf !important;
+  -webkit-text-fill-color: #f4efdf !important;
 }
 
 /* Whole-control opacity blends dark hardware into the light faceplate and
