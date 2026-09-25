@@ -25,6 +25,7 @@
     "build": "tsc -b && vite build && vite build --mode extension && node scripts/package-extensions.mjs",
     "postbuild": "node scripts/verify-precache.mjs && node scripts/verify-extension-packages.mjs",
     "build:extensions": "npm run generate:icons && npm run generate:audio-keepalive && tsc -b && vite build --mode extension && node scripts/package-extensions.mjs && node scripts/verify-extension-packages.mjs",
+    "release": "node scripts/bump-version.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "generate:icons": "node scripts/generate-icons.mjs",
     "generate:audio-keepalive": "node scripts/generate-audio-keepalive.mjs",

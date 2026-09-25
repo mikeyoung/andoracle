@@ -30,7 +30,8 @@ export const PWA_WORKBOX_IMPORT_SCRIPTS = [
 
 // The one-release bridge snapshots already-controlled update clients before
 // claiming the scope, which prevents a first install from reloading itself.
-// Restore Workbox ownership when the bridge is removed in a later release.
+// `npm run release -- <version> --no-bridge` restores Workbox ownership when
+// the bridge is removed in a later release.
 export const PWA_WORKBOX_CLIENTS_CLAIM = false;
 export const PWA_INJECT_REGISTER = false;
 

@@ -1,12 +1,20 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runInNewContext } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
+import { ANDORACLE_VERSION } from "../src/version";
 import {
   PWA_INJECT_REGISTER,
   PWA_WORKBOX_CLIENTS_CLAIM,
   PWA_WORKBOX_IMPORT_SCRIPTS,
 } from "../vite.config";
+
+// Derived from the canonical release identifier so a version bump (npm run
+// release) never requires editing this suite by hand. Once a release retires
+// the bridge (`npm run release -- <version> --no-bridge`), these tests are
+// skipped until a future release re-adds it.
+const bridgeName = `sw-update-bridge-${ANDORACLE_VERSION}.js`;
+const hasUpdateBridge = existsSync(resolve("public", bridgeName));
 
 interface ActivateEventLike {
   waitUntil(promise: Promise<unknown>): void;
@@ -14,9 +22,8 @@ interface ActivateEventLike {
 
 type ActivateListener = (event: ActivateEventLike) => void;
 
-describe("PWA 1.0.24 update bridge", () => {
+describe.skipIf(!hasUpdateBridge)(`PWA ${ANDORACLE_VERSION} update bridge`, () => {
   it("claims clients before reloading only same-origin windows inside the app scope", async () => {
-    const bridgeName = "sw-update-bridge-1.0.24.js";
     expect(PWA_WORKBOX_IMPORT_SCRIPTS).toEqual([bridgeName]);
     expect(PWA_WORKBOX_CLIENTS_CLAIM).toBe(false);
     expect(PWA_INJECT_REGISTER).toBe(false);
@@ -111,9 +118,10 @@ describe("PWA 1.0.24 update bridge", () => {
   });
 
   it("reloads prior controlled clients but not a fresh-install page", async () => {
-    const bridgeName = "sw-update-bridge-1.0.24.js";
+    // A fixed historical release keeps the migration scenario meaningful for
+    // any current version; the activating worker tracks the real release.
     const previousWorker = { version: "1.0.17" };
-    const activatingWorker = { version: "1.0.24" };
+    const activatingWorker = { version: ANDORACLE_VERSION };
     const updateClient = {
       url: "https://mikeyoung.org/andoracle/?from=1.0.17",
       navigate: vi.fn(async () => null),
@@ -173,7 +181,6 @@ describe("PWA 1.0.24 update bridge", () => {
   });
 
   it("does not keep activation pending on a never-settling client navigation", async () => {
-    const bridgeName = "sw-update-bridge-1.0.24.js";
     const neverSettles = new Promise<null>(() => undefined);
     const client = {
       url: "https://mikeyoung.org/andoracle/",
@@ -209,7 +216,6 @@ describe("PWA 1.0.24 update bridge", () => {
   it.each(["claim", "matchAll"] as const)(
     "contains a rejected %s operation so activation still completes",
     async (failedOperation) => {
-      const bridgeName = "sw-update-bridge-1.0.24.js";
       let activate: ActivateListener | undefined;
       const claim = vi.fn(async () => {
         if (failedOperation === "claim") throw new Error("claim unavailable");

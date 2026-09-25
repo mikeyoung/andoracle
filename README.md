@@ -45,6 +45,18 @@ The shared modulation system includes one LFO, separate raw/held/lagged sample-a
 
 The full signal chain runs at 2× rate, oscillator discontinuities run at an additional 2× rate, and dedicated FIR decimators suppress hard-sync, pulse, ring, filter, and drive aliases before the required 44.1 kHz output.
 
+## Releasing
+
+Cut a release with one atomic bump that keeps every version surface in lockstep—the `src/version.ts` constant, `package.json` and its lockfile (through `npm version`), and the versioned PWA update bridge:
+
+```sh
+npm run release -- 1.0.25              # rename public/sw-update-bridge-* to the new version
+npm run release -- 1.0.25 --no-bridge  # retire the bridge; restores Workbox clientsClaim()
+npm run release -- 1.0.25 --dry-run    # preview the changes without writing
+```
+
+The target must satisfy both semantic-versioning and browser-store rules (plain dot-separated integers), so a bump that would break store packaging fails before anything is written. After bumping, run `npm run check` and commit as "Release Andoracle <version> …".
+
 ## Verification
 
 ```sh
