@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   applyBump,
@@ -120,6 +120,15 @@ describe("target version validation", () => {
     for (const invalid of ["1.0.25-beta", "1.0.25+build", "01.0.25"]) {
       expect(() => validateTargetVersion(invalid)).toThrow();
     }
+  });
+
+  it("fails fast on store-incompatible versions when vite.config loads", () => {
+    // The same rule runs at config load (before tsc/Vite do any work) so a
+    // prerelease tag is caught up front, not after a full extension build.
+    const viteConfig = readFileSync(resolve("vite.config.ts"), "utf8");
+    expect(viteConfig).toContain('import { extensionStoreVersion } from "./scripts/version-rules.mjs"');
+    expect(viteConfig).toContain("extensionStoreVersion(packageMetadata.version)");
+    expect(viteConfig).toContain("is not browser-store compatible");
   });
 });
 

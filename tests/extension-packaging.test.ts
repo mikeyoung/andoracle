@@ -1,6 +1,8 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -14,12 +16,14 @@ import {
   EXTENSION_DESCRIPTION,
   EXTENSION_ICON_FILES,
   FIREFOX_EXTENSION_ID,
+  cleanStorePackageRoot,
   createExtensionManifest,
   createZipBuffer,
   extensionStoreVersion,
   listFiles,
   readZipEntries,
 } from "../scripts/extension-package-utils.mjs";
+import { extensionStoreVersion as sharedStoreVersion } from "../scripts/version-rules.mjs";
 import { validateExtensionHtml } from "../scripts/verify-extension-packages.mjs";
 import { VITE_DEV_WATCH_IGNORED } from "../vite.config";
 
@@ -35,6 +39,40 @@ describe("browser-extension store packaging", () => {
     expect(extensionStoreVersion("1.2.3.4")).toBe("1.2.3.4");
     for (const invalid of ["0", "1.2.3-beta.1", "1.2.3+build", "1.65536.0", "1..2", "01.2.3", "01.a"]) {
       expect(() => extensionStoreVersion(invalid)).toThrow();
+    }
+  });
+
+  it("keeps the packager and vite config on one shared store-version rule", () => {
+    // The same canonical implementation must back both the late check in the
+    // packager and the fail-fast check at vite.config load time.
+    expect(sharedStoreVersion).toBe(extensionStoreVersion);
+  });
+
+  it("cleans only generated store artifacts, preserving foreign files", () => {
+    const root = mkdtempSync(join(tmpdir(), "andoracle-store-clean-"));
+    try {
+      // Generated artifacts that a rebuild must remove.
+      mkdirSync(join(root, "chrome"), { recursive: true });
+      writeFileSync(join(root, "chrome", "manifest.json"), "{}");
+      mkdirSync(join(root, "firefox"), { recursive: true });
+      writeFileSync(join(root, "firefox", "manifest.json"), "{}");
+      writeFileSync(join(root, "andoracle-chrome-1.0.24.zip"), "old");
+      writeFileSync(join(root, "andoracle-firefox-1.0.23.zip"), "old");
+      // Foreign files that must survive a rebuild.
+      writeFileSync(join(root, "signed-andoracle-chrome-1.0.24-final.zip"), "keep");
+      writeFileSync(join(root, "NOTES.txt"), "keep");
+      mkdirSync(join(root, "my-notes"), { recursive: true });
+      writeFileSync(join(root, "my-notes", "readme.md"), "keep");
+
+      cleanStorePackageRoot(root);
+
+      const remaining = readdirSync(root).toSorted();
+      expect(remaining).toEqual(["NOTES.txt", "my-notes", "signed-andoracle-chrome-1.0.24-final.zip"]);
+      expect(existsSync(join(root, "chrome"))).toBe(false);
+      expect(existsSync(join(root, "firefox"))).toBe(false);
+      expect(existsSync(join(root, "andoracle-chrome-1.0.24.zip"))).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

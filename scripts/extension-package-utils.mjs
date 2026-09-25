@@ -11,6 +11,11 @@ import {
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+// One canonical store-version rule, shared with the fail-fast check that runs
+// when vite.config.ts loads (before any build work).
+import { extensionStoreVersion } from "./version-rules.mjs";
+
+export { extensionStoreVersion };
 
 export const PROJECT_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const EXTENSION_BUILD_ROOT = resolve(PROJECT_ROOT, "node_modules", ".tmp", "andoracle-extension");
@@ -70,25 +75,22 @@ const assertSafeOutputDirectory = (directory) => {
   return absolute;
 };
 
+// Remove exactly what the packager produces—the two target directories and any
+// versioned store archives—so foreign files dropped into store-packages/ (for
+// example a signed archive kept for submission) survive a rebuild.
+export const cleanStorePackageRoot = (outputRoot) => {
+  if (!existsSync(outputRoot)) return;
+  for (const entry of readdirSync(outputRoot, { withFileTypes: true })) {
+    const isTargetDirectory = entry.isDirectory() && (entry.name === "chrome" || entry.name === "firefox");
+    const isStoreArchive = entry.isFile() && /^andoracle-(?:chrome|firefox)-\d+(?:\.\d+){0,3}\.zip$/.test(entry.name);
+    if (isTargetDirectory || isStoreArchive) rmSync(resolve(outputRoot, entry.name), { recursive: true, force: true });
+  }
+};
+
 const assertInside = (parent, child) => {
   const path = relative(resolve(parent), resolve(child));
   if (path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path))) return;
   throw new Error(`Path escapes its expected directory: ${child}`);
-};
-
-export const extensionStoreVersion = (version) => {
-  if (typeof version !== "string" || !/^\d+(?:\.\d+){0,3}$/.test(version)) {
-    throw new Error("Extension builds require package.json version to contain one to four dot-separated integers.");
-  }
-  const components = version.split(".");
-  if (components.some((component) => component.length > 1 && component.startsWith("0"))) {
-    throw new Error("Non-zero extension version components cannot have leading zeroes.");
-  }
-  const parts = components.map(Number);
-  if (parts.every((part) => part === 0) || parts.some((part) => !Number.isSafeInteger(part) || part > 65535)) {
-    throw new Error("Extension version components must be 0–65535 and the complete version cannot be zero.");
-  }
-  return version;
 };
 
 export const createExtensionManifest = (target, packageMetadata) => {
@@ -316,7 +318,7 @@ const copyRuntime = (targetDirectory) => {
 export const packageExtensions = (packageMetadata) => {
   const version = extensionStoreVersion(packageMetadata.version);
   const outputRoot = assertSafeOutputDirectory(STORE_PACKAGE_ROOT);
-  rmSync(outputRoot, { recursive: true, force: true });
+  cleanStorePackageRoot(outputRoot);
   mkdirSync(outputRoot, { recursive: true });
   const packages = [];
 

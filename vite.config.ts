@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import packageMetadata from "./package.json";
+import { extensionStoreVersion } from "./scripts/version-rules.mjs";
 import { ANDORACLE_VERSION } from "./src/version";
 
 export { ANDORACLE_VERSION };
@@ -11,6 +12,18 @@ if (typeof packageMetadata.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][0-9A-
 }
 if (packageMetadata.version !== ANDORACLE_VERSION) {
   throw new Error("package.json version must match src/version.ts.");
+}
+// Fail fast on versions the browser stores would reject (e.g. prerelease tags
+// such as "1.0.25-beta") before tsc/Vite do any work, rather than discovering
+// it in scripts/package-extensions.mjs after a full extension build.
+try {
+  extensionStoreVersion(packageMetadata.version);
+} catch (error) {
+  throw new Error(
+    `package.json version "${String(packageMetadata.version)}" is not browser-store compatible: ${
+      error instanceof Error ? error.message : String(error)
+    } Use a plain dot-separated integer version for store releases.`,
+  );
 }
 
 export const PWA_INCLUDE_ASSETS = [
