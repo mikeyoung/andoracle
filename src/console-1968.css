@@ -3165,6 +3165,8 @@ main {
   max-width: none;
   margin: 0;
   overflow: visible;
+  color: #f3eee1 !important;
+  -webkit-text-fill-color: #f3eee1 !important;
   font-family: var(--andoracle-font);
   font-size: 11px;
   line-height: 1.35;

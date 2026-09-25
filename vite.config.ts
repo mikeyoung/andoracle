@@ -37,15 +37,13 @@ export const PWA_WORKBOX_GLOB_PATTERNS = [
   "assets/**/*.{png,webp}",
 ] as const;
 
-export const PWA_WORKBOX_IMPORT_SCRIPTS = [
-  "sw-update-bridge-1.0.24.js",
-] as const;
+export const PWA_WORKBOX_IMPORT_SCRIPTS = [] as const;
 
 // The one-release bridge snapshots already-controlled update clients before
 // claiming the scope, which prevents a first install from reloading itself.
 // `npm run release -- <version> --no-bridge` restores Workbox ownership when
 // the bridge is removed in a later release.
-export const PWA_WORKBOX_CLIENTS_CLAIM = false;
+export const PWA_WORKBOX_CLIENTS_CLAIM = true;
 export const PWA_INJECT_REGISTER = false;
 
 // Normal builds replace these generated trees. Excluding them from the dev
