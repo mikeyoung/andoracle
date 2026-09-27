@@ -2228,10 +2228,7 @@ footer span {
     padding-left: 18px;
   }
 
-  .piano-key:focus::after {
-    inset: 4px 1px;
-    border-width: 2px;
-  }
+
 
   .direct-entry form {
     padding: 20px 18px;
