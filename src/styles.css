@@ -2248,6 +2248,12 @@ footer span {
   }
 }
 
+/* Remove focus ring for select elements */
+select:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 @media (max-height: 480px) {
   .direct-entry form {
     padding: 12px 18px;
