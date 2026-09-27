@@ -349,9 +349,10 @@ describe("output meter accessibility", () => {
   });
 
   it("retains Chaotic Sound Effects' calibrated dB scale and frame-clamped response", () => {
-    expect(outputVuMeterDrive(0.004777286046641967)).toBeCloseTo(0, 8);
-    expect(outputVuMeterDrive(0.016950450455051074)).toBeCloseTo(0.5, 8);
-    expect(outputVuMeterDrive(0.06014246794170308)).toBeCloseTo(1, 8);
+    // Calibration shifted +10 dB (floor -36.4 / ceiling -14.4) to better register normal playback levels.
+    expect(outputVuMeterDrive(0.01510710494153)).toBeCloseTo(0, 8);
+    expect(outputVuMeterDrive(0.05360203105811557)).toBeCloseTo(0.5, 8);
+    expect(outputVuMeterDrive(0.19018718309533358)).toBeCloseTo(1, 8);
 
     const positions = new Float64Array(2);
     const velocities = new Float64Array(2);
