@@ -91,6 +91,19 @@ input:focus-visible,
   box-shadow: 0 0 0 2px #282828;
 }
 
+/* Remove focus ring for piano keys specifically */
+.piano-key:focus,
+.piano-key:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure no focus ring from ::after pseudo-element */
+.piano-key:focus::after,
+.piano-key:focus-visible::after {
+  display: none !important;
+}
+
 .app-shell {
   max-width: 100%;
   min-height: 100vh;
@@ -1500,6 +1513,13 @@ kbd.kbd--black {
 
 .piano-key:focus {
   outline: 0;
+}
+
+/* Remove focus ring for piano keys */
+.piano-key:focus,
+.piano-key:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 .piano-key:focus::after {
