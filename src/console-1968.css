@@ -4903,3 +4903,22 @@ kbd.kbd--black {
   }
 
 }
+
+/* Remove focus ring for piano keys */
+.piano-key:focus,
+.piano-key:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure no focus ring from ::after pseudo-element */
+.piano-key:focus::after,
+.piano-key:focus-visible::after {
+  display: none !important;
+}
+
+/* Remove focus ring for select elements */
+select {
+  outline: none !important;
+  box-shadow: none !important;
+}
