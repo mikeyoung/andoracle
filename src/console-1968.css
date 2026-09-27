@@ -1526,24 +1526,7 @@ kbd {
 
 
 
-/* Remove focus ring for piano keys */
-.piano-key:focus,
-.piano-key:focus-visible {
-  outline: none !important;
-  box-shadow: none !important;
-}
 
-/* Ensure no focus ring from ::after pseudo-element */
-.piano-key:focus::after,
-.piano-key:focus-visible::after {
-  display: none !important;
-}
-
-.piano-key:focus::after {
-  inset: 3px;
-  border: 2px solid #171713;
-  box-shadow: 0 0 0 1px #eee9da;
-}
 
 .allocation-legend {
   display: flex;
@@ -1673,12 +1656,6 @@ input:focus-visible,
   outline: 2px solid #171713;
   outline-offset: -4px;
   box-shadow: inset 0 0 0 2px #eee9da;
-}
-
-/* Remove focus ring for piano keys specifically */
-.piano-key:focus-visible {
-  outline: none;
-  box-shadow: none;
 }
 
 .system-banner {
