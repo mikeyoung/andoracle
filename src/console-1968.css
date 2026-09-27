@@ -1526,11 +1526,7 @@ kbd {
 
 
 
-.piano-key:focus::after {
-  inset: 3px;
-  border: 2px solid #171713;
-  box-shadow: 0 0 0 1px #eee9da;
-}
+
 
 .allocation-legend {
   display: flex;
